@@ -1,0 +1,6 @@
+package mss.mooncake.identity.dto.request;
+
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+
+public record RegisterRequest(@NotBlank String fullName, @Email @NotBlank String email, String phone) { }

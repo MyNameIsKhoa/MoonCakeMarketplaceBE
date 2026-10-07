@@ -1,0 +1,32 @@
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      server:
+        webmvc:
+          routes:
+            - id: identity-service
+              uri: ${IDENTITY_SERVICE_URL:http://localhost:8081}
+              predicates:
+                - Path=/api/auth/**,/api/users/**,/api/addresses/**
+            - id: catalog-store-service
+              uri: ${CATALOG_SERVICE_URL:http://localhost:8082}
+              predicates:
+                - Path=/api/stores/**,/api/products/**,/api/categories/**,/api/promotions/**,/api/supplier-profile/**
+            - id: commerce-service
+              uri: ${COMMERCE_SERVICE_URL:http://localhost:8083}
+              predicates:
+                - Path=/api/cart/**,/api/checkout/**,/api/orders/**,/api/payments/**,/api/cancellations/**,/api/refunds/**,/api/shipments/**,/api/disputes/**,/api/settlements/**,/api/reviews/**
+            - id: rfq-negotiation-service
+              uri: ${RFQ_SERVICE_URL:http://localhost:8084}
+              predicates:
+                - Path=/api/rfqs/**,/api/quotations/**,/api/conversations/**,/api/messages/**
+server:
+  port: ${SERVER_PORT:8080}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html

@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: rfq-negotiation-service
+  datasource:
+    url: ${RFQ_DB_URL:jdbc:sqlserver://localhost:14334;databaseName=mss_rfq_negotiation;encrypt=false;trustServerCertificate=true}
+    username: ${RFQ_DB_USERNAME:sa}
+    password: ${RFQ_DB_PASSWORD:YourStrong(!)Password}
+    driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
+  jpa:
+    hibernate.ddl-auto: none
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+services:
+  identity:
+    base-url: ${IDENTITY_SERVICE_URL:http://localhost:8081}
+  catalog:
+    base-url: ${CATALOG_SERVICE_URL:http://localhost:8082}
+  commerce:
+    base-url: ${COMMERCE_SERVICE_URL:http://localhost:8083}
+server:
+  port: ${SERVER_PORT:8084}
+springdoc:
+  api-docs.path: /v3/api-docs
+  swagger-ui.path: /swagger-ui.html

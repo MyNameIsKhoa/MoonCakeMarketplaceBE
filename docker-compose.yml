@@ -1,0 +1,87 @@
+services:
+  identity-db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
+    ports: ["14331:1433"]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$${MSSQL_SA_PASSWORD}\" -Q \"SELECT 1\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+  catalog-db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
+    ports: ["14332:1433"]
+  commerce-db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
+    ports: ["14333:1433"]
+  rfq-db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
+    ports: ["14334:1433"]
+
+  identity-service:
+    build:
+      context: .
+      dockerfile: IdentityService/Dockerfile
+    environment:
+      IDENTITY_DB_URL: jdbc:sqlserver://identity-db:1433;databaseName=mss_identity;encrypt=false;trustServerCertificate=true
+      IDENTITY_DB_USERNAME: sa
+      IDENTITY_DB_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
+    ports: ["8081:8081"]
+    depends_on: { identity-db: { condition: service_started } }
+  catalog-store-service:
+    build:
+      context: .
+      dockerfile: CatalogStoreService/Dockerfile
+    environment:
+      CATALOG_DB_URL: jdbc:sqlserver://catalog-db:1433;databaseName=mss_catalog_store;encrypt=false;trustServerCertificate=true
+      CATALOG_DB_USERNAME: sa
+      CATALOG_DB_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
+    ports: ["8082:8082"]
+    depends_on: { catalog-db: { condition: service_started } }
+  commerce-service:
+    build:
+      context: .
+      dockerfile: CommerceService/Dockerfile
+    environment:
+      COMMERCE_DB_URL: jdbc:sqlserver://commerce-db:1433;databaseName=mss_commerce;encrypt=false;trustServerCertificate=true
+      COMMERCE_DB_USERNAME: sa
+      COMMERCE_DB_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
+      IDENTITY_SERVICE_URL: http://identity-service:8081
+      CATALOG_SERVICE_URL: http://catalog-store-service:8082
+    ports: ["8083:8083"]
+    depends_on: { commerce-db: { condition: service_started }, identity-service: { condition: service_started }, catalog-store-service: { condition: service_started } }
+  rfq-negotiation-service:
+    build:
+      context: .
+      dockerfile: RFQService/Dockerfile
+    environment:
+      RFQ_DB_URL: jdbc:sqlserver://rfq-db:1433;databaseName=mss_rfq_negotiation;encrypt=false;trustServerCertificate=true
+      RFQ_DB_USERNAME: sa
+      RFQ_DB_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
+      IDENTITY_SERVICE_URL: http://identity-service:8081
+      CATALOG_SERVICE_URL: http://catalog-store-service:8082
+      COMMERCE_SERVICE_URL: http://commerce-service:8083
+    ports: ["8084:8084"]
+    depends_on: { rfq-db: { condition: service_started }, commerce-service: { condition: service_started } }
+  api-gateway:
+    build:
+      context: .
+      dockerfile: API-Gateway/Dockerfile
+    environment:
+      IDENTITY_SERVICE_URL: http://identity-service:8081
+      CATALOG_SERVICE_URL: http://catalog-store-service:8082
+      COMMERCE_SERVICE_URL: http://commerce-service:8083
+      RFQ_SERVICE_URL: http://rfq-negotiation-service:8084
+    ports: ["8080:8080"]
+    depends_on: { identity-service: { condition: service_started }, catalog-store-service: { condition: service_started }, commerce-service: { condition: service_started }, rfq-negotiation-service: { condition: service_started } }
