@@ -1,21 +1,9 @@
 # MSS Mooncake Marketplace Workplan
 
-TODO này bám theo hai tài liệu project. Không tự thêm business rule; điểm chưa chốt phải được thống nhất trước khi implement.
+TODO này bám theo hai tài liệu project. 
 
-## Phạm vi repository
 
-- Backend repository này gồm 4 business services và 1 API Gateway: Identity, Catalog & Store, Commerce, RFQ & Negotiation và API Gateway.
-- Frontend React nằm ở repository riêng: `D:\Code\Github\MoonCakeMarketplace\MoonCakeMarketFrontend`.
-- Frontend chỉ gọi API Gateway, không gọi trực tiếp business service.
 
-## Quy tắc chung
-
-- Giữ đúng 4 business services + 1 API Gateway; TV3, TV5, TV6 cùng ở Commerce.
-- Frontend chỉ gọi API Gateway.
-- Không share JPA entity/repository/code implementation và không FK/join database xuyên service.
-- Cross-service synchronous dùng OpenFeign/REST; cùng Commerce gọi application service nội bộ.
-- Không thêm Kafka ở MVP.
-- Controller là adapter; business logic ở `service`/`service/impl`; REST không expose JPA entity.
 
 ## TV1 — Account, Supplier Onboarding, Store
 
