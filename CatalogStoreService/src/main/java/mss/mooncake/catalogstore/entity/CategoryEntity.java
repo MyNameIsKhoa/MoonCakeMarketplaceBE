@@ -9,8 +9,12 @@ import jakarta.persistence.Table;
 @Table(name = "category")
 @AttributeOverride(name = "id", column = @Column(name = "category_id"))
 public class CategoryEntity extends BaseCatalogEntity {
-    @Column(name = "parent_category_id") private Long parentCategoryId;
-    @Column(name = "name", nullable = false, length = 255) private String name;
-    @Column(name = "slug", nullable = false, length = 255, unique = true) private String slug;
-    @Column(name = "status", nullable = false, length = 30) private String status;
+    @Column(name = "parent_category_id")
+    private Long parentCategoryId;
+    @Column(name = "name", nullable = false, length = 255)
+    private String name;
+    @Column(name = "slug", nullable = false, length = 255, unique = true)
+    private String slug;
+    @Column(name = "status", nullable = false, length = 30)
+    private String status;
 }
