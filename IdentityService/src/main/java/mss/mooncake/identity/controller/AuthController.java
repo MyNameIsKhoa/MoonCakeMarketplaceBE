@@ -1,9 +1,12 @@
 package mss.mooncake.identity.controller;
 
 import jakarta.validation.Valid;
+import mss.mooncake.identity.dto.request.LoginRequest;
 import mss.mooncake.identity.dto.request.RegisterRequest;
+import mss.mooncake.identity.dto.response.AuthResponse;
 import mss.mooncake.identity.dto.response.UserSummaryResponse;
 import mss.mooncake.identity.service.AccountApplicationService;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -21,6 +24,11 @@ public class AuthController {
 
     @PostMapping("/register")
     public ResponseEntity<UserSummaryResponse> register(@Valid @RequestBody RegisterRequest request) {
-        return ResponseEntity.ok(accountApplicationService.register(request));
+        return ResponseEntity.status(HttpStatus.CREATED).body(accountApplicationService.register(request));
+    }
+
+    @PostMapping("/login")
+    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
+        return ResponseEntity.ok(accountApplicationService.login(request));
     }
 }

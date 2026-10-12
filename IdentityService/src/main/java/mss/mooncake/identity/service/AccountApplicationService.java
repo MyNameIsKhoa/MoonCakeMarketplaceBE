@@ -1,9 +1,16 @@
 package mss.mooncake.identity.service;
 
+import mss.mooncake.identity.dto.request.LoginRequest;
 import mss.mooncake.identity.dto.request.RegisterRequest;
+import mss.mooncake.identity.dto.request.UpdateProfileRequest;
+import mss.mooncake.identity.dto.response.AuthResponse;
+import mss.mooncake.identity.dto.response.UserProfileResponse;
 import mss.mooncake.identity.dto.response.UserSummaryResponse;
 
 public interface AccountApplicationService {
     UserSummaryResponse register(RegisterRequest request);
-    // TODO: Implement authentication and token issuance according to the selected identity provider.
+    AuthResponse login(LoginRequest request);
+    UserProfileResponse getProfile(Long userId);
+    UserProfileResponse updateProfile(Long userId, UpdateProfileRequest request);
+    UserSummaryResponse getUserSummary(Long userId);
 }

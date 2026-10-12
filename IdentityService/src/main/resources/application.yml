@@ -2,9 +2,9 @@ spring:
   application:
     name: identity-service
   datasource:
-    url: ${IDENTITY_DB_URL:jdbc:sqlserver://localhost:14331;databaseName=mss_identity;encrypt=false;trustServerCertificate=true}
+    url: ${IDENTITY_DB_URL:jdbc:sqlserver://localhost:1433;databaseName=mss_identity;encrypt=false;trustServerCertificate=true}
     username: ${IDENTITY_DB_USERNAME:sa}
-    password: ${IDENTITY_DB_PASSWORD:YourStrong(!)Password}
+    password: ${IDENTITY_DB_PASSWORD:sa}
     driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
   jpa:
     hibernate:

@@ -9,11 +9,11 @@ spring:
             - id: identity-service
               uri: ${IDENTITY_SERVICE_URL:http://localhost:8081}
               predicates:
-                - Path=/api/auth/**,/api/users/**,/api/addresses/**
+                - Path=/api/auth/**,/api/users/**,/api/addresses/**,/api/supplier-profile/**
             - id: catalog-store-service
               uri: ${CATALOG_SERVICE_URL:http://localhost:8082}
               predicates:
-                - Path=/api/stores/**,/api/products/**,/api/categories/**,/api/promotions/**,/api/supplier-profile/**
+                - Path=/api/stores/**,/api/products/**,/api/categories/**,/api/promotions/**
             - id: commerce-service
               uri: ${COMMERCE_SERVICE_URL:http://localhost:8083}
               predicates:

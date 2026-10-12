@@ -2,7 +2,7 @@ spring:
   application:
     name: catalog-store-service
   datasource:
-    url: ${CATALOG_DB_URL:jdbc:sqlserver://localhost:14332;databaseName=mss_catalog_store;encrypt=false;trustServerCertificate=true}
+    url: ${CATALOG_DB_URL:jdbc:sqlserver://localhost:1433;databaseName=mss_catalog_store;encrypt=false;trustServerCertificate=true}
     username: ${CATALOG_DB_USERNAME:sa}
     password: ${CATALOG_DB_PASSWORD:sa}
     driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
@@ -17,3 +17,13 @@ server:
 springdoc:
   api-docs.path: /v3/api-docs
   swagger-ui.path: /swagger-ui.html
+
+# Feign client URLs
+clients:
+  identity:
+    url: ${IDENTITY_SERVICE_URL:http://localhost:8081}
+
+# JWT — phải giống hệt IdentityService
+security:
+  jwt:
+    secret: ${JWT_SECRET:MoonCakeMarketplaceSecretKeyForJwtAuthenticationMustBeAtLeast256BitsLong!}
