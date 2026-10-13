@@ -89,7 +89,8 @@ public class StoreController {
             @PathVariable("id") Long id,
             @Valid @RequestBody UpdateStoreRequest request,
             @AuthenticationPrincipal UserPrincipal principal) {
-        StoreResponse response = storeService.updateStore(id, request, principal.getUserId());
+        boolean admin = principal.getAuthorities().stream().anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
+        StoreResponse response = storeService.updateStore(id, request, principal.getUserId(), admin);
         return ResponseEntity.ok(response);
     }
 }

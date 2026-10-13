@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.PathVariable;
  * Feign client gọi Identity Service để xác minh supplier.
  * Gọi endpoint /internal/v1/suppliers/by-user/{userId}/summary.
  */
-@FeignClient(name = "identity-service", url = "${clients.identity.url:http://localhost:8081}")
+@FeignClient(name = "identity-service", url = "${clients.identity.url:http://localhost:8081}", configuration = mss.mooncake.catalogstore.config.FeignConfig.class)
 public interface IdentityClient {
 
     /**

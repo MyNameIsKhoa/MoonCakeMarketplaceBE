@@ -14,8 +14,14 @@ import org.springframework.stereotype.Component;
 @Component
 public class JwtTokenProvider {
 
-    @Value("${security.jwt.secret:MoonCakeMarketplaceSecretKeyForJwtAuthenticationMustBeAtLeast256BitsLong!}")
+    @Value("${security.jwt.secret}")
     private String jwtSecret;
+
+    @Value("${security.jwt.issuer}")
+    private String issuer;
+
+    @Value("${security.jwt.audience}")
+    private String audience;
 
     private Key signingKey;
 
@@ -27,8 +33,11 @@ public class JwtTokenProvider {
 
     public boolean validateToken(String token) {
         try {
-            Jwts.parserBuilder().setSigningKey(signingKey).build().parseClaimsJws(token);
-            return true;
+            Claims claims = getClaims(token);
+            List<?> roles = claims.get("roles", List.class);
+            return claims.getExpiration() != null && claims.getExpiration().after(new java.util.Date())
+                    && claims.getSubject() != null && claims.get("userId") != null
+                    && roles != null && !roles.isEmpty();
         } catch (JwtException | IllegalArgumentException e) {
             return false;
         }
@@ -37,6 +46,8 @@ public class JwtTokenProvider {
     public Claims getClaims(String token) {
         return Jwts.parserBuilder()
                 .setSigningKey(signingKey)
+                .requireIssuer(issuer)
+                .requireAudience(audience)
                 .build()
                 .parseClaimsJws(token)
                 .getBody();

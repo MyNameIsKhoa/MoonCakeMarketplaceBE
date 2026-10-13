@@ -34,6 +34,13 @@ services:
       context: .
       dockerfile: IdentityService/Dockerfile
     environment:
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a random value of at least 32 characters}
+      JWT_ISSUER: ${JWT_ISSUER:-mooncake-identity}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-mooncake-api}
+      CATALOG_TO_IDENTITY_TOKEN: ${CATALOG_TO_IDENTITY_TOKEN:?Set a unique 32+ character token}
+      COMMERCE_TO_IDENTITY_TOKEN: ${COMMERCE_TO_IDENTITY_TOKEN:?Set a unique 32+ character token}
+      RFQ_TO_IDENTITY_TOKEN: ${RFQ_TO_IDENTITY_TOKEN:?Set a unique 32+ character token}
+      ADMIN_USER_IDS: ${ADMIN_USER_IDS:-}
       IDENTITY_DB_URL: jdbc:sqlserver://identity-db:1433;databaseName=mss_identity;encrypt=false;trustServerCertificate=true
       IDENTITY_DB_USERNAME: sa
       IDENTITY_DB_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
@@ -44,6 +51,12 @@ services:
       context: .
       dockerfile: CatalogStoreService/Dockerfile
     environment:
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a random value of at least 32 characters}
+      JWT_ISSUER: ${JWT_ISSUER:-mooncake-identity}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-mooncake-api}
+      CATALOG_TO_IDENTITY_TOKEN: ${CATALOG_TO_IDENTITY_TOKEN:?Set a unique 32+ character token}
+      COMMERCE_TO_CATALOG_TOKEN: ${COMMERCE_TO_CATALOG_TOKEN:?Set a unique 32+ character token}
+      RFQ_TO_CATALOG_TOKEN: ${RFQ_TO_CATALOG_TOKEN:?Set a unique 32+ character token}
       CATALOG_DB_URL: jdbc:sqlserver://catalog-db:1433;databaseName=mss_catalog_store;encrypt=false;trustServerCertificate=true
       CATALOG_DB_USERNAME: sa
       CATALOG_DB_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
@@ -54,6 +67,12 @@ services:
       context: .
       dockerfile: CommerceService/Dockerfile
     environment:
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a random value of at least 32 characters}
+      JWT_ISSUER: ${JWT_ISSUER:-mooncake-identity}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-mooncake-api}
+      COMMERCE_TO_IDENTITY_TOKEN: ${COMMERCE_TO_IDENTITY_TOKEN:?Set a unique 32+ character token}
+      COMMERCE_TO_CATALOG_TOKEN: ${COMMERCE_TO_CATALOG_TOKEN:?Set a unique 32+ character token}
+      RFQ_TO_COMMERCE_TOKEN: ${RFQ_TO_COMMERCE_TOKEN:?Set a unique 32+ character token}
       COMMERCE_DB_URL: jdbc:sqlserver://commerce-db:1433;databaseName=mss_commerce;encrypt=false;trustServerCertificate=true
       COMMERCE_DB_USERNAME: sa
       COMMERCE_DB_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
@@ -66,6 +85,12 @@ services:
       context: .
       dockerfile: RFQService/Dockerfile
     environment:
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a random value of at least 32 characters}
+      JWT_ISSUER: ${JWT_ISSUER:-mooncake-identity}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-mooncake-api}
+      RFQ_TO_IDENTITY_TOKEN: ${RFQ_TO_IDENTITY_TOKEN:?Set a unique 32+ character token}
+      RFQ_TO_CATALOG_TOKEN: ${RFQ_TO_CATALOG_TOKEN:?Set a unique 32+ character token}
+      RFQ_TO_COMMERCE_TOKEN: ${RFQ_TO_COMMERCE_TOKEN:?Set a unique 32+ character token}
       RFQ_DB_URL: jdbc:sqlserver://rfq-db:1433;databaseName=mss_rfq_negotiation;encrypt=false;trustServerCertificate=true
       RFQ_DB_USERNAME: sa
       RFQ_DB_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
@@ -79,6 +104,10 @@ services:
       context: .
       dockerfile: API-Gateway/Dockerfile
     environment:
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a random value of at least 32 characters}
+      JWT_ISSUER: ${JWT_ISSUER:-mooncake-identity}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-mooncake-api}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
       IDENTITY_SERVICE_URL: http://identity-service:8081
       CATALOG_SERVICE_URL: http://catalog-store-service:8082
       COMMERCE_SERVICE_URL: http://commerce-service:8083

@@ -192,7 +192,9 @@ class SupplierProfileControllerIntegrationTest {
     @Test
     @Order(9)
     void getSupplierSummary_InternalEndpoint_Returns200OK() throws Exception {
-        mockMvc.perform(get("/internal/v1/suppliers/" + supplier1Id + "/summary"))
+        mockMvc.perform(get("/internal/v1/suppliers/" + supplier1Id + "/summary")
+                        .header("X-Service-Name", "catalog")
+                        .header("X-Service-Token", "test-catalog-identity-token-32-bytes-minimum"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.supplierId").value(supplier1Id))
                 .andExpect(jsonPath("$.userId").value(user1Id))
@@ -204,7 +206,9 @@ class SupplierProfileControllerIntegrationTest {
     @Test
     @Order(10)
     void getSupplierSummaryByUserId_InternalEndpoint_Returns200OK() throws Exception {
-        mockMvc.perform(get("/internal/v1/suppliers/by-user/" + user1Id + "/summary"))
+        mockMvc.perform(get("/internal/v1/suppliers/by-user/" + user1Id + "/summary")
+                        .header("X-Service-Name", "catalog")
+                        .header("X-Service-Token", "test-catalog-identity-token-32-bytes-minimum"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.supplierId").value(supplier1Id))
                 .andExpect(jsonPath("$.userId").value(user1Id))

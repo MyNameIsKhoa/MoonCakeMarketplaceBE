@@ -1,4 +1,6 @@
 spring:
+  config:
+    import: optional:file:.env[.properties],optional:file:../.env[.properties]
   application:
     name: catalog-store-service
   datasource:
@@ -14,6 +16,15 @@ spring:
     locations: classpath:db/migration
 server:
   port: ${SERVER_PORT:8082}
+security:
+  jwt:
+    secret: ${JWT_SECRET}
+    issuer: ${JWT_ISSUER:mooncake-identity}
+    audience: ${JWT_AUDIENCE:mooncake-api}
+  internal-service-tokens:
+    commerce: ${COMMERCE_TO_CATALOG_TOKEN}
+    rfq: ${RFQ_TO_CATALOG_TOKEN}
+  outgoing-identity-token: ${CATALOG_TO_IDENTITY_TOKEN}
 springdoc:
   api-docs.path: /v3/api-docs
   swagger-ui.path: /swagger-ui.html
@@ -23,7 +34,3 @@ clients:
   identity:
     url: ${IDENTITY_SERVICE_URL:http://localhost:8081}
 
-# JWT — phải giống hệt IdentityService
-security:
-  jwt:
-    secret: ${JWT_SECRET:MoonCakeMarketplaceSecretKeyForJwtAuthenticationMustBeAtLeast256BitsLong!}

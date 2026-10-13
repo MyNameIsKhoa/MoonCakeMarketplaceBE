@@ -9,7 +9,13 @@ spring:
 
 security:
   jwt:
-    secret: MoonCakeMarketplaceSecretKeyForJwtAuthenticationMustBeAtLeast256BitsLong!
+    secret: MoonCakeMarketplaceTestSecretKeyMustBeAtLeast256BitsLong!
+    issuer: mooncake-identity
+    audience: mooncake-api
+  internal-service-tokens:
+    commerce: test-commerce-catalog-token-32-bytes-minimum
+    rfq: test-rfq-catalog-token-32-bytes-minimum
+  outgoing-identity-token: test-catalog-identity-token-32-bytes-minimum
 
 clients:
   identity:

@@ -64,7 +64,7 @@ class StoreControllerTest {
     private static final Long USER_ID = 10L;
 
     private UserPrincipal principalA() {
-        return UserPrincipal.create(USER_ID, "supplierA@test.com", List.of("ROLE_USER"));
+        return UserPrincipal.create(USER_ID, "supplierA@test.com", List.of("ROLE_SUPPLIER"));
     }
 
     private StoreResponse sampleResponse() {
@@ -152,7 +152,7 @@ class StoreControllerTest {
     @Test
     @DisplayName("PATCH /api/stores/{id} trả 200 khi user là owner")
     void updateStore_200_owner() throws Exception {
-        when(storeService.updateStore(eq(STORE_ID), any(UpdateStoreRequest.class), eq(USER_ID)))
+        when(storeService.updateStore(eq(STORE_ID), any(UpdateStoreRequest.class), eq(USER_ID), eq(false)))
                 .thenReturn(sampleResponse());
 
         UpdateStoreRequest req = new UpdateStoreRequest("New Name", null, null, "dark", null);
@@ -167,7 +167,7 @@ class StoreControllerTest {
     @Test
     @DisplayName("PATCH /api/stores/{id} trả 403 khi user không phải owner")
     void updateStore_403_notOwner() throws Exception {
-        when(storeService.updateStore(eq(STORE_ID), any(UpdateStoreRequest.class), eq(USER_ID)))
+        when(storeService.updateStore(eq(STORE_ID), any(UpdateStoreRequest.class), eq(USER_ID), eq(false)))
                 .thenThrow(new ForbiddenException("Bạn không có quyền"));
 
         UpdateStoreRequest req = new UpdateStoreRequest("Hacked", null, null, null, null);

@@ -1,10 +1,12 @@
 spring:
+  config:
+    import: optional:file:.env[.properties],optional:file:../.env[.properties]
   application:
     name: rfq-negotiation-service
   datasource:
     url: ${RFQ_DB_URL:jdbc:sqlserver://localhost:14334;databaseName=mss_rfq_negotiation;encrypt=false;trustServerCertificate=true}
     username: ${RFQ_DB_USERNAME:sa}
-    password: ${RFQ_DB_PASSWORD:YourStrong(!)Password}
+    password: ${RFQ_DB_PASSWORD:sa}
     driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
   jpa:
     hibernate.ddl-auto: none
@@ -21,6 +23,14 @@ services:
     base-url: ${COMMERCE_SERVICE_URL:http://localhost:8083}
 server:
   port: ${SERVER_PORT:8084}
+security:
+  jwt:
+    secret: ${JWT_SECRET}
+    issuer: ${JWT_ISSUER:mooncake-identity}
+    audience: ${JWT_AUDIENCE:mooncake-api}
+  outgoing-identity-token: ${RFQ_TO_IDENTITY_TOKEN}
+  outgoing-catalog-token: ${RFQ_TO_CATALOG_TOKEN}
+  outgoing-commerce-token: ${RFQ_TO_COMMERCE_TOKEN}
 springdoc:
   api-docs.path: /v3/api-docs
   swagger-ui.path: /swagger-ui.html

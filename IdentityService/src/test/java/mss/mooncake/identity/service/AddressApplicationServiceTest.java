@@ -48,7 +48,7 @@ class AddressApplicationServiceTest {
 
     @Test
     void createAddress_FirstAddress_AutomaticallyBecomesDefault() {
-        when(customerProfileRepository.findByUserId(1L)).thenReturn(Optional.of(customerProfileA));
+        when(customerProfileRepository.findByUserIdForUpdate(1L)).thenReturn(Optional.of(customerProfileA));
         when(addressRepository.countByCustomerId(100L)).thenReturn(0L);
 
         AddressRequest request = new AddressRequest(
@@ -73,7 +73,7 @@ class AddressApplicationServiceTest {
 
     @Test
     void createAddress_WithIsDefaultTrue_ResetsExistingDefaults() {
-        when(customerProfileRepository.findByUserId(1L)).thenReturn(Optional.of(customerProfileA));
+        when(customerProfileRepository.findByUserIdForUpdate(1L)).thenReturn(Optional.of(customerProfileA));
         when(addressRepository.countByCustomerId(100L)).thenReturn(1L);
 
         AddressRequest request = new AddressRequest(
@@ -113,7 +113,7 @@ class AddressApplicationServiceTest {
 
     @Test
     void updateAddress_Success() {
-        when(customerProfileRepository.findByUserId(1L)).thenReturn(Optional.of(customerProfileA));
+        when(customerProfileRepository.findByUserIdForUpdate(1L)).thenReturn(Optional.of(customerProfileA));
 
         AddressEntity addr1 = new AddressEntity(100L, "A", "0901", "123", "W", "D", "City", false);
         ReflectionTestUtils.setField(addr1, "id", 1L);
@@ -133,7 +133,7 @@ class AddressApplicationServiceTest {
 
     @Test
     void updateAddress_UserANotOwnerOfAddressB_ThrowsForbiddenException() {
-        when(customerProfileRepository.findByUserId(1L)).thenReturn(Optional.of(customerProfileA));
+        when(customerProfileRepository.findByUserIdForUpdate(1L)).thenReturn(Optional.of(customerProfileA));
 
         // Address belongs to customerId 200L (User B), not 100L (User A)
         AddressEntity addressB = new AddressEntity(200L, "B", "0902", "456", "W", "D", "City", true);
@@ -150,7 +150,7 @@ class AddressApplicationServiceTest {
 
     @Test
     void deleteAddress_UserANotOwnerOfAddressB_ThrowsForbiddenException() {
-        when(customerProfileRepository.findByUserId(1L)).thenReturn(Optional.of(customerProfileA));
+        when(customerProfileRepository.findByUserIdForUpdate(1L)).thenReturn(Optional.of(customerProfileA));
 
         AddressEntity addressB = new AddressEntity(200L, "B", "0902", "456", "W", "D", "City", true);
         ReflectionTestUtils.setField(addressB, "id", 2L);
@@ -164,7 +164,7 @@ class AddressApplicationServiceTest {
 
     @Test
     void deleteAddress_Success_PromotesRemainingAddressIfDeletedWasDefault() {
-        when(customerProfileRepository.findByUserId(1L)).thenReturn(Optional.of(customerProfileA));
+        when(customerProfileRepository.findByUserIdForUpdate(1L)).thenReturn(Optional.of(customerProfileA));
 
         AddressEntity addr1 = new AddressEntity(100L, "A1", "0901", "123", "W", "D", "City", true);
         ReflectionTestUtils.setField(addr1, "id", 1L);

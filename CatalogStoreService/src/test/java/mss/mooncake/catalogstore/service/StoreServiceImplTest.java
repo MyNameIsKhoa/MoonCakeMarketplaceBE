@@ -179,7 +179,8 @@ class StoreServiceImplTest {
         @Test
         @DisplayName("Trả store khi tìm thấy")
         void getStoreById_found() {
-            when(storeRepository.findById(1L)).thenReturn(Optional.of(storeOfSupplierA));
+            storeOfSupplierA.setStatus(StoreStatus.ACTIVE);
+            when(storeRepository.findByIdAndStatus(1L, StoreStatus.ACTIVE)).thenReturn(Optional.of(storeOfSupplierA));
             StoreResponse resp = storeService.getStoreById(1L);
             assertThat(resp.storeId()).isEqualTo(1L);
             assertThat(resp.name()).isEqualTo("Store A");
@@ -188,7 +189,7 @@ class StoreServiceImplTest {
         @Test
         @DisplayName("Ném ResourceNotFoundException khi không tìm thấy")
         void getStoreById_notFound() {
-            when(storeRepository.findById(999L)).thenReturn(Optional.empty());
+            when(storeRepository.findByIdAndStatus(999L, StoreStatus.ACTIVE)).thenReturn(Optional.empty());
             assertThatThrownBy(() -> storeService.getStoreById(999L))
                     .isInstanceOf(ResourceNotFoundException.class);
         }
@@ -283,7 +284,8 @@ class StoreServiceImplTest {
         @Test
         @DisplayName("getStoreByIdOrSlug tìm thấy theo numeric ID")
         void getStoreByIdOrSlug_foundById() {
-            when(storeRepository.findById(1L)).thenReturn(Optional.of(storeOfSupplierA));
+            storeOfSupplierA.setStatus(StoreStatus.ACTIVE);
+            when(storeRepository.findByIdAndStatus(1L, StoreStatus.ACTIVE)).thenReturn(Optional.of(storeOfSupplierA));
 
             StoreResponse resp = storeService.getStoreByIdOrSlug("1");
 
@@ -294,7 +296,8 @@ class StoreServiceImplTest {
         @Test
         @DisplayName("getStoreByIdOrSlug tìm thấy theo slug chuỗi")
         void getStoreByIdOrSlug_foundBySlug() {
-            when(storeRepository.findBySlug("store-a")).thenReturn(Optional.of(storeOfSupplierA));
+            storeOfSupplierA.setStatus(StoreStatus.ACTIVE);
+            when(storeRepository.findBySlugAndStatus("store-a", StoreStatus.ACTIVE)).thenReturn(Optional.of(storeOfSupplierA));
 
             StoreResponse resp = storeService.getStoreByIdOrSlug("store-a");
 
@@ -305,7 +308,9 @@ class StoreServiceImplTest {
         @Test
         @DisplayName("getStoresBySupplierId trả danh sách theo supplierId")
         void getStoresBySupplierId_returnsStores() {
-            when(storeRepository.findBySupplierIdRef(SUPPLIER_A_ID)).thenReturn(List.of(storeOfSupplierA));
+            storeOfSupplierA.setStatus(StoreStatus.ACTIVE);
+            when(storeRepository.findBySupplierIdRefAndStatusOrderByIdAsc(SUPPLIER_A_ID, StoreStatus.ACTIVE))
+                    .thenReturn(List.of(storeOfSupplierA));
 
             List<StoreResponse> list = storeService.getStoresBySupplierId(SUPPLIER_A_ID);
 
