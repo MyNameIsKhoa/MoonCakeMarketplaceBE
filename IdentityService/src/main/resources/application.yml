@@ -1,4 +1,6 @@
 spring:
+  config:
+    import: optional:file:.env[.properties],optional:file:../.env[.properties]
   application:
     name: identity-service
   datasource:
@@ -15,6 +17,17 @@ spring:
     locations: classpath:db/migration
 server:
   port: ${SERVER_PORT:8081}
+security:
+  jwt:
+    secret: ${JWT_SECRET}
+    issuer: ${JWT_ISSUER:mooncake-identity}
+    audience: ${JWT_AUDIENCE:mooncake-api}
+  internal-service-tokens:
+    catalog: ${CATALOG_TO_IDENTITY_TOKEN}
+    commerce: ${COMMERCE_TO_IDENTITY_TOKEN}
+    rfq: ${RFQ_TO_IDENTITY_TOKEN}
+  admin:
+    user-ids: ${ADMIN_USER_IDS:}
 springdoc:
   api-docs.path: /v3/api-docs
   swagger-ui.path: /swagger-ui.html

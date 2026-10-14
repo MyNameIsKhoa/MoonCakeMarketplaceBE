@@ -2,14 +2,20 @@ package mss.mooncake.identity.service.impl;
 
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import mss.mooncake.identity.dto.request.SupplierProfileRequest;
 import mss.mooncake.identity.dto.request.UpdateSupplierProfileRequest;
 import mss.mooncake.identity.dto.response.SupplierProfileResponse;
 import mss.mooncake.identity.dto.response.SupplierSummaryResponse;
+import mss.mooncake.identity.dto.response.SupplierVerificationAuditResponse;
 import mss.mooncake.identity.entity.SupplierProfileEntity;
+import mss.mooncake.identity.entity.SupplierVerificationAuditEntity;
+import mss.mooncake.identity.enums.SupplierVerificationStatus;
 import mss.mooncake.identity.exception.DuplicateResourceException;
+import mss.mooncake.identity.exception.InvalidStateTransitionException;
 import mss.mooncake.identity.exception.ResourceNotFoundException;
 import mss.mooncake.identity.repository.SupplierProfileRepository;
+import mss.mooncake.identity.repository.SupplierVerificationAuditRepository;
 import mss.mooncake.identity.repository.UserRepository;
 import mss.mooncake.identity.service.SupplierApplicationService;
 import org.springframework.stereotype.Service;
@@ -20,11 +26,14 @@ public class SupplierApplicationServiceImpl implements SupplierApplicationServic
 
     private final SupplierProfileRepository supplierProfileRepository;
     private final UserRepository userRepository;
+    private final SupplierVerificationAuditRepository auditRepository;
 
     public SupplierApplicationServiceImpl(SupplierProfileRepository supplierProfileRepository,
-                                          UserRepository userRepository) {
+                                          UserRepository userRepository,
+                                          SupplierVerificationAuditRepository auditRepository) {
         this.supplierProfileRepository = supplierProfileRepository;
         this.userRepository = userRepository;
+        this.auditRepository = auditRepository;
     }
 
     @Override
@@ -48,12 +57,14 @@ public class SupplierApplicationServiceImpl implements SupplierApplicationServic
                 userId,
                 request.companyName().trim(),
                 normalizedTaxCode,
-                "PENDING",
+                SupplierVerificationStatus.PENDING.name(),
                 now,
                 now
         );
 
         SupplierProfileEntity saved = supplierProfileRepository.save(entity);
+        auditRepository.save(new SupplierVerificationAuditEntity(saved.getId(), userId, null,
+                SupplierVerificationStatus.PENDING.name(), "Supplier onboarding submitted", now));
         return toResponse(saved);
     }
 
@@ -73,8 +84,11 @@ public class SupplierApplicationServiceImpl implements SupplierApplicationServic
 
         boolean updated = false;
         if (request.companyName() != null && !request.companyName().isBlank()) {
-            entity.setCompanyName(request.companyName().trim());
-            updated = true;
+            String companyName = request.companyName().trim();
+            if (!companyName.equals(entity.getCompanyName())) {
+                entity.setCompanyName(companyName);
+                updated = true;
+            }
         }
 
         if (request.taxCode() != null && !request.taxCode().isBlank()) {
@@ -89,6 +103,13 @@ public class SupplierApplicationServiceImpl implements SupplierApplicationServic
         }
 
         if (updated) {
+            String currentStatus = entity.getVerificationStatus();
+            if (SupplierVerificationStatus.REJECTED.name().equals(currentStatus)
+                    || SupplierVerificationStatus.VERIFIED.name().equals(currentStatus)) {
+                entity.setVerificationStatus(SupplierVerificationStatus.PENDING.name());
+                auditRepository.save(new SupplierVerificationAuditEntity(entity.getId(), userId, currentStatus,
+                        SupplierVerificationStatus.PENDING.name(), "Supplier updated profile and resubmitted", LocalDateTime.now(ZoneOffset.UTC)));
+            }
             entity.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
             supplierProfileRepository.save(entity);
         }
@@ -124,6 +145,61 @@ public class SupplierApplicationServiceImpl implements SupplierApplicationServic
                 entity.getTaxCode(),
                 entity.getVerificationStatus()
         );
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<SupplierProfileResponse> getSupplierProfilesByStatus(SupplierVerificationStatus status) {
+        return supplierProfileRepository.findAllByVerificationStatusOrderByCreatedAtAsc(status.name())
+                .stream().map(this::toResponse).toList();
+    }
+
+    @Override
+    @Transactional
+    public SupplierProfileResponse reviewSupplier(Long supplierId, SupplierVerificationStatus newStatus, Long actorUserId, String reason) {
+        SupplierProfileEntity entity = supplierProfileRepository.findById(supplierId)
+                .orElseThrow(() -> new ResourceNotFoundException("Supplier not found with id: " + supplierId));
+        SupplierVerificationStatus currentStatus = parseStatus(entity.getVerificationStatus());
+        if (!isAllowedTransition(currentStatus, newStatus)) {
+            throw new InvalidStateTransitionException(
+                    "Cannot change supplier verification from " + currentStatus + " to " + newStatus);
+        }
+        entity.setVerificationStatus(newStatus.name());
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+        entity.setUpdatedAt(now);
+        SupplierProfileEntity saved = supplierProfileRepository.save(entity);
+        auditRepository.save(new SupplierVerificationAuditEntity(supplierId, actorUserId, currentStatus.name(),
+                newStatus.name(), reason.trim(), now));
+        return toResponse(saved);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<SupplierVerificationAuditResponse> getVerificationHistory(Long supplierId) {
+        if (!supplierProfileRepository.existsById(supplierId)) {
+            throw new ResourceNotFoundException("Supplier not found with id: " + supplierId);
+        }
+        return auditRepository.findBySupplierIdOrderByActedAtDescIdDesc(supplierId).stream()
+                .map(a -> new SupplierVerificationAuditResponse(a.getId(), a.getSupplierId(), a.getActorUserId(),
+                        a.getPreviousStatus(), a.getNewStatus(), a.getReason(), a.getActedAt()))
+                .toList();
+    }
+
+    private SupplierVerificationStatus parseStatus(String value) {
+        try {
+            return SupplierVerificationStatus.valueOf(value);
+        } catch (IllegalArgumentException | NullPointerException ex) {
+            throw new InvalidStateTransitionException("Unknown supplier verification status: " + value);
+        }
+    }
+
+    private boolean isAllowedTransition(SupplierVerificationStatus current, SupplierVerificationStatus next) {
+        return switch (current) {
+            case PENDING -> next == SupplierVerificationStatus.VERIFIED || next == SupplierVerificationStatus.REJECTED;
+            case VERIFIED -> next == SupplierVerificationStatus.SUSPENDED;
+            case SUSPENDED -> next == SupplierVerificationStatus.VERIFIED;
+            case REJECTED -> false; // Supplier sửa hồ sơ để gửi lại; không admin-approve trực tiếp hồ sơ cũ.
+        };
     }
 
     private SupplierProfileResponse toResponse(SupplierProfileEntity entity) {

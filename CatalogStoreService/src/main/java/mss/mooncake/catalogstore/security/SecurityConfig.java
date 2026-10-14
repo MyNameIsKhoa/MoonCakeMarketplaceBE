@@ -2,6 +2,7 @@ package mss.mooncake.catalogstore.security;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -16,9 +17,12 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final InternalServiceTokenFilter internalServiceTokenFilter;
 
-    public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter) {
+    public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
+                          InternalServiceTokenFilter internalServiceTokenFilter) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+        this.internalServiceTokenFilter = internalServiceTokenFilter;
     }
 
     @Bean
@@ -32,12 +36,27 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/stores", "/api/stores/**").permitAll()
                         // Swagger
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
-                        // Internal contracts — chỉ service-to-service nội bộ gọi, permitAll tạm thời (chốt s2s auth sau)
-                        .requestMatchers("/internal/**").permitAll()
+                        .requestMatchers("/internal/**").hasAnyAuthority("ROLE_INTERNAL_COMMERCE", "ROLE_INTERNAL_RFQ")
                         // Mọi request còn lại cần JWT
-                        .anyRequest().authenticated()
+                        .anyRequest().hasAnyAuthority("ROLE_CUSTOMER", "ROLE_SUPPLIER", "ROLE_ADMIN")
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterAfter(internalServiceTokenFilter, JwtAuthenticationFilter.class)
                 .build();
+    }
+
+    @Bean
+    FilterRegistrationBean<JwtAuthenticationFilter> disableContainerJwtFilterRegistration(JwtAuthenticationFilter filter) {
+        FilterRegistrationBean<JwtAuthenticationFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
+    FilterRegistrationBean<InternalServiceTokenFilter> disableContainerServiceFilterRegistration(
+            InternalServiceTokenFilter filter) {
+        FilterRegistrationBean<InternalServiceTokenFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
     }
 }

@@ -10,6 +10,7 @@ import mss.mooncake.identity.entity.SupplierProfileEntity;
 import mss.mooncake.identity.exception.DuplicateResourceException;
 import mss.mooncake.identity.exception.ResourceNotFoundException;
 import mss.mooncake.identity.repository.SupplierProfileRepository;
+import mss.mooncake.identity.repository.SupplierVerificationAuditRepository;
 import mss.mooncake.identity.repository.UserRepository;
 import mss.mooncake.identity.service.impl.SupplierApplicationServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,11 +33,14 @@ class SupplierApplicationServiceTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private SupplierVerificationAuditRepository auditRepository;
+
     private SupplierApplicationServiceImpl supplierService;
 
     @BeforeEach
     void setUp() {
-        supplierService = new SupplierApplicationServiceImpl(supplierProfileRepository, userRepository);
+        supplierService = new SupplierApplicationServiceImpl(supplierProfileRepository, userRepository, auditRepository);
     }
 
     @Test

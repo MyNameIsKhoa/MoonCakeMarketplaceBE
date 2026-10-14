@@ -1,10 +1,12 @@
 spring:
+  config:
+    import: optional:file:.env[.properties],optional:file:../.env[.properties]
   application:
     name: commerce-service
   datasource:
-    url: ${COMMERCE_DB_URL:jdbc:sqlserver://localhost:14333;databaseName=mss_commerce;encrypt=false;trustServerCertificate=true}
+    url: ${COMMERCE_DB_URL:jdbc:sqlserver://localhost:1433;databaseName=mss_commerce;encrypt=false;trustServerCertificate=true}
     username: ${COMMERCE_DB_USERNAME:sa}
-    password: ${COMMERCE_DB_PASSWORD:YourStrong(!)Password}
+    password: ${COMMERCE_DB_PASSWORD:sa}
     driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
   jpa:
     hibernate.ddl-auto: none
@@ -19,6 +21,15 @@ services:
     base-url: ${CATALOG_SERVICE_URL:http://localhost:8082}
 server:
   port: ${SERVER_PORT:8083}
+security:
+  jwt:
+    secret: ${JWT_SECRET}
+    issuer: ${JWT_ISSUER:mooncake-identity}
+    audience: ${JWT_AUDIENCE:mooncake-api}
+  internal-service-tokens:
+    rfq: ${RFQ_TO_COMMERCE_TOKEN}
+  outgoing-identity-token: ${COMMERCE_TO_IDENTITY_TOKEN}
+  outgoing-catalog-token: ${COMMERCE_TO_CATALOG_TOKEN}
 springdoc:
   api-docs.path: /v3/api-docs
   swagger-ui.path: /swagger-ui.html

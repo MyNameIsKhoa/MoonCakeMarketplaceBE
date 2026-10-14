@@ -2,7 +2,11 @@ package mss.mooncake.identity.service.impl;
 
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+import jakarta.annotation.PostConstruct;
 import mss.mooncake.identity.dto.request.LoginRequest;
 import mss.mooncake.identity.dto.request.RegisterRequest;
 import mss.mooncake.identity.dto.request.UpdateProfileRequest;
@@ -20,6 +24,7 @@ import mss.mooncake.identity.repository.CustomerProfileRepository;
 import mss.mooncake.identity.repository.UserRepository;
 import mss.mooncake.identity.security.JwtTokenProvider;
 import mss.mooncake.identity.service.AccountApplicationService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +36,9 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
     private final CustomerProfileRepository customerProfileRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
+    @Value("${security.admin.user-ids:}")
+    private String configuredAdminUserIds;
+    private Set<Long> adminUserIds = Set.of();
 
     public AccountApplicationServiceImpl(UserRepository userRepository,
                                           CustomerProfileRepository customerProfileRepository,
@@ -40,6 +48,19 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
         this.customerProfileRepository = customerProfileRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
+    }
+
+    @PostConstruct
+    void loadAdminUserIds() {
+        if (configuredAdminUserIds == null || configuredAdminUserIds.isBlank()) {
+            adminUserIds = Set.of();
+            return;
+        }
+        adminUserIds = Arrays.stream(configuredAdminUserIds.split(","))
+                .map(String::trim)
+                .filter(value -> !value.isEmpty())
+                .map(Long::valueOf)
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     @Override
@@ -102,7 +123,9 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
         String fullName = profile != null ? profile.getFullName() : null;
         String phone = profile != null ? profile.getPhone() : null;
 
-        List<String> roles = List.of("ROLE_CUSTOMER");
+        List<String> roles = adminUserIds.contains(user.getId())
+                ? List.of("ROLE_CUSTOMER", "ROLE_ADMIN")
+                : List.of("ROLE_CUSTOMER");
         String token = jwtTokenProvider.generateToken(user.getId(), customerId, user.getEmail(), roles);
 
         UserSummaryResponse userSummary = new UserSummaryResponse(

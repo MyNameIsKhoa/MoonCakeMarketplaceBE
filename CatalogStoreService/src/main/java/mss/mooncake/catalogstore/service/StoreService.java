@@ -54,6 +54,8 @@ public interface StoreService {
      */
     StoreResponse updateStore(Long storeId, UpdateStoreRequest request, Long userId);
 
+    StoreResponse updateStore(Long storeId, UpdateStoreRequest request, Long userId, boolean admin);
+
     // ─── Internal contract ───────────────────────────────────────────────────────
 
     /**

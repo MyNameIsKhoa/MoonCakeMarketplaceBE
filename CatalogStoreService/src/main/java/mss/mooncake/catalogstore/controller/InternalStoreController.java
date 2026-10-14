@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * Internal contract endpoint cho TV3 (Commerce) và TV4 (RFQ).
  * Không expose ra Gateway public routing.
- * Authentication: permitAll tạm thời — cần chốt service-to-service auth sau.
+ * Authentication: X-Service-Token dành cho lời gọi service-to-service.
  */
 @RestController
 @RequestMapping("/internal/v1/stores")

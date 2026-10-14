@@ -6,3 +6,11 @@ spring:
     driver-class-name: org.h2.Driver
   flyway.enabled: false
   jpa.hibernate.ddl-auto: create-drop
+security:
+  jwt:
+    secret: MoonCakeMarketplaceTestSecretKeyMustBeAtLeast256BitsLong!
+    issuer: mooncake-identity
+    audience: mooncake-api
+  outgoing-identity-token: test-rfq-identity-token-32-bytes-minimum
+  outgoing-catalog-token: test-rfq-catalog-token-32-bytes-minimum
+  outgoing-commerce-token: test-rfq-commerce-token-32-bytes-minimum

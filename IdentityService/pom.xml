@@ -4,6 +4,11 @@
     <modelVersion>4.0.0</modelVersion>
     <parent><groupId>mss.mooncake</groupId><artifactId>mooncake-marketplace-backend</artifactId><version>0.0.1-SNAPSHOT</version></parent>
     <artifactId>identity-service</artifactId><name>Identity Service</name>
+    <properties>
+        <java.version>21</java.version>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+    </properties>
     <dependencies>
         <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-webmvc</artifactId></dependency>
         <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-data-jpa</artifactId></dependency>

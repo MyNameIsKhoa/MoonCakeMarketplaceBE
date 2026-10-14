@@ -9,4 +9,5 @@ public interface SupplierProfileRepository extends JpaRepository<SupplierProfile
     boolean existsByUserId(Long userId);
     boolean existsByTaxCode(String taxCode);
     Optional<SupplierProfileEntity> findByTaxCode(String taxCode);
+    java.util.List<SupplierProfileEntity> findAllByVerificationStatusOrderByCreatedAtAsc(String verificationStatus);
 }

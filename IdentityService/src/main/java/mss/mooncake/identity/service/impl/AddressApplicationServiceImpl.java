@@ -39,7 +39,7 @@ public class AddressApplicationServiceImpl implements AddressApplicationService 
     @Override
     @Transactional
     public AddressResponse createAddress(Long userId, AddressRequest request) {
-        CustomerProfileEntity customerProfile = getCustomerProfile(userId);
+        CustomerProfileEntity customerProfile = getCustomerProfileForUpdate(userId);
         Long customerId = customerProfile.getId();
 
         long count = addressRepository.countByCustomerId(customerId);
@@ -67,7 +67,7 @@ public class AddressApplicationServiceImpl implements AddressApplicationService 
     @Override
     @Transactional
     public AddressResponse updateAddress(Long userId, Long addressId, UpdateAddressRequest request) {
-        CustomerProfileEntity customerProfile = getCustomerProfile(userId);
+        CustomerProfileEntity customerProfile = getCustomerProfileForUpdate(userId);
         Long customerId = customerProfile.getId();
 
         AddressEntity address = addressRepository.findById(addressId)
@@ -98,8 +98,14 @@ public class AddressApplicationServiceImpl implements AddressApplicationService 
         if (request.isDefault() != null) {
             if (Boolean.TRUE.equals(request.isDefault())) {
                 addressRepository.resetDefaultAddressByCustomerId(customerId);
+                address.setDefaultAddress(false);
+                addressRepository.flush();
                 address.setDefaultAddress(true);
             } else {
+                if (address.isDefaultAddress()) {
+                    throw new mss.mooncake.identity.exception.InvalidStateTransitionException(
+                            "The default address cannot be unset; select another default address instead");
+                }
                 address.setDefaultAddress(false);
             }
         }
@@ -111,7 +117,7 @@ public class AddressApplicationServiceImpl implements AddressApplicationService 
     @Override
     @Transactional
     public void deleteAddress(Long userId, Long addressId) {
-        CustomerProfileEntity customerProfile = getCustomerProfile(userId);
+        CustomerProfileEntity customerProfile = getCustomerProfileForUpdate(userId);
         Long customerId = customerProfile.getId();
 
         AddressEntity address = addressRepository.findById(addressId)
@@ -153,6 +159,11 @@ public class AddressApplicationServiceImpl implements AddressApplicationService 
 
     private CustomerProfileEntity getCustomerProfile(Long userId) {
         return customerProfileRepository.findByUserId(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Customer profile not found for user id: " + userId));
+    }
+
+    private CustomerProfileEntity getCustomerProfileForUpdate(Long userId) {
+        return customerProfileRepository.findByUserIdForUpdate(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Customer profile not found for user id: " + userId));
     }
 

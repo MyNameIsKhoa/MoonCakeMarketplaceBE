@@ -209,7 +209,9 @@ class AddressControllerIntegrationTest {
     @Test
     @Order(9)
     void getAddressSummary_InternalEndpoint_Returns200OK() throws Exception {
-        mockMvc.perform(get("/internal/v1/addresses/" + addressId1 + "/summary"))
+        mockMvc.perform(get("/internal/v1/addresses/" + addressId1 + "/summary")
+                        .header("X-Service-Name", "commerce")
+                        .header("X-Service-Token", "test-commerce-identity-token-32-bytes-minimum"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.addressId").value(addressId1))
                 .andExpect(jsonPath("$.recipientName").value("Nguoi Nhan 1 Cap Nhat"))
