@@ -236,11 +236,11 @@
 | `POST /api/orders/{orderId}/seller-orders/{sellerOrderId}/accept` | Đề xuất | Buyer nghiệm thu seller order thuộc order này; xử lý lặp an toàn. |
 | `POST /api/reviews`, `GET /api/reviews?orderItemId=...` | Đề xuất | Chỉ buyer hợp lệ, rating 1..5, một review/item. |
 
-- [ ] Backend: shipment lifecycle/tracking, delivered/accepted, review; cho TV5 đọc eligibility bằng Java service nội bộ.
-- [ ] DB: dùng V1 Commerce, local FK và `UQ_review_order_item`; không tạo migration của service mới.
-- [ ] FE: supplier fulfillment, buyer tracking/acceptance/review, trạng thái theo seller order.
-- [ ] Test: shipment sai owner bị chặn; expected/actual dates; delivered/accept lặp; chưa đủ điều kiện không review; review trùng bị chặn; dispute blocking tới TV5.
-- [ ] Handoff: TV3 chốt seller-order status; TV5 chốt tín hiệu nào cho phép settlement. Không Feign giữa TV3/TV5/TV6.
+- [X] Backend: shipment lifecycle/tracking, delivered/accepted, review; cho TV5 đọc eligibility bằng Java service nội bộ.
+- [X] DB: dùng V1 Commerce, local FK và `UQ_review_order_item`; không tạo migration của service mới.
+- [X] FE: supplier fulfillment, buyer tracking/acceptance/review, trạng thái theo seller order.
+- [X] Test: shipment sai owner bị chặn; expected/actual dates; delivered/accept lặp; chưa đủ điều kiện không review; review trùng bị chặn; dispute blocking tới TV5.
+- [X] Handoff: TV3 chốt seller-order status; TV5 chốt tín hiệu nào cho phép settlement. Không Feign giữa TV3/TV5/TV6.
 - [ ] **CHỐT:** tự giao hay provider, nguồn xác nhận delivered, acceptance timeout, thời điểm review và status transitions.
 
 ## 9. Contract và thứ tự phối hợp

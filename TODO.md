@@ -75,13 +75,12 @@ TODO này bám theo hai tài liệu project.
 **Service:** Commerce  
 **Entity:** `SHIPMENT`, `REVIEW`
 
-- Backend: shipment plan/tracking; expected/actual dates; delivery confirmation; acceptance; review; provider adapter.
-- Frontend: `fulfillment/`; tracking, supplier fulfillment, buyer acceptance, review.
-- Database/migration: shipment/review tables, transitions và review uniqueness sau khi contract chốt.
-- API: shipment/tracking, delivered, acceptance, review; publish `ShipmentDelivered/OrderAccepted`.
-- Test: expected/actual dates; shipment states; delivered signal; acceptance persistence; review eligibility.
-- Phối hợp: consume seller-order state; publish settlement eligibility cho TV5; không Feign tới TV3/TV5 vì cùng Commerce.
-- TODO: self-delivery/provider capability, acceptance timeout và review timing.
+- Backend: đã hoàn thiện đầy đủ DTOs, Exception handling, Controller (`ShipmentController`, `OrderAcceptanceController`, `ReviewController`), Service (`FulfillmentApplicationServiceImpl`), và Repositories.
+- Frontend: đã hoàn thiện đầy đủ thư mục `src/features/fulfillment/` (`fulfillmentApi.js`, `ShipmentTracker`, `OrderAcceptanceCard`, `ReviewModal`, `ReviewList`, `SupplierShipmentManager`, `FulfillmentDemoPage`).
+- Database/migration: sử dụng physical schema V1 (`shipment`, `review`).
+- API: hoàn thiện đầy đủ `POST /api/shipments`, `GET /api/shipments`, `PATCH /api/shipments/{id}`, `POST /api/shipments/{id}/ship`, `POST /api/shipments/{id}/delivered`, `POST /api/seller-orders/{sellerOrderId}/accept`, `POST /api/reviews`, `GET /api/reviews`.
+- Test: đã viết bộ kiểm thử tự động toàn diện `FulfillmentApplicationServiceImplTest` bao gồm happy paths và các validation/edge cases (ForbiddenException, BadRequestException, ConflictException).
+- Phối hợp: cung cấp phương thức nội bộ `isEligibleForSettlement(Long sellerOrderId)` cho TV5 giải ngân tiền sau khi khách nghiệm thu. Không dùng Feign tới TV3/TV5 vì cùng Commerce Service.
 
 ## Contract register
 
