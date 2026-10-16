@@ -19,6 +19,8 @@ import mss.mooncake.identity.repository.SupplierVerificationAuditRepository;
 import mss.mooncake.identity.repository.UserRepository;
 import mss.mooncake.identity.service.SupplierApplicationService;
 import org.springframework.stereotype.Service;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -149,9 +151,8 @@ public class SupplierApplicationServiceImpl implements SupplierApplicationServic
 
     @Override
     @Transactional(readOnly = true)
-    public List<SupplierProfileResponse> getSupplierProfilesByStatus(SupplierVerificationStatus status) {
-        return supplierProfileRepository.findAllByVerificationStatusOrderByCreatedAtAsc(status.name())
-                .stream().map(this::toResponse).toList();
+    public Page<SupplierProfileResponse> getSupplierProfilesByStatus(SupplierVerificationStatus status, Pageable pageable) {
+        return supplierProfileRepository.findAllByVerificationStatus(status.name(), pageable).map(this::toResponse);
     }
 
     @Override

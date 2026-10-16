@@ -218,4 +218,24 @@ class AddressControllerIntegrationTest {
                 .andExpect(jsonPath("$.addressLine").value("123 Le Loi Updated"))
                 .andExpect(jsonPath("$.city").value("TP Ho Chi Minh"));
     }
+
+    @Test
+    @Order(10)
+    void getAddressDetail_OnlyOwnerCanRead() throws Exception {
+        mockMvc.perform(get("/api/addresses/" + addressId1)
+                        .header("Authorization", "Bearer " + tokenUserA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.addressId").value(addressId1));
+
+        mockMvc.perform(get("/api/addresses/" + addressId1)
+                        .header("Authorization", "Bearer " + tokenUserB))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/addresses/999999")
+                        .header("Authorization", "Bearer " + tokenUserA))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(get("/api/addresses/" + addressId1))
+                .andExpect(status().isUnauthorized());
+    }
 }

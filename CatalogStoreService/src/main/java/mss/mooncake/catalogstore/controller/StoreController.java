@@ -61,11 +61,12 @@ public class StoreController {
     }
 
     /**
-     * GET /api/stores/{id} — public (hỗ trợ cả numeric ID và slug).
+     * GET /api/stores/{id} — ACTIVE công khai; owner đăng nhập xem được store chưa công bố.
      */
     @GetMapping("/{id}")
-    public ResponseEntity<StoreResponse> getStoreByIdOrSlug(@PathVariable("id") String id) {
-        return ResponseEntity.ok(storeService.getStoreByIdOrSlug(id));
+    public ResponseEntity<StoreResponse> getStoreByIdOrSlug(@PathVariable("id") String id,
+                                                            @AuthenticationPrincipal UserPrincipal principal) {
+        return ResponseEntity.ok(storeService.getStoreByIdOrSlug(id, principal == null ? null : principal.getUserId()));
     }
 
     /**

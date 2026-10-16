@@ -61,6 +61,11 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
                 .filter(value -> !value.isEmpty())
                 .map(Long::valueOf)
                 .collect(Collectors.toUnmodifiableSet());
+        for (Long adminUserId : adminUserIds) {
+            if (adminUserId <= 0 || !userRepository.existsById(adminUserId)) {
+                throw new IllegalStateException("ADMIN_USER_IDS must reference existing, operator-provisioned users: " + adminUserId);
+            }
+        }
     }
 
     @Override

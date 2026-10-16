@@ -16,8 +16,6 @@ public interface StoreRepository extends JpaRepository<StoreEntity, Long> {
 
     Optional<StoreEntity> findByIdAndStatus(Long id, StoreStatus status);
 
-    Optional<StoreEntity> findBySlugAndStatus(String slug, StoreStatus status);
-
     boolean existsByStoreCode(String storeCode);
 
     boolean existsBySlug(String slug);

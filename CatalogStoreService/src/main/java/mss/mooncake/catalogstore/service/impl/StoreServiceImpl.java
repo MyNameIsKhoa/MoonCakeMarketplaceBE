@@ -100,9 +100,7 @@ public class StoreServiceImpl implements StoreService {
                 e.getLogoUrl(),
                 e.getBannerUrl(),
                 e.getThemeKey(),
-                e.getStatus().name(),
-                e.getCreatedAt(),
-                e.getUpdatedAt()
+                e.getStatus().name()
         );
     }
 
@@ -167,22 +165,37 @@ public class StoreServiceImpl implements StoreService {
     }
 
     @Override
-    public StoreResponse getStoreByIdOrSlug(String identifier) {
+    public StoreResponse getStoreByIdOrSlug(String identifier, Long userId) {
         if (!StringUtils.hasText(identifier)) {
             throw new BadRequestException("Identifier của store không được để trống.");
         }
         String trimmed = identifier.trim();
+        StoreEntity store = null;
         // Nếu là số, thử tìm theo store_id trước
         if (trimmed.matches("^\\d+$")) {
-            Long id = Long.parseLong(trimmed);
-            var storeOpt = storeRepository.findByIdAndStatus(id, StoreStatus.ACTIVE);
-            if (storeOpt.isPresent()) {
-                return toResponse(storeOpt.get());
+            try {
+                store = storeRepository.findById(Long.parseLong(trimmed)).orElse(null);
+            } catch (NumberFormatException ignored) {
+                // Numeric slug can exceed Long.MAX_VALUE.
             }
         }
-        // Tìm theo slug
-        StoreEntity store = storeRepository.findBySlugAndStatus(trimmed, StoreStatus.ACTIVE)
-                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy store với id hoặc slug: " + trimmed));
+        if (store == null) {
+            store = storeRepository.findBySlug(trimmed)
+                    .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy store với id hoặc slug: " + trimmed));
+        }
+        if (store.getStatus() != StoreStatus.ACTIVE) {
+            if (userId == null) {
+                throw new ResourceNotFoundException("Không tìm thấy store với id hoặc slug: " + trimmed);
+            }
+            try {
+                SupplierSummaryDto supplier = identityClient.getSupplierSummaryByUserId(userId);
+                if (!store.getSupplierIdRef().equals(supplier.supplierId())) {
+                    throw new ResourceNotFoundException("Không tìm thấy store với id hoặc slug: " + trimmed);
+                }
+            } catch (FeignException.NotFound e) {
+                throw new ResourceNotFoundException("Không tìm thấy store với id hoặc slug: " + trimmed);
+            }
+        }
         return toResponse(store);
     }
 
@@ -239,6 +252,8 @@ public class StoreServiceImpl implements StoreService {
         if (!admin && (current == StoreStatus.SUSPENDED || next == StoreStatus.SUSPENDED)) {
             throw new ForbiddenException("Only an administrator can suspend or reinstate a store");
         }
+        if (admin && next == StoreStatus.SUSPENDED
+                && (current == StoreStatus.ACTIVE || current == StoreStatus.INACTIVE)) return;
         boolean allowed = switch (current) {
             case DRAFT -> next == StoreStatus.ACTIVE || next == StoreStatus.INACTIVE;
             case ACTIVE -> next == StoreStatus.INACTIVE;

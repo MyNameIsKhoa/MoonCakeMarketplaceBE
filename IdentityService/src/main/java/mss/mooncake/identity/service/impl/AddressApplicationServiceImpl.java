@@ -37,6 +37,18 @@ public class AddressApplicationServiceImpl implements AddressApplicationService 
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public AddressResponse getCustomerAddress(Long userId, Long addressId) {
+        Long customerId = getCustomerProfile(userId).getId();
+        AddressEntity address = addressRepository.findById(addressId)
+                .orElseThrow(() -> new ResourceNotFoundException("Address not found with id: " + addressId));
+        if (!address.getCustomerId().equals(customerId)) {
+            throw new ForbiddenException("You do not have permission to view this address");
+        }
+        return toResponse(address);
+    }
+
+    @Override
     @Transactional
     public AddressResponse createAddress(Long userId, AddressRequest request) {
         CustomerProfileEntity customerProfile = getCustomerProfileForUpdate(userId);

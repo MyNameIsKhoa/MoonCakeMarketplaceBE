@@ -1,7 +1,6 @@
 package mss.mooncake.catalogstore.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.time.LocalDateTime;
 import java.util.List;
 import mss.mooncake.catalogstore.dto.request.CreateStoreRequest;
 import mss.mooncake.catalogstore.dto.request.UpdateStoreRequest;
@@ -69,8 +68,7 @@ class StoreControllerTest {
 
     private StoreResponse sampleResponse() {
         return new StoreResponse(STORE_ID, SUPPLIER_ID, "STR-ABCD1234", "Store A",
-                "store-a", null, null, null, "DRAFT",
-                LocalDateTime.now(), LocalDateTime.now());
+                "store-a", null, null, null, "DRAFT");
     }
 
     // ── GET /api/stores — public ──────────────────────────────────────────────────
@@ -89,7 +87,7 @@ class StoreControllerTest {
     @Test
     @DisplayName("GET /api/stores/{id} trả 200 — public")
     void getStoreById_200() throws Exception {
-        when(storeService.getStoreByIdOrSlug(String.valueOf(STORE_ID))).thenReturn(sampleResponse());
+        when(storeService.getStoreByIdOrSlug(String.valueOf(STORE_ID), null)).thenReturn(sampleResponse());
 
         mockMvc.perform(get("/api/stores/{id}", STORE_ID))
                 .andExpect(status().isOk())
@@ -99,10 +97,19 @@ class StoreControllerTest {
     @Test
     @DisplayName("GET /api/stores/{id} trả 404 khi store không tồn tại")
     void getStoreById_404() throws Exception {
-        when(storeService.getStoreByIdOrSlug("999")).thenThrow(new ResourceNotFoundException("Không tìm thấy"));
+        when(storeService.getStoreByIdOrSlug("999", null)).thenThrow(new ResourceNotFoundException("Không tìm thấy"));
 
         mockMvc.perform(get("/api/stores/{id}", 999L))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void ownerCanRequestDraftStoreDetail() throws Exception {
+        when(storeService.getStoreByIdOrSlug("1", USER_ID)).thenReturn(sampleResponse());
+
+        mockMvc.perform(get("/api/stores/1").with(SecurityMockMvcRequestPostProcessors.user(principalA())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("DRAFT"));
     }
 
     // ── POST /api/stores ──────────────────────────────────────────────────────────

@@ -238,7 +238,7 @@ Owner Identity cho `ID*`; owner Catalog cho `ST*`. `—` nghĩa không có body.
 | ID03 C | `GET /api/users/me` | USER | — | 200 `UserProfileResponse` | User từ principal. |
 | ID04 C | `PATCH /api/users/me` | USER | `UpdateProfileRequest` | 200 `UserProfileResponse` | Allowlist fullName/phone; không sửa role/status qua profile. |
 | ID05 C | `GET /api/addresses` | BUYER | — | 200 `AddressResponse[]` | Chỉ địa chỉ của customer hiện tại; contract giới hạn list cần chốt. |
-| ID06 N | `GET /api/addresses/{addressId}` | BUYER | — | 200 `AddressResponse` | Owner check. |
+| ID06 C | `GET /api/addresses/{addressId}` | BUYER | — | 200 `AddressResponse` | Owner check. |
 | ID07 C | `POST /api/addresses` | BUYER | `AddressRequest` | 201 `AddressResponse` | customerId từ principal; rule default phải nhất quán. |
 | ID08 C | `PATCH /api/addresses/{addressId}` | BUYER | `UpdateAddressRequest` | 200 `AddressResponse` | Bao gồm đổi default; xử lý concurrent update trong service. |
 | ID09 C | `DELETE /api/addresses/{addressId}` | BUYER | — | 204 | Không xóa/sửa delivery snapshot trong đơn cũ. |
@@ -413,14 +413,14 @@ Review filter lấy variant/store từ order snapshots/local refs; không join t
 
 ### 10.3. Quản trị và các chức năng phụ thuộc policy
 
-Spec có Platform Admin cho moderation, hỗ trợ dispute/refund/settlement. Đây là phần quyền cần thiết, nhưng không có quyền admin đầy đủ trong native login hiện tại (login đang phát ROLE_CUSTOMER). Không gán role từ body đăng ký.
+Spec có Platform Admin cho moderation, hỗ trợ dispute/refund/settlement. Identity chỉ cấp `ROLE_ADMIN` cho `ADMIN_USER_IDS` đã tồn tại khi khởi động; tài khoản này phải do người vận hành xác minh/provision trước. Không gán role từ body đăng ký.
 
 | Mã / hiện trạng | Method + path | Quyền | Request/query | Success | Điều kiện chính |
 |---|---|---|---|---|---|
 | AD01 T | `GET /api/users` | ADMIN* | status, page/sort | 200 `Page<AdminUserResponse>` | Moderation queue; projection PII tối thiểu. |
 | AD02 T,K | `POST /api/users/{userId}/moderation` | ADMIN* | action, reason | 200 `AdminUserResponse` | Chốt actions/quyền/audit và ảnh hưởng token đã phát. |
-| AD03 T | `GET /api/suppliers` | ADMIN* | verificationStatus, page/sort | 200 `Page<SupplierProfileResponse>` | Onboarding queue; Gateway cần route mới. |
-| AD04 T,K | `POST /api/suppliers/{supplierId}/verification` | ADMIN* | decision, reason | 200 `SupplierProfileResponse` | Chốt verification state machine và nơi lưu audit/reason. |
+| AD03 C | `GET /api/suppliers` | ADMIN | verificationStatus, page/sort | 200 `Page<SupplierProfileResponse>` | Onboarding queue; Gateway route tới Identity. |
+| AD04 C | `POST /api/suppliers/{supplierId}/verification` | ADMIN | decision, reason | 200 `SupplierProfileResponse` | Chỉ các transition đã cho phép; lưu audit/reason. |
 | AD05 T,K | `POST /api/stores/{storeId}/moderation` | ADMIN* | action, reason | 200 `StoreResponse` | Chốt moderation state, audit; không chuyển ownership. |
 | AD06 T,K | `POST /api/products/{productId}/moderation` | ADMIN* | action, reason | 200 `ProductResponse` | Không thay order/quotation snapshots. |
 | AD07 T,K | `POST /api/rfqs/{rfqId}/moderation` | ADMIN* | action, reason | 200 `RfqResponse` | Không hủy order đã accept chỉ vì ẩn RFQ. |
@@ -584,13 +584,13 @@ Các quyết định còn mở: required verification để bán; draft/publish 
 | Phần | Hiện tại kiểm tra trong code | Việc áp dụng convention |
 |---|---|---|
 | Public routing | Gateway đã route `/api/supplier-profile/**` về Identity | Giữ ownership này, không dùng routing sai trong README/TODO cũ. |
-| Route mới | Chưa có `/api/seller-orders/**`, `/api/suppliers/**` | Thêm lần lượt về Commerce và Identity cùng PR implement endpoint. |
+| Route mới | Đã có `/api/suppliers/**`; chưa có `/api/seller-orders/**` | Chỉ thêm route Commerce cùng PR implement endpoint. |
 | WebSocket | RFQ có `/ws/chat`, Gateway hiện dùng Gateway MVC và chưa có route WS | Kiểm tra khả năng proxy WebSocket của stack đã chọn; triển khai proxy phù hợp và test handshake/STOMP qua Gateway. Không chỉ copy cấu hình của Gateway WebFlux. |
 | Identity | Đã có login/JWT/password_hash V2 và profile/address/supplier logic | Cập nhật TODO cũ; hoàn thiện capability, internal auth, password/session decisions. |
-| AuthZ | Login đang cấp ROLE_CUSTOMER, internal ở Identity/Catalog còn permitAll | Ownership và service identity phải implement/test; nhãn quyền trong tài liệu chưa tự thành enforcement. |
+| AuthZ | Identity cấp ROLE_ADMIN từ danh sách user ID đã được provision; internal API dùng service token riêng | Tiếp tục test ownership/service identity; không cấu hình trước ID admin chưa tồn tại. |
 | DTO wire | IDs numeric, timestamp LocalDateTime, store supplierIdRef | Lên PR chuyển contract có FE/Feign; không trộn string/numeric ID ngẫu nhiên giữa API mới. |
 | Error/PATCH/list | Legacy ErrorResponse, PATCH record, store array | Áp Problem Details, presence-aware PATCH, PageResponse với compatibility plan. |
-| Store mapping | Response có audit timestamps trong khi STORE V1 không có | Đối chiếu base entity/migration trước khi công bố field persist. |
+| Store mapping | StoreResponse không có audit timestamps theo STORE V1 | Kiểm tra mapping với SQL Server thật trước khi merge. |
 | Product snapshot | Endpoint tồn tại, implementation TODO | Thêm batch variant snapshot và field đủ cho checkout; cập nhật consumer. |
 | Accept quotation | Route tồn tại nhưng chưa bind path ID; body là DTO ID nội bộ | Tách AcceptQuotationRequest public và AcceptedQuotationOrderRequest internal; validate path/principal. |
 | Finance/fulfillment | Phần lớn còn skeleton | Không đánh dấu Done chỉ vì tên endpoint đã có trong tài liệu. |

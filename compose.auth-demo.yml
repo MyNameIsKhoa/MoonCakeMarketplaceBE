@@ -1,0 +1,64 @@
+name: mooncake-auth-demo
+
+services:
+  identity-db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
+      SQLCMDPASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
+    volumes:
+      - identity-demo-data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD", "/opt/mssql-tools18/bin/sqlcmd", "-C", "-S", "localhost", "-U", "sa", "-Q", "SELECT 1", "-b"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  identity-db-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    entrypoint: ["/opt/mssql-tools18/bin/sqlcmd"]
+    command: ["-C", "-S", "identity-db", "-U", "sa", "-Q", "IF DB_ID('mss_identity') IS NULL EXEC('CREATE DATABASE mss_identity')", "-b"]
+    environment:
+      SQLCMDPASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
+    depends_on:
+      identity-db:
+        condition: service_healthy
+    restart: "no"
+
+  identity-service:
+    build:
+      context: .
+      dockerfile: IdentityService/Dockerfile
+    environment:
+      JWT_SECRET: ${JWT_SECRET:?Set a random secret of at least 32 characters in .env}
+      JWT_ISSUER: ${JWT_ISSUER:-mooncake-identity}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-mooncake-api}
+      CATALOG_TO_IDENTITY_TOKEN: ${CATALOG_TO_IDENTITY_TOKEN:?Set a unique 32+ character token in .env}
+      COMMERCE_TO_IDENTITY_TOKEN: ${COMMERCE_TO_IDENTITY_TOKEN:?Set a unique 32+ character token in .env}
+      RFQ_TO_IDENTITY_TOKEN: ${RFQ_TO_IDENTITY_TOKEN:?Set a unique 32+ character token in .env}
+      ADMIN_USER_IDS: ""
+      IDENTITY_DB_URL: jdbc:sqlserver://identity-db:1433;databaseName=mss_identity;encrypt=false;trustServerCertificate=true
+      IDENTITY_DB_USERNAME: sa
+      IDENTITY_DB_PASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
+    depends_on:
+      identity-db-init:
+        condition: service_completed_successfully
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: API-Gateway/Dockerfile
+    environment:
+      JWT_SECRET: ${JWT_SECRET:?Set a random secret of at least 32 characters in .env}
+      JWT_ISSUER: ${JWT_ISSUER:-mooncake-identity}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-mooncake-api}
+      IDENTITY_SERVICE_URL: http://identity-service:8081
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      identity-service:
+        condition: service_started
+
+volumes:
+  identity-demo-data:

@@ -7,6 +7,7 @@ import mss.mooncake.identity.dto.request.UpdateSupplierProfileRequest;
 import mss.mooncake.identity.dto.response.SupplierProfileResponse;
 import mss.mooncake.identity.dto.response.SupplierSummaryResponse;
 import mss.mooncake.identity.entity.SupplierProfileEntity;
+import mss.mooncake.identity.enums.SupplierVerificationStatus;
 import mss.mooncake.identity.exception.DuplicateResourceException;
 import mss.mooncake.identity.exception.ResourceNotFoundException;
 import mss.mooncake.identity.repository.SupplierProfileRepository;
@@ -18,6 +19,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -154,5 +157,20 @@ class SupplierApplicationServiceTest {
         assertEquals("Kinh Do", summary.companyName());
         assertEquals("0123456789", summary.taxCode());
         assertEquals("VERIFIED", summary.verificationStatus());
+    }
+
+    @Test
+    void supplierReviewQueueMapsPagedRepositoryResult() {
+        SupplierProfileEntity entity = new SupplierProfileEntity(1L, "Kinh Do", "0123456789", "PENDING",
+                LocalDateTime.now(), LocalDateTime.now());
+        ReflectionTestUtils.setField(entity, "id", 50L);
+        PageRequest page = PageRequest.of(0, 10);
+        when(supplierProfileRepository.findAllByVerificationStatus("PENDING", page))
+                .thenReturn(new PageImpl<>(java.util.List.of(entity), page, 1));
+
+        var result = supplierService.getSupplierProfilesByStatus(SupplierVerificationStatus.PENDING, page);
+
+        assertEquals(1, result.getTotalElements());
+        assertEquals(50L, result.getContent().getFirst().supplierId());
     }
 }

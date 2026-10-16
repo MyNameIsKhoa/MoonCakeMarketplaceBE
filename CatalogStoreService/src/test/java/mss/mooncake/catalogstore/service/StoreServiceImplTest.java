@@ -24,6 +24,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -69,12 +70,7 @@ class StoreServiceImplTest {
 
     private StoreEntity buildStore(Long id, Long supplierIdRef, String name, String slug, String code) {
         StoreEntity e = new StoreEntity();
-        // set id via reflection since BaseCatalogEntity.id is protected
-        try {
-            var field = mss.mooncake.catalogstore.entity.BaseCatalogEntity.class.getDeclaredField("id");
-            field.setAccessible(true);
-            field.set(e, id);
-        } catch (Exception ex) { throw new RuntimeException(ex); }
+        ReflectionTestUtils.setField(e, "id", id);
         e.setSupplierIdRef(supplierIdRef);
         e.setName(name);
         e.setSlug(slug);
@@ -97,11 +93,7 @@ class StoreServiceImplTest {
             when(storeRepository.existsBySlug(anyString())).thenReturn(false);
             when(storeRepository.save(any(StoreEntity.class))).thenAnswer(inv -> {
                 StoreEntity s = inv.getArgument(0);
-                try {
-                    var f = mss.mooncake.catalogstore.entity.BaseCatalogEntity.class.getDeclaredField("id");
-                    f.setAccessible(true);
-                    f.set(s, 99L);
-                } catch (Exception e) { throw new RuntimeException(e); }
+                ReflectionTestUtils.setField(s, "id", 99L);
                 return s;
             });
 
@@ -273,6 +265,42 @@ class StoreServiceImplTest {
 
             verify(storeRepository, never()).save(any());
         }
+
+        @Test
+        void adminCanSuspendActiveStoreAndReinstateIt() {
+            storeOfSupplierA.setStatus(StoreStatus.ACTIVE);
+            when(storeRepository.findById(1L)).thenReturn(Optional.of(storeOfSupplierA));
+            when(storeRepository.save(any(StoreEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            StoreResponse suspended = storeService.updateStore(1L,
+                    new UpdateStoreRequest(null, null, null, null, "SUSPENDED"), USER_B, true);
+            assertThat(suspended.status()).isEqualTo("SUSPENDED");
+
+            StoreResponse restored = storeService.updateStore(1L,
+                    new UpdateStoreRequest(null, null, null, null, "INACTIVE"), USER_B, true);
+            assertThat(restored.status()).isEqualTo("INACTIVE");
+        }
+
+        @Test
+        void ownerCannotSuspendStore() {
+            storeOfSupplierA.setStatus(StoreStatus.ACTIVE);
+            when(storeRepository.findById(1L)).thenReturn(Optional.of(storeOfSupplierA));
+            when(identityClient.getSupplierSummaryByUserId(USER_A)).thenReturn(supplierA);
+
+            assertThatThrownBy(() -> storeService.updateStore(1L,
+                    new UpdateStoreRequest(null, null, null, null, "SUSPENDED"), USER_A))
+                    .isInstanceOf(ForbiddenException.class);
+            verify(storeRepository, never()).save(any());
+        }
+
+        @Test
+        void draftCannotBeSuspendedWithoutAgreedTransitionRule() {
+            when(storeRepository.findById(1L)).thenReturn(Optional.of(storeOfSupplierA));
+
+            assertThatThrownBy(() -> storeService.updateStore(1L,
+                    new UpdateStoreRequest(null, null, null, null, "SUSPENDED"), USER_B, true))
+                    .isInstanceOf(BadRequestException.class);
+        }
     }
 
     // ── GET /api/stores/{idOrSlug} & by supplier ──────────────────────────────────
@@ -285,9 +313,9 @@ class StoreServiceImplTest {
         @DisplayName("getStoreByIdOrSlug tìm thấy theo numeric ID")
         void getStoreByIdOrSlug_foundById() {
             storeOfSupplierA.setStatus(StoreStatus.ACTIVE);
-            when(storeRepository.findByIdAndStatus(1L, StoreStatus.ACTIVE)).thenReturn(Optional.of(storeOfSupplierA));
+            when(storeRepository.findById(1L)).thenReturn(Optional.of(storeOfSupplierA));
 
-            StoreResponse resp = storeService.getStoreByIdOrSlug("1");
+            StoreResponse resp = storeService.getStoreByIdOrSlug("1", null);
 
             assertThat(resp.storeId()).isEqualTo(1L);
             assertThat(resp.name()).isEqualTo("Store A");
@@ -297,12 +325,25 @@ class StoreServiceImplTest {
         @DisplayName("getStoreByIdOrSlug tìm thấy theo slug chuỗi")
         void getStoreByIdOrSlug_foundBySlug() {
             storeOfSupplierA.setStatus(StoreStatus.ACTIVE);
-            when(storeRepository.findBySlugAndStatus("store-a", StoreStatus.ACTIVE)).thenReturn(Optional.of(storeOfSupplierA));
+            when(storeRepository.findBySlug("store-a")).thenReturn(Optional.of(storeOfSupplierA));
 
-            StoreResponse resp = storeService.getStoreByIdOrSlug("store-a");
+            StoreResponse resp = storeService.getStoreByIdOrSlug("store-a", null);
 
             assertThat(resp.slug()).isEqualTo("store-a");
             assertThat(resp.name()).isEqualTo("Store A");
+        }
+
+        @Test
+        void ownerCanViewDraftButAnonymousAndOtherSupplierCannot() {
+            when(storeRepository.findById(1L)).thenReturn(Optional.of(storeOfSupplierA));
+            when(identityClient.getSupplierSummaryByUserId(USER_A)).thenReturn(supplierA);
+            when(identityClient.getSupplierSummaryByUserId(USER_B)).thenReturn(supplierB);
+
+            assertThat(storeService.getStoreByIdOrSlug("1", USER_A).status()).isEqualTo("DRAFT");
+            assertThatThrownBy(() -> storeService.getStoreByIdOrSlug("1", null))
+                    .isInstanceOf(ResourceNotFoundException.class);
+            assertThatThrownBy(() -> storeService.getStoreByIdOrSlug("1", USER_B))
+                    .isInstanceOf(ResourceNotFoundException.class);
         }
 
         @Test

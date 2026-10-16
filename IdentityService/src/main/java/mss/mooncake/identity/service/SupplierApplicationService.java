@@ -7,6 +7,8 @@ import mss.mooncake.identity.dto.response.SupplierProfileResponse;
 import mss.mooncake.identity.dto.response.SupplierSummaryResponse;
 import mss.mooncake.identity.dto.response.SupplierVerificationAuditResponse;
 import mss.mooncake.identity.enums.SupplierVerificationStatus;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 public interface SupplierApplicationService {
     SupplierProfileResponse registerSupplier(Long userId, SupplierProfileRequest request);
@@ -14,7 +16,7 @@ public interface SupplierApplicationService {
     SupplierProfileResponse updateSupplierProfile(Long userId, UpdateSupplierProfileRequest request);
     SupplierSummaryResponse getSupplierSummary(Long supplierId);
     SupplierSummaryResponse getSupplierSummaryByUserId(Long userId);
-    List<SupplierProfileResponse> getSupplierProfilesByStatus(SupplierVerificationStatus status);
+    Page<SupplierProfileResponse> getSupplierProfilesByStatus(SupplierVerificationStatus status, Pageable pageable);
     SupplierProfileResponse reviewSupplier(Long supplierId, SupplierVerificationStatus newStatus, Long actorUserId, String reason);
     List<SupplierVerificationAuditResponse> getVerificationHistory(Long supplierId);
 }

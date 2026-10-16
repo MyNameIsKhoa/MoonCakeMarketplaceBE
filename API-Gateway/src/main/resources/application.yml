@@ -11,7 +11,7 @@ spring:
             - id: identity-service
               uri: ${IDENTITY_SERVICE_URL:http://localhost:8081}
               predicates:
-                - Path=/api/auth/**,/api/users/**,/api/addresses/**,/api/admin/**
+                - Path=/api/auth/**,/api/users/**,/api/addresses/**,/api/admin/**,/api/suppliers,/api/suppliers/**
             - id: supplier-profile-identity-service
               uri: ${IDENTITY_SERVICE_URL:http://localhost:8081}
               predicates:

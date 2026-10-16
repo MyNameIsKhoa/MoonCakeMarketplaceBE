@@ -91,8 +91,10 @@ Kết quả thành công trả đối tượng dữ liệu trực tiếp. Lỗi 
 | ID12 | `PATCH /api/supplier-profile` | Cập nhật hồ sơ nhà cung cấp | Nhà cung cấp |
 | AD01* | `GET /api/users` | Tra cứu tài khoản phục vụ quản lý | Quản trị |
 | AD02* | `POST /api/users/{userId}/moderation` | Xử lý trạng thái tài khoản theo chính sách | Quản trị |
-| AD03* | `GET /api/suppliers` | Xem danh sách hồ sơ cần xác minh | Quản trị |
-| AD04* | `POST /api/suppliers/{supplierId}/verification` | Xác minh hồ sơ nhà cung cấp | Quản trị |
+| AD03 | `GET /api/suppliers` | Xem danh sách hồ sơ cần xác minh, có phân trang | Quản trị |
+| AD04 | `POST /api/suppliers/{supplierId}/verification` | Duyệt hồ sơ với `decision` và `reason` | Quản trị |
+
+Lịch sử xác minh: `GET /api/suppliers/{supplierId}/verification-history` (quản trị).
 
 Nhà cung cấp không tự thay đổi kết quả xác minh hoặc quyền quản trị.
 

@@ -16,7 +16,7 @@ TODO này bám theo hai tài liệu project.
 - API: `/api/auth/register`, `/api/users/me`, `/api/addresses`, `/api/supplier-profile`, `/api/stores`.
 - Test: validation, ownership address/store, onboarding happy path, contract tests.
 - Phối hợp: publish `UserSummary`, `AddressSummary`, `SupplierSummary`, `StoreSummary` cho TV2/TV3/TV4.
-- Backend hiện lưu reason/audit duyệt supplier ở Identity V2; cần nhóm nghiệp vụ chốt tiêu chí duyệt và cách bootstrap admin ngoài allowlist MVP. Auth dùng HS256, admin ID allowlist và các status flow được mô tả trong `TODO_IMPLEMENTATION.md`.
+- Backend hiện lưu reason/audit duyệt supplier ở Identity V3; cần nhóm nghiệp vụ chốt tiêu chí duyệt và cách bootstrap admin ngoài allowlist MVP. Auth dùng HS256, admin ID allowlist và các status flow được mô tả trong `TODO_IMPLEMENTATION.md`.
 
 ## TV2 — Catalog, Product, Promotion
 

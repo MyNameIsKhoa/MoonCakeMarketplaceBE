@@ -34,7 +34,7 @@
 
 ### Việc hạ tầng chung trước khi tách branch feature
 
-- [ ] Auth MVP dùng Identity-issued HS256 JWT: Gateway và bốn service kiểm tra chữ ký/issuer/audience/expiration; API nghiệp vụ yêu cầu Bearer token. `ADMIN_USER_IDS` cấp `ROLE_ADMIN` cho các user ID được cấu hình trước; admin review supplier qua Identity. Internal API xác thực `X-Service-Name` + secret riêng theo từng cặp service; sáu biến `*_TO_*_TOKEN` được cấu hình bắt buộc (tối thiểu 32 ký tự), không chia sẻ secret. `JWT_SECRET` tách riêng. Cần demo token hợp lệ/không hợp lệ/hết hạn, admin allowlist và internal token trước khi đánh dấu hoàn thành.
+- [ ] Auth MVP dùng Identity-issued HS256 JWT: Gateway và bốn service kiểm tra chữ ký/issuer/audience/expiration; API nghiệp vụ yêu cầu Bearer token. `ADMIN_USER_IDS` chỉ cấp `ROLE_ADMIN` cho user ID đã tồn tại trước khi Identity khởi động; ID không tồn tại làm service fail-fast. Admin review supplier qua Identity. Internal API xác thực `X-Service-Name` + secret riêng theo từng cặp service; sáu biến `*_TO_*_TOKEN` được cấu hình bắt buộc (tối thiểu 32 ký tự), không chia sẻ secret. `JWT_SECRET` tách riêng. Cần demo token hợp lệ/không hợp lệ/hết hạn, admin allowlist và internal token trước khi đánh dấu hoàn thành.
 - [X] Gateway route và CORS đã cấu hình phía backend: `CORS_ALLOWED_ORIGINS` (mặc định `http://localhost:5173`); `/api/supplier-profile/**` đi riêng về Identity. Chưa có FE trong repo nên chưa cấu hình Vite proxy; `/internal/**` không được expose qua Gateway.
 - [ ] Người giữ môi trường tạo 4 database trước Flyway, health/readiness cho DB và service, volume lưu SQL Server, mật khẩu local qua env. Compose hiện chỉ chạy container, chưa tự tạo named database.
 - [ ] Bật health/metrics/log có request ID cho cả 5 app; chốt timeout Feign và cách báo lỗi upstream. Cloudflare chỉ kiểm tra public endpoint, không thay thế log/metrics nội bộ.
@@ -94,7 +94,7 @@
 | `GET/PATCH /api/users/me` | Đề xuất | User/profile của principal, không đọc user tùy ý. |
 | `GET/POST /api/addresses`, `PATCH/DELETE /api/addresses/{id}` | Đề xuất | Chỉ địa chỉ thuộc customer của principal; field theo `ADDRESS`, không dùng tên DTO lệch DB một cách ngầm định. |
 | `GET/POST/PATCH /api/supplier-profile` | Đã implement ở backend | Onboarding/profile của supplier; Gateway route Identity. Profile mới `PENDING`; supplier sửa hồ sơ `REJECTED` gửi lại `PENDING`. |
-| `GET /api/admin/suppliers?status=PENDING`, `PATCH /api/admin/suppliers/{id}/verification` | Đã implement ở backend | Chỉ `ROLE_ADMIN`; yêu cầu reason, audit persistent; transitions `PENDING → VERIFIED/REJECTED`, `VERIFIED → SUSPENDED`, `SUSPENDED → VERIFIED`. |
+| `GET /api/suppliers?verificationStatus=PENDING`, `POST /api/suppliers/{id}/verification` | Đã implement ở backend | Chỉ `ROLE_ADMIN`; body `decision` + `reason`, audit persistent; transitions `PENDING → VERIFIED/REJECTED`, `VERIFIED → SUSPENDED`, `SUSPENDED → VERIFIED`. |
 | `GET/POST /api/stores`, `GET/PATCH /api/stores/{id}` | Đề xuất | Catalog quản lý store; quyền sửa theo supplier owner. |
 | `GET /internal/v1/users/{userId}/summary` | Đã implement | Identity owner; `userId`, nullable `customerId/fullName/phone`, `email`; 404 nếu user không tồn tại; service auth; version trong `/v1`. |
 | `GET /internal/v1/addresses/{id}/summary`, `GET /internal/v1/suppliers/{id}/summary` | Đã implement | Identity owner; field/consumer/auth/not-found đã ghi trong `docs/contracts/README.md`; version `/v1`. |
@@ -105,7 +105,7 @@
 - [ ] FE: form register/profile/address, supplier onboarding, store/theme; tất cả qua Gateway; xử lý loading/validation/401/403.
 - [ ] Test: register trùng email; user A không sửa address B; supplier A không sửa store B; internal summaries đúng contract; migration chạy SQL Server.
 - [ ] Handoff: TV2 nhận store ownership; TV3 nhận user/address/store summary; TV4 nhận supplier/user/store summary.
-- [ ] **CHỐT:** bên nghiệp vụ xác nhận chính sách/tiêu chí duyệt supplier, cách bootstrap và vận hành admin ID ngoài cấu hình MVP, lý do/tài liệu kiểm toán cho quyết định duyệt/từ chối. MVP đã chọn allowlist user ID và transitions nêu trên; đã có lý do và audit trong bảng V2 `supplier_verification_audit`; lịch sử có API admin riêng.
+- [ ] **CHỐT:** bên nghiệp vụ xác nhận chính sách/tiêu chí duyệt supplier, cách bootstrap và vận hành admin ID ngoài cấu hình MVP, lý do/tài liệu kiểm toán cho quyết định duyệt/từ chối. MVP đã chọn allowlist user ID và transitions nêu trên; đã có lý do và audit trong migration V3 `supplier_verification_audit`; lịch sử có API admin riêng. Chốt riêng có cho phép admin chuyển Store `DRAFT → SUSPENDED` hay không; hiện không cho phép.
 
 ## 4. TV2 — Catalog, Product, Promotion
 

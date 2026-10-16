@@ -1,7 +1,5 @@
 package mss.mooncake.catalogstore.dto.response;
 
-import java.time.LocalDateTime;
-
 public record StoreResponse(
     Long storeId,
     Long supplierIdRef,
@@ -11,7 +9,5 @@ public record StoreResponse(
     String logoUrl,
     String bannerUrl,
     String themeKey,
-    String status,
-    LocalDateTime createdAt,
-    LocalDateTime updatedAt
+    String status
 ) { }

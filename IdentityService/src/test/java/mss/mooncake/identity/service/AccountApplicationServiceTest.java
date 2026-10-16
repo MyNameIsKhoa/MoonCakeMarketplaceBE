@@ -61,6 +61,32 @@ class AccountApplicationServiceTest {
     }
 
     @Test
+    void configuredAdminIdMustExistBeforeServiceStarts() {
+        ReflectionTestUtils.setField(accountService, "configuredAdminUserIds", "1");
+        when(userRepository.existsById(1L)).thenReturn(false);
+
+        assertThrows(IllegalStateException.class, () -> ReflectionTestUtils.invokeMethod(accountService, "loadAdminUserIds"));
+    }
+
+    @Test
+    void existingConfiguredAdminReceivesAdminRole() {
+        ReflectionTestUtils.setField(accountService, "configuredAdminUserIds", "1");
+        when(userRepository.existsById(1L)).thenReturn(true);
+        ReflectionTestUtils.invokeMethod(accountService, "loadAdminUserIds");
+
+        UserEntity user = new UserEntity("admin@example.com", "hash", UserStatus.ACTIVE, LocalDateTime.now(), LocalDateTime.now());
+        ReflectionTestUtils.setField(user, "id", 1L);
+        when(userRepository.findByEmail("admin@example.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("password123", "hash")).thenReturn(true);
+        when(customerProfileRepository.findByUserId(1L)).thenReturn(Optional.empty());
+
+        accountService.login(new LoginRequest("admin@example.com", "password123"));
+
+        verify(jwtTokenProvider).generateToken(eq(1L), isNull(), eq("admin@example.com"),
+                argThat(roles -> roles.contains("ROLE_ADMIN")));
+    }
+
+    @Test
     void register_Success() {
         RegisterRequest request = new RegisterRequest("Nguyen Van A", "test@example.com", "password123", "0901234567");
 

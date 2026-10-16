@@ -45,7 +45,7 @@ Các entity hiện mới là skeleton, chưa có đầy đủ mapping/constraint
 
 Frontend chỉ gọi Gateway:
 
-- `/api/auth/**`, `/api/users/**`, `/api/addresses/**`, `/api/supplier-profile/**`, `/api/admin/**` -> Identity :8081.
+- `/api/auth/**`, `/api/users/**`, `/api/addresses/**`, `/api/supplier-profile/**`, `/api/suppliers/**`, `/api/admin/**` -> Identity :8081.
 - `/api/stores/**`, `/api/products/**`, `/api/categories/**`, `/api/promotions/**` -> Catalog & Store :8082.
 - `/api/cart/**`, `/api/checkout/**`, `/api/orders/**`, `/api/payments/**`, `/api/cancellations/**`, `/api/refunds/**`, `/api/shipments/**`, `/api/disputes/**`, `/api/settlements/**`, `/api/reviews/**` -> Commerce :8083.
 - `/api/rfqs/**`, `/api/quotations/**`, `/api/conversations/**`, `/api/messages/**` -> RFQ & Negotiation :8084.
@@ -80,15 +80,40 @@ $env:RFQ_TO_COMMERCE_TOKEN = [Convert]::ToBase64String([Security.Cryptography.Ra
 
 Với Docker Compose, đặt cùng giá trị `JWT_SECRET` trong file `.env` tại repository root (không commit file đó). Khi chạy từng service trực tiếp, đặt biến môi trường trong terminal trước khi chạy Maven Wrapper.
 
-Mỗi cặp gọi service dùng một secret riêng, truyền bằng `X-Service-Name` và `X-Service-Token`. Khai báo sáu biến `CATALOG_TO_IDENTITY_TOKEN`, `COMMERCE_TO_IDENTITY_TOKEN`, `RFQ_TO_IDENTITY_TOKEN`, `COMMERCE_TO_CATALOG_TOKEN`, `RFQ_TO_CATALOG_TOKEN`, `RFQ_TO_COMMERCE_TOKEN`; mỗi secret ngẫu nhiên tối thiểu 32 ký tự và không dùng lại giữa các cặp. Provider chỉ gán authority đúng cho caller đã xác thực. Danh sách admin cấu hình qua `ADMIN_USER_IDS`, là danh sách `user_id` đã được tạo sẵn, phân cách bằng dấu phẩy; Identity chỉ gắn `ROLE_ADMIN` vào token của các ID này. Không có API tự cấp quyền admin.
+Mỗi cặp gọi service dùng một secret riêng, truyền bằng `X-Service-Name` và `X-Service-Token`. Khai báo sáu biến `CATALOG_TO_IDENTITY_TOKEN`, `COMMERCE_TO_IDENTITY_TOKEN`, `RFQ_TO_IDENTITY_TOKEN`, `COMMERCE_TO_CATALOG_TOKEN`, `RFQ_TO_CATALOG_TOKEN`, `RFQ_TO_COMMERCE_TOKEN`; mỗi secret ngẫu nhiên tối thiểu 32 ký tự và không dùng lại giữa các cặp. Provider chỉ gán authority đúng cho caller đã xác thực. `ADMIN_USER_IDS` chỉ được trỏ tới `user_id` của tài khoản đã được người vận hành tạo và kiểm tra trước; Identity sẽ không khởi động nếu ID cấu hình chưa tồn tại. Không đặt trước ID của database trống rồi mở đăng ký công khai, và không có API tự cấp quyền admin.
 
-Supplier onboarding bắt đầu ở `PENDING`. Admin xem hồ sơ bằng `GET /api/admin/suppliers` và duyệt bằng `PATCH /api/admin/suppliers/{supplierId}/verification` với `{"verificationStatus":"VERIFIED","reason":"..."}` hoặc `REJECTED` kèm lý do. Lịch sử lưu ở `supplier_verification_audit` và đọc qua `GET /api/admin/suppliers/{supplierId}/verification-history`. Supplier `VERIFIED` mới được tạo/cập nhật store; admin có thể chỉnh trạng thái store để quản trị. Chuyển trạng thái cho phép `PENDING → VERIFIED/REJECTED`, `VERIFIED → SUSPENDED`, `SUSPENDED → VERIFIED`; supplier sửa hồ sơ bị `REJECTED` sẽ gửi lại về `PENDING`, còn chỉnh sửa hồ sơ `VERIFIED` cũng yêu cầu duyệt lại.
+Supplier onboarding bắt đầu ở `PENDING`. Admin xem hồ sơ bằng `GET /api/suppliers?verificationStatus=PENDING&page=0&size=20` và duyệt bằng `POST /api/suppliers/{supplierId}/verification` với `{"decision":"VERIFIED","reason":"..."}` hoặc `REJECTED` kèm lý do. Lịch sử lưu ở `supplier_verification_audit` và đọc qua `GET /api/suppliers/{supplierId}/verification-history`. Supplier `VERIFIED` mới được tạo/cập nhật store; admin có thể chỉnh trạng thái store để quản trị. Chuyển trạng thái cho phép `PENDING → VERIFIED/REJECTED`, `VERIFIED → SUSPENDED`, `SUSPENDED → VERIFIED`; supplier sửa hồ sơ bị `REJECTED` sẽ gửi lại về `PENDING`, còn chỉnh sửa hồ sơ `VERIFIED` cũng yêu cầu duyệt lại.
 
 ## Database and configuration
 
 Mỗi business service có datasource SQL Server và Flyway location riêng. V1 Flyway migration hiện đã được đồng bộ theo bộ physical SQL Server v1; các migration tiếp theo phải chỉ bổ sung/điều chỉnh sau khi team cập nhật physical source of truth.
 
-Mặc định local: Identity `14331/mss_identity`, Catalog `14332/mss_catalog_store`, Commerce `14333/mss_commerce`, RFQ `14334/mss_rfq_negotiation`. Đổi connection bằng `*_DB_URL`, `*_DB_USERNAME`, `*_DB_PASSWORD`. `ddl-auto` là `none`; migration là nguồn tạo schema.
+Khi chạy service trực tiếp trên máy, `application.yml` mặc định kết nối SQL Server ở `localhost:1433`; đổi bằng `*_DB_URL`, `*_DB_USERNAME`, `*_DB_PASSWORD`. Compose đầy đủ publish bốn SQL container ra host lần lượt ở `14331`–`14334`, còn trong mạng Docker mỗi SQL Server vẫn nghe `1433`. `ddl-auto` là `none`; migration là nguồn tạo schema.
+
+## Demo Docker: Gateway + Identity + JWT
+
+[`compose.auth-demo.yml`](compose.auth-demo.yml) chỉ khởi động SQL Server cho Identity, một bước tạo database `mss_identity`, Identity Service và API Gateway. Demo dùng project/volume riêng, không thay đổi Compose đầy đủ. Dockerfiles hiện có build hai Spring Boot JAR thành image. Chỉ Gateway mở `http://localhost:8080`; Identity nghe `8081` và SQL Server nghe `1433` **bên trong** Docker, không publish hai port đó ra host.
+
+Tạo file `.env` tại root (đã được gitignore) và đặt ít nhất các biến sau; thay mỗi giá trị bằng secret riêng, không commit hoặc gửi secret cho người khác:
+
+```properties
+MSSQL_SA_PASSWORD=<mat-khau-SQL-Server-manh>
+JWT_SECRET=<secret-ngau-nhien-toi-thieu-32-ky-tu>
+CATALOG_TO_IDENTITY_TOKEN=<token-rieng-toi-thieu-32-ky-tu>
+COMMERCE_TO_IDENTITY_TOKEN=<token-rieng-toi-thieu-32-ky-tu>
+RFQ_TO_IDENTITY_TOKEN=<token-rieng-toi-thieu-32-ky-tu>
+```
+
+Mở Docker Desktop rồi chạy từ root backend. Lần chạy đầu cần tải image SQL Server khá lớn; thời gian phụ thuộc tốc độ mạng:
+
+```powershell
+docker compose -f compose.auth-demo.yml config -q
+docker compose -f compose.auth-demo.yml up -d --build
+docker compose -f compose.auth-demo.yml ps
+.\scripts\auth-demo-smoke.ps1
+```
+
+Smoke test đăng ký/đăng nhập qua Gateway, sau đó kiểm tra `GET /api/users/me` với JWT hợp lệ, thiếu JWT và JWT giả. Xem lỗi khởi động bằng `docker compose -f compose.auth-demo.yml logs identity-db identity-db-init identity-service api-gateway`. Dừng bằng `docker compose -f compose.auth-demo.yml down` (không thêm `-v`; volume demo giữ dữ liệu). Nếu port host `8080` đang bị chiếm, dừng app khác trước khi chạy demo. `ADMIN_USER_IDS` được để trống trong demo để không vô tình cấp quyền admin cho tài khoản đăng ký mới.
 
 ## Chạy từng service
 
@@ -117,4 +142,4 @@ Branch: `feature/tv1-account-store`, `feature/tv2-catalog-promo`, `feature/tv3-c
 
 Chi tiết phân công, dependencies, acceptance tests và điểm chưa rõ nằm trong [`TODO.md`](TODO.md). Contract inventory nằm trong [`docs/contracts/README.md`](docs/contracts/README.md).
 
-Quy tắc địa chỉ: địa chỉ đầu tiên tự thành mặc định; mỗi customer có tối đa một mặc định; chọn địa chỉ khác sẽ thay mặc định hiện tại; không thể bỏ mặc định nếu chưa chọn địa chỉ thay thế; xóa mặc định thì địa chỉ có ID nhỏ nhất còn lại được thăng cấp. Store mới bắt đầu DRAFT, mã có dạng STR- + 12 ký tự hex viết hoa; chỉ ACTIVE được hiển thị công khai. Owner đổi DRAFT → ACTIVE/INACTIVE và ACTIVE ↔ INACTIVE; chỉ admin được chuyển vào/ra SUSPENDED.
+Quy tắc địa chỉ: địa chỉ đầu tiên tự thành mặc định; mỗi customer có tối đa một mặc định; chọn địa chỉ khác sẽ thay mặc định hiện tại; không thể bỏ mặc định nếu chưa chọn địa chỉ thay thế; xóa mặc định thì địa chỉ có ID nhỏ nhất còn lại được thăng cấp. Store mới bắt đầu DRAFT, mã có dạng STR- + 12 ký tự hex viết hoa; chỉ ACTIVE được hiển thị công khai, Store chưa công bố chỉ owner xem được khi đăng nhập. Owner đổi DRAFT → ACTIVE/INACTIVE và ACTIVE ↔ INACTIVE; admin được suspend từ ACTIVE/INACTIVE và đưa SUSPENDED về ACTIVE/INACTIVE. Chưa chốt DRAFT → SUSPENDED.

@@ -5,8 +5,11 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import mss.mooncake.catalogstore.enums.ProductStatus;
 
 @Entity
@@ -22,4 +25,15 @@ public class ProductEntity extends BaseCatalogEntity {
     @Column(name = "status", nullable = false, length = 30) private ProductStatus status;
     @Column(name = "created_at", nullable = false) private LocalDateTime createdAt;
     @Column(name = "updated_at", nullable = false) private LocalDateTime updatedAt;
+
+    @PrePersist
+    private void onCreate() {
+        createdAt = LocalDateTime.now(ZoneOffset.UTC);
+        updatedAt = createdAt;
+    }
+
+    @PreUpdate
+    private void onUpdate() {
+        updatedAt = LocalDateTime.now(ZoneOffset.UTC);
+    }
 }

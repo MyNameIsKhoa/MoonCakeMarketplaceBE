@@ -38,6 +38,15 @@ public class AddressController {
         return ResponseEntity.ok(addressService.getCustomerAddresses(principal.getUserId()));
     }
 
+    @GetMapping("/{id}")
+    public ResponseEntity<AddressResponse> getAddress(@AuthenticationPrincipal UserPrincipal principal,
+                                                      @PathVariable("id") Long id) {
+        if (principal == null) {
+            throw new UnauthorizedException("User is not authenticated");
+        }
+        return ResponseEntity.ok(addressService.getCustomerAddress(principal.getUserId(), id));
+    }
+
     @PostMapping
     public ResponseEntity<AddressResponse> createAddress(@AuthenticationPrincipal UserPrincipal principal,
                                                          @Valid @RequestBody AddressRequest request) {

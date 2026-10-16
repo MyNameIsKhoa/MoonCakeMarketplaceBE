@@ -8,6 +8,7 @@ import mss.mooncake.identity.dto.response.AddressSummaryResponse;
 
 public interface AddressApplicationService {
     List<AddressResponse> getCustomerAddresses(Long userId);
+    AddressResponse getCustomerAddress(Long userId, Long addressId);
     AddressResponse createAddress(Long userId, AddressRequest request);
     AddressResponse updateAddress(Long userId, Long addressId, UpdateAddressRequest request);
     void deleteAddress(Long userId, Long addressId);

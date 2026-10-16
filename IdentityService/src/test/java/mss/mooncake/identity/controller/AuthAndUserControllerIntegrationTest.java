@@ -127,9 +127,9 @@ class AuthAndUserControllerIntegrationTest {
 
     @Test
     @Order(6)
-    void getProfile_WithoutToken_Returns401Or403() throws Exception {
+    void getProfile_WithoutToken_Returns401() throws Exception {
         mockMvc.perform(get("/api/users/me"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

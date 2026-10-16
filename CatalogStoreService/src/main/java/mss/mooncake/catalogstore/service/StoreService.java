@@ -40,9 +40,9 @@ public interface StoreService {
     StoreResponse getStoreById(Long storeId);
 
     /**
-     * Lấy chi tiết một store theo storeId (số) hoặc slug (chuỗi) (public).
+     * Lấy chi tiết theo ID/slug; chỉ ACTIVE công khai, store khác chỉ chủ sở hữu xem được.
      */
-    StoreResponse getStoreByIdOrSlug(String identifier);
+    StoreResponse getStoreByIdOrSlug(String identifier, Long userId);
 
     /**
      * Cập nhật branding/giao diện store.
