@@ -56,5 +56,6 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(500, "Lỗi hệ thống: " + ex.getMessage(), LocalDateTime.now()));
     }
 
-    public record ErrorResponse(int status, String message, LocalDateTime timestamp) { }
+    public record ErrorResponse(int status, String message, LocalDateTime timestamp) {
+    }
 }

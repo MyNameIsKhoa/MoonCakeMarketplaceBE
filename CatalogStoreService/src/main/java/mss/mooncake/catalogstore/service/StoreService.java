@@ -12,8 +12,8 @@ public interface StoreService {
      * Tạo store mới. Chỉ user đã là supplier mới được gọi.
      * Xác minh supplier qua IdentityClient; sinh store_code và slug duy nhất.
      *
-     * @param request   payload
-     * @param userId    userId từ JWT principal (không nhận từ body)
+     * @param request payload
+     * @param userId  userId từ JWT principal (không nhận từ body)
      */
     StoreResponse createStore(CreateStoreRequest request, Long userId);
 
@@ -40,7 +40,8 @@ public interface StoreService {
     StoreResponse getStoreById(Long storeId);
 
     /**
-     * Lấy chi tiết theo ID/slug; chỉ ACTIVE công khai, store khác chỉ chủ sở hữu xem được.
+     * Lấy chi tiết theo ID/slug; chỉ ACTIVE công khai, store khác chỉ chủ sở hữu
+     * xem được.
      */
     StoreResponse getStoreByIdOrSlug(String identifier, Long userId);
 
@@ -48,9 +49,9 @@ public interface StoreService {
      * Cập nhật branding/giao diện store.
      * Kiểm tra ownership: store.supplierIdRef phải khớp với supplierId của userId.
      *
-     * @param storeId  store cần cập nhật
-     * @param request  payload patch
-     * @param userId   userId từ JWT principal
+     * @param storeId store cần cập nhật
+     * @param request payload patch
+     * @param userId  userId từ JWT principal
      */
     StoreResponse updateStore(Long storeId, UpdateStoreRequest request, Long userId);
 

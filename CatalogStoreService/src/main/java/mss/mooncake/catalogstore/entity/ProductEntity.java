@@ -36,4 +36,23 @@ public class ProductEntity extends BaseCatalogEntity {
     private void onUpdate() {
         updatedAt = LocalDateTime.now(ZoneOffset.UTC);
     }
+
+    // ─── Getters ────────────────────────────────────────────────────────────────
+    public Long getStoreId() { return storeId; }
+    public Long getCategoryId() { return categoryId; }
+    public String getProductCode() { return productCode; }
+    public String getName() { return name; }
+    public String getDescription() { return description; }
+    public ProductStatus getStatus() { return status; }
+    public LocalDateTime getCreatedAt() { return createdAt; }
+    public LocalDateTime getUpdatedAt() { return updatedAt; }
+
+    // ─── Setters ────────────────────────────────────────────────────────────────
+    // storeId chỉ set khi tạo; không reparent product sang store khác.
+    public void setStoreId(Long storeId) { this.storeId = storeId; }
+    public void setCategoryId(Long categoryId) { this.categoryId = categoryId; }
+    public void setProductCode(String productCode) { this.productCode = productCode; }
+    public void setName(String name) { this.name = name; }
+    public void setDescription(String description) { this.description = description; }
+    public void setStatus(ProductStatus status) { this.status = status; }
 }

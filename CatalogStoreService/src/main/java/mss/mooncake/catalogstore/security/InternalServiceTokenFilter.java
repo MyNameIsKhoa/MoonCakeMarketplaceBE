@@ -21,12 +21,13 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
     private final Map<String, byte[]> expectedTokens;
 
     public InternalServiceTokenFilter(@Value("${security.internal-service-tokens.commerce}") String commerce,
-                                      @Value("${security.internal-service-tokens.rfq}") String rfq) {
+            @Value("${security.internal-service-tokens.rfq}") String rfq) {
         this.expectedTokens = Map.of("commerce", token(commerce), "rfq", token(rfq));
     }
 
     private byte[] token(String value) {
-        if (value == null || value.length() < 32) throw new IllegalArgumentException("Each internal service token must contain at least 32 characters");
+        if (value == null || value.length() < 32)
+            throw new IllegalArgumentException("Each internal service token must contain at least 32 characters");
         return value.getBytes(StandardCharsets.UTF_8);
     }
 
@@ -36,7 +37,8 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
         String caller = request.getHeader("X-Service-Name");
         String suppliedToken = request.getHeader("X-Service-Token");
         byte[] expected = caller == null ? null : expectedTokens.get(caller);
-        if (expected != null && suppliedToken != null && MessageDigest.isEqual(expected, suppliedToken.getBytes(StandardCharsets.UTF_8))) {
+        if (expected != null && suppliedToken != null
+                && MessageDigest.isEqual(expected, suppliedToken.getBytes(StandardCharsets.UTF_8))) {
             var authentication = new UsernamePasswordAuthenticationToken(
                     caller, null, List.of(new SimpleGrantedAuthority("ROLE_INTERNAL_" + caller.toUpperCase())));
             SecurityContextHolder.getContext().setAuthentication(authentication);

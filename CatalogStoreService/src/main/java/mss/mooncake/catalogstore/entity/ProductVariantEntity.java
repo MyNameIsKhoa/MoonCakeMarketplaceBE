@@ -21,4 +21,23 @@ public class ProductVariantEntity extends BaseCatalogEntity {
     @Column(name = "stock_quantity", nullable = false) private Integer stockQuantity;
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 30) private ProductStatus status;
+
+    // ─── Getters ────────────────────────────────────────────────────────────────
+    public Long getProductId() { return productId; }
+    public String getSku() { return sku; }
+    public String getVariantName() { return variantName; }
+    public String getImageUrl() { return imageUrl; }
+    public BigDecimal getBasePrice() { return basePrice; }
+    public Integer getStockQuantity() { return stockQuantity; }
+    public ProductStatus getStatus() { return status; }
+
+    // ─── Setters ────────────────────────────────────────────────────────────────
+    // productId chỉ set khi tạo; không reparent variant sang product khác.
+    public void setProductId(Long productId) { this.productId = productId; }
+    public void setSku(String sku) { this.sku = sku; }
+    public void setVariantName(String variantName) { this.variantName = variantName; }
+    public void setImageUrl(String imageUrl) { this.imageUrl = imageUrl; }
+    public void setBasePrice(BigDecimal basePrice) { this.basePrice = basePrice; }
+    public void setStockQuantity(Integer stockQuantity) { this.stockQuantity = stockQuantity; }
+    public void setStatus(ProductStatus status) { this.status = status; }
 }

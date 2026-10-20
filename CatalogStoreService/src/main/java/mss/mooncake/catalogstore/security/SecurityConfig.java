@@ -20,7 +20,7 @@ public class SecurityConfig {
     private final InternalServiceTokenFilter internalServiceTokenFilter;
 
     public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
-                          InternalServiceTokenFilter internalServiceTokenFilter) {
+            InternalServiceTokenFilter internalServiceTokenFilter) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
         this.internalServiceTokenFilter = internalServiceTokenFilter;
     }
@@ -34,19 +34,28 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // Public read: GET /api/stores và GET /api/stores/{id}
                         .requestMatchers(HttpMethod.GET, "/api/stores", "/api/stores/**").permitAll()
+                        // Public read catalog (CA01, CA02, CA06, CA07, CA11, CA12, CA16, CA17).
+                        // Service vẫn lọc DRAFT/INACTIVE: chỉ owner đăng nhập mới thấy.
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/categories", "/api/categories/**",
+                                "/api/products", "/api/products/**",
+                                "/api/promotions", "/api/promotions/**")
+                        .permitAll()
+                        // Category dùng chung toàn sàn: chỉ admin được ghi (CA03–CA05)
+                        .requestMatchers("/api/categories", "/api/categories/**").hasAuthority("ROLE_ADMIN")
                         // Swagger
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .requestMatchers("/internal/**").hasAnyAuthority("ROLE_INTERNAL_COMMERCE", "ROLE_INTERNAL_RFQ")
                         // Mọi request còn lại cần JWT
-                        .anyRequest().hasAnyAuthority("ROLE_CUSTOMER", "ROLE_SUPPLIER", "ROLE_ADMIN")
-                )
+                        .anyRequest().hasAnyAuthority("ROLE_CUSTOMER", "ROLE_SUPPLIER", "ROLE_ADMIN"))
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterAfter(internalServiceTokenFilter, JwtAuthenticationFilter.class)
                 .build();
     }
 
     @Bean
-    FilterRegistrationBean<JwtAuthenticationFilter> disableContainerJwtFilterRegistration(JwtAuthenticationFilter filter) {
+    FilterRegistrationBean<JwtAuthenticationFilter> disableContainerJwtFilterRegistration(
+            JwtAuthenticationFilter filter) {
         FilterRegistrationBean<JwtAuthenticationFilter> registration = new FilterRegistrationBean<>(filter);
         registration.setEnabled(false);
         return registration;

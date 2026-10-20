@@ -19,7 +19,7 @@ public class ProductController {
 
     @GetMapping("/{productId}/variants/{variantId}/snapshot")
     public ResponseEntity<ProductSnapshotResponse> getSnapshot(@PathVariable Long productId,
-                                                                @PathVariable Long variantId) {
+            @PathVariable Long variantId) {
         return ResponseEntity.ok(catalogApplicationService.getProductSnapshot(productId, variantId));
     }
 }
