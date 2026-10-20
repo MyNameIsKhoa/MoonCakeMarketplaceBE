@@ -19,4 +19,19 @@ public class PromotionEntity extends BaseCatalogEntity {
     @Column(name = "end_at", nullable = false) private LocalDateTime endAt;
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 30) private PromotionStatus status;
+
+    // ─── Getters ────────────────────────────────────────────────────────────────
+    public Long getStoreId() { return storeId; }
+    public String getName() { return name; }
+    public LocalDateTime getStartAt() { return startAt; }
+    public LocalDateTime getEndAt() { return endAt; }
+    public PromotionStatus getStatus() { return status; }
+
+    // ─── Setters ────────────────────────────────────────────────────────────────
+    // storeId chỉ set khi tạo; không chuyển promotion sang store khác.
+    public void setStoreId(Long storeId) { this.storeId = storeId; }
+    public void setName(String name) { this.name = name; }
+    public void setStartAt(LocalDateTime startAt) { this.startAt = startAt; }
+    public void setEndAt(LocalDateTime endAt) { this.endAt = endAt; }
+    public void setStatus(PromotionStatus status) { this.status = status; }
 }

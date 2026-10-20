@@ -20,7 +20,8 @@ public interface IdentityClient {
 
     /**
      * Lấy SupplierSummary theo userId của người đang login.
-     * Dùng khi POST /api/stores: supplier tạo store phải có hồ sơ supplier ứng với userId.
+     * Dùng khi POST /api/stores: supplier tạo store phải có hồ sơ supplier ứng với
+     * userId.
      */
     @GetMapping("/internal/v1/suppliers/by-user/{userId}/summary")
     SupplierSummaryDto getSupplierSummaryByUserId(@PathVariable("userId") Long userId);

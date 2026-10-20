@@ -9,6 +9,9 @@ import org.springframework.context.annotation.Configuration;
 public class FeignConfig {
     @Bean
     RequestInterceptor internalServiceAuthentication(@Value("${security.outgoing-identity-token}") String token) {
-        return template -> { template.header("X-Service-Name", "catalog"); template.header("X-Service-Token", token); };
+        return template -> {
+            template.header("X-Service-Name", "catalog");
+            template.header("X-Service-Token", token);
+        };
     }
 }

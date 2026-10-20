@@ -22,10 +22,11 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * Public API cho Store.
  *
- * GET  /api/stores          — public storefront listing (có thể filter by ?mine=true để lấy store của supplier)
- * GET  /api/stores/{id}     — public chi tiết store
- * POST /api/stores          — tạo store (yêu cầu JWT + supplier)
- * PATCH /api/stores/{id}    — cập nhật branding (yêu cầu JWT + owner)
+ * GET /api/stores — public storefront listing (có thể filter by ?mine=true để
+ * lấy store của supplier)
+ * GET /api/stores/{id} — public chi tiết store
+ * POST /api/stores — tạo store (yêu cầu JWT + supplier)
+ * PATCH /api/stores/{id} — cập nhật branding (yêu cầu JWT + owner)
  */
 @RestController
 @RequestMapping("/api/stores")
@@ -61,17 +62,19 @@ public class StoreController {
     }
 
     /**
-     * GET /api/stores/{id} — ACTIVE công khai; owner đăng nhập xem được store chưa công bố.
+     * GET /api/stores/{id} — ACTIVE công khai; owner đăng nhập xem được store chưa
+     * công bố.
      */
     @GetMapping("/{id}")
     public ResponseEntity<StoreResponse> getStoreByIdOrSlug(@PathVariable("id") String id,
-                                                            @AuthenticationPrincipal UserPrincipal principal) {
+            @AuthenticationPrincipal UserPrincipal principal) {
         return ResponseEntity.ok(storeService.getStoreByIdOrSlug(id, principal == null ? null : principal.getUserId()));
     }
 
     /**
      * POST /api/stores — tạo store, chỉ supplier.
-     * userId lấy từ JWT principal, không nhận từ body (tuân thủ mục 1 TODO_IMPLEMENTATION).
+     * userId lấy từ JWT principal, không nhận từ body (tuân thủ mục 1
+     * TODO_IMPLEMENTATION).
      */
     @PostMapping
     public ResponseEntity<StoreResponse> createStore(
@@ -83,7 +86,8 @@ public class StoreController {
 
     /**
      * PATCH /api/stores/{id} — cập nhật branding, chỉ owner.
-     * Ownership check trong service: store.supplierIdRef === supplier(userId).supplierId.
+     * Ownership check trong service: store.supplierIdRef ===
+     * supplier(userId).supplierId.
      */
     @PatchMapping("/{id}")
     public ResponseEntity<StoreResponse> updateStore(

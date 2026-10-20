@@ -35,9 +35,13 @@ public class StoreServiceImpl implements StoreService {
         this.identityClient = identityClient;
     }
 
-    // ─── Helpers ──────────────────────────────────────────────────────────────────
+    // ─── Helpers
+    // ──────────────────────────────────────────────────────────────────
 
-    /** Chuyển tên store thành slug: lowercase, thay khoảng trắng thành '-', bỏ ký tự đặc biệt. */
+    /**
+     * Chuyển tên store thành slug: lowercase, thay khoảng trắng thành '-', bỏ ký tự
+     * đặc biệt.
+     */
     private String generateSlug(String name) {
         String normalized = Normalizer.normalize(name, Normalizer.Form.NFD);
         String ascii = Pattern.compile("\\p{InCombiningDiacriticalMarks}+").matcher(normalized).replaceAll("");
@@ -61,12 +65,16 @@ public class StoreServiceImpl implements StoreService {
     private String generateUniqueStoreCode() {
         for (int attempt = 0; attempt < 5; attempt++) {
             String code = "STR-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase();
-            if (!storeRepository.existsByStoreCode(code)) return code;
+            if (!storeRepository.existsByStoreCode(code))
+                return code;
         }
         throw new ConflictException("Could not generate a unique store code; retry the request");
     }
 
-    /** Lấy SupplierSummary của userId; ném BadRequestException nếu chưa có hồ sơ supplier. */
+    /**
+     * Lấy SupplierSummary của userId; ném BadRequestException nếu chưa có hồ sơ
+     * supplier.
+     */
     private SupplierSummaryDto requireSupplier(Long userId) {
         try {
             return identityClient.getSupplierSummaryByUserId(userId);
@@ -83,8 +91,9 @@ public class StoreServiceImpl implements StoreService {
         SupplierSummaryDto supplier = requireSupplier(userId);
         String status = supplier.verificationStatus();
         if (status == null || !"VERIFIED".equalsIgnoreCase(status)) {
-            throw new BadRequestException("Hồ sơ nhà cung cấp chưa được xác minh hoặc kích hoạt (trạng thái: " + status + "). " +
-                    "Vui lòng chờ phê duyệt trước khi thao tác cửa hàng.");
+            throw new BadRequestException(
+                    "Hồ sơ nhà cung cấp chưa được xác minh hoặc kích hoạt (trạng thái: " + status + "). " +
+                            "Vui lòng chờ phê duyệt trước khi thao tác cửa hàng.");
         }
         return supplier;
     }
@@ -100,16 +109,17 @@ public class StoreServiceImpl implements StoreService {
                 e.getLogoUrl(),
                 e.getBannerUrl(),
                 e.getThemeKey(),
-                e.getStatus().name()
-        );
+                e.getStatus().name());
     }
 
-    // ─── Public API ───────────────────────────────────────────────────────────────
+    // ─── Public API
+    // ───────────────────────────────────────────────────────────────
 
     @Override
     @Transactional
     public StoreResponse createStore(CreateStoreRequest request, Long userId) {
-        // 1. Xác minh supplier qua Identity và phải ACTIVE/VERIFIED — Feign call TRƯỚC khi ghi DB
+        // 1. Xác minh supplier qua Identity và phải ACTIVE/VERIFIED — Feign call TRƯỚC
+        // khi ghi DB
         SupplierSummaryDto supplier = requireActiveSupplier(userId);
 
         // 2. Sinh store_code và slug duy nhất
@@ -125,7 +135,7 @@ public class StoreServiceImpl implements StoreService {
         store.setLogoUrl(request.logoUrl());
         store.setBannerUrl(request.bannerUrl());
         store.setThemeKey(request.themeKey());
-        store.setStatus(StoreStatus.DRAFT);  // Trạng thái ban đầu là DRAFT
+        store.setStatus(StoreStatus.DRAFT); // Trạng thái ban đầu là DRAFT
 
         store = storeRepository.save(store);
         return toResponse(store);
@@ -181,7 +191,8 @@ public class StoreServiceImpl implements StoreService {
         }
         if (store == null) {
             store = storeRepository.findBySlug(trimmed)
-                    .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy store với id hoặc slug: " + trimmed));
+                    .orElseThrow(
+                            () -> new ResourceNotFoundException("Không tìm thấy store với id hoặc slug: " + trimmed));
         }
         if (store.getStatus() != StoreStatus.ACTIVE) {
             if (userId == null) {
@@ -215,7 +226,8 @@ public class StoreServiceImpl implements StoreService {
         // 2. Xác minh supplier của user hiện tại (phải ACTIVE/VERIFIED)
         SupplierSummaryDto supplier = admin ? null : requireActiveSupplier(userId);
 
-        // 3. Kiểm tra ownership: store.supplierIdRef phải = supplier.supplierId của user đang login
+        // 3. Kiểm tra ownership: store.supplierIdRef phải = supplier.supplierId của
+        // user đang login
         if (!admin && !store.getSupplierIdRef().equals(supplier.supplierId())) {
             throw new ForbiddenException("Bạn không có quyền chỉnh sửa store này.");
         }
@@ -248,23 +260,27 @@ public class StoreServiceImpl implements StoreService {
     }
 
     private void validateStatusTransition(StoreStatus current, StoreStatus next, boolean admin) {
-        if (current == next) return;
+        if (current == next)
+            return;
         if (!admin && (current == StoreStatus.SUSPENDED || next == StoreStatus.SUSPENDED)) {
             throw new ForbiddenException("Only an administrator can suspend or reinstate a store");
         }
         if (admin && next == StoreStatus.SUSPENDED
-                && (current == StoreStatus.ACTIVE || current == StoreStatus.INACTIVE)) return;
+                && (current == StoreStatus.ACTIVE || current == StoreStatus.INACTIVE))
+            return;
         boolean allowed = switch (current) {
             case DRAFT -> next == StoreStatus.ACTIVE || next == StoreStatus.INACTIVE;
             case ACTIVE -> next == StoreStatus.INACTIVE;
             case INACTIVE -> next == StoreStatus.ACTIVE;
             case SUSPENDED -> admin && (next == StoreStatus.ACTIVE || next == StoreStatus.INACTIVE);
         };
-        if (!allowed) throw new BadRequestException(
-                "Cannot change store status from " + current + " to " + next);
+        if (!allowed)
+            throw new BadRequestException(
+                    "Cannot change store status from " + current + " to " + next);
     }
 
-    // ─── Internal contract ────────────────────────────────────────────────────────
+    // ─── Internal contract
+    // ────────────────────────────────────────────────────────
 
     @Override
     public StoreSummaryResponse getStoreSummary(Long storeId) {
@@ -277,7 +293,6 @@ public class StoreServiceImpl implements StoreService {
                 store.getName(),
                 store.getSlug(),
                 store.getLogoUrl(),
-                store.getStatus().name()
-        );
+                store.getStatus().name());
     }
 }
