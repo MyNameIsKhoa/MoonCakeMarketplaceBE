@@ -1,5 +1,7 @@
 package mss.mooncake.identity.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDateTime;
 import java.util.List;
 import mss.mooncake.identity.dto.response.SupplierProfileResponse;
@@ -17,6 +19,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -29,7 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @ActiveProfiles("test")
-class AdminSupplierControllerTest {
+class AdminSupplierVerificationControllerTest {
 
     @Autowired WebApplicationContext context;
     @MockitoBean SupplierApplicationService supplierService;
@@ -42,6 +46,19 @@ class AdminSupplierControllerTest {
 
     private UserPrincipal principal(String role) {
         return UserPrincipal.create(1L, 1L, "admin@example.com", List.of(role));
+    }
+
+    @Test
+    void openApiNamesAdminGroupAndHidesInternalContracts() throws Exception {
+        String json = mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        JsonNode paths = new ObjectMapper().readTree(json).path("paths");
+        assertEquals("Admin - Supplier Verification", paths.path("/api/suppliers")
+                .path("get").path("tags").path(0).asText());
+        assertFalse(paths.has("/internal/v1/addresses/{id}/summary"));
+        assertFalse(paths.has("/internal/v1/suppliers/{id}/summary"));
+        assertFalse(paths.has("/internal/v1/users/{userId}/summary"));
     }
 
     @Test

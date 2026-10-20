@@ -1,12 +1,12 @@
 # ĐẶC TẢ API — MSS MOONCAKE MARKETPLACE
 
-**Phiên bản tài liệu:** 1.0  
-**Ngày cập nhật:** 13/10/2026  
+**Phiên bản tài liệu:** 1.1
+**Ngày cập nhật:** 20/10/2026
 **Mục đích:** Trình bày thiết kế API để kiểm tra chức năng, phân quyền và giao tiếp giữa các dịch vụ.
 
 ## 1. Phạm vi
 
-Hệ thống gồm 4 dịch vụ nghiệp vụ và 1 API Gateway. Tài liệu mô tả API thiết kế; không xác nhận toàn bộ API đã được triển khai. Các mục có dấu `*` cần thống nhất chính sách hoặc phương thức tích hợp trước khi thực hiện.
+Hệ thống gồm 4 dịch vụ nghiệp vụ và 1 API Gateway. Đây là **danh mục API mục tiêu**, không phải danh sách toàn bộ endpoint hiện chạy. Dấu `*` nghĩa là còn chính sách/phương thức tích hợp cần chốt; **không có dấu `*` cũng không đồng nghĩa đã triển khai**. Đối chiếu trạng thái mã nguồn hiện tại ở mục 1.1 trước khi dùng tài liệu để tích hợp frontend.
 
 | Thành phần | Cổng | Phạm vi | Phụ trách |
 |---|---:|---|---|
@@ -18,6 +18,17 @@ Hệ thống gồm 4 dịch vụ nghiệp vụ và 1 API Gateway. Tài liệu m�
 
 Mỗi dịch vụ sở hữu cơ sở dữ liệu riêng. Giao tiếp đồng bộ giữa dịch vụ sử dụng REST/OpenFeign. Các chức năng trong cùng Commerce Service gọi lớp service nội bộ.
 
+### 1.1. Trạng thái triển khai đối chiếu mã nguồn
+
+| Dịch vụ | Public API có controller hiện tại | API còn ở mức thiết kế hoặc skeleton |
+|---|---|---|
+| Identity | ID01–ID12, AD03–AD04 và lịch sử xác minh supplier | AD01–AD02, AU01–AU05 |
+| Catalog & Store | ST01–ST04 | Danh mục, sản phẩm bán lẻ, biến thể, khuyến mãi và các thao tác kiểm duyệt/xóa trong mục 4 |
+| Commerce | Chưa có public controller cho các mục 5.1–5.5 | Toàn bộ public API Commerce trong mục 5 |
+| RFQ & Negotiation | Có skeleton `POST /api/quotations/{quotationId}/accept`; chưa đủ contract và kiểm tra quyền như RQ15 thiết kế | Các API RFQ, báo giá còn lại và hội thoại/WebSocket trong mục 6 |
+
+“Có controller” chỉ xác nhận route đã khai báo, **không xác nhận nghiệp vụ đã hoàn chỉnh hoặc sẵn sàng production**. Các API nội bộ đã có controller gồm IN01–IN06, IN09 và IN11; IN07, IN08, IN10 chưa có. Gateway hiện chưa định tuyến `/api/seller-orders/**`, nên các endpoint đó cũng chưa thể gọi qua Gateway nếu chỉ thêm controller Commerce. Trạng thái này là ảnh chụp mã nguồn ngày cập nhật; khi triển khai thêm phải cập nhật tài liệu cùng contract và test.
+
 ## 2. Quy ước API
 
 - Địa chỉ phát triển: `http://localhost:8080`. Khi triển khai sử dụng HTTPS.
@@ -25,10 +36,10 @@ Mỗi dịch vụ sở hữu cơ sở dữ liệu riêng. Giao tiếp đồng b�
 - API có yêu cầu đăng nhập sử dụng `Authorization: Bearer <accessToken>`. API nội bộ và callback của đối tác sử dụng cơ chế xác thực riêng phù hợp.
 - Tên tài nguyên dùng danh từ số nhiều; trường dữ liệu dùng `camelCase`. Giữ các đường dẫn đơn thể hiện có: `/api/cart`, `/api/supplier-profile`.
 - `GET`: đọc; `POST`: tạo hoặc thực hiện nghiệp vụ; `PUT`: thay thế toàn bộ; `PATCH`: cập nhật một phần; `DELETE`: xóa theo chính sách dữ liệu.
-- Request thông thường dùng `application/json`. PATCH thiết kế dùng `application/merge-patch+json`: trường vắng giữ nguyên; `null` chỉ xóa giá trị của trường cho phép rỗng.
-- Contract thiết kế biểu diễn ID và số tiền bằng chuỗi; số lượng, phiên bản và phân trang bằng số nguyên. Ví dụ: `"orderId":"123"`, `"amount":"250000.00"`.
-- Ngày dùng `YYYY-MM-DD`; thời điểm dùng ISO-8601 UTC, ví dụ `2026-10-13T08:30:00Z`.
-- Danh sách lớn sử dụng `page`, `size`, `sort`; `page` bắt đầu từ 0, `size` mặc định 20 và tối đa 100. Kết quả gồm `items`, `page`, `size`, `totalElements`, `totalPages`.
+- Request hiện có dùng `application/json`. `application/merge-patch+json` là quy ước **đề xuất**, chưa được áp dụng đồng bộ cho các PATCH đã viết; không gửi kiểu này cho endpoint hiện hữu khi chưa kiểm tra OpenAPI của service.
+- ID dạng chuỗi và tiền dạng chuỗi là **contract mục tiêu**; DTO hiện tại của Identity/Catalog còn dùng ID số (`Long`). Frontend phải theo response thực tế cho tới khi có thay đổi contract được version hóa/phối hợp.
+- Ngày mục tiêu dùng `YYYY-MM-DD`, thời điểm dùng ISO-8601 UTC. Một số DTO hiện dùng `LocalDateTime`; không mặc định coi response đó đã mang ký hiệu múi giờ `Z`.
+- Danh sách lớn **thiết kế** dùng `page`, `size`, `sort`, trả `items`, `page`, `size`, `totalElements`, `totalPages`; response hiện tại chưa thống nhất: ví dụ danh sách địa chỉ/cửa hàng trả mảng, còn danh sách supplier chờ xác minh trả Spring `Page`.
 - Client gửi `Idempotency-Key` cho checkout, chấp nhận báo giá và các lệnh có nguy cơ tạo giao dịch trùng. Cùng khóa và dữ liệu phải trả cùng kết quả nghiệp vụ.
 
 Các quy ước định dạng mới cần được cập nhật đồng thời ở backend, frontend và các dịch vụ sử dụng API trước khi áp dụng vào endpoint hiện có.
@@ -64,7 +75,7 @@ Server xác định người thực hiện từ thông tin xác thực và kiể
 | 429 | Vượt giới hạn yêu cầu. |
 | 500 / 502 / 503 / 504 | Lỗi xử lý, lỗi phản hồi dịch vụ liên quan, dịch vụ không sẵn sàng hoặc hết thời gian chờ. |
 
-Kết quả thành công trả đối tượng dữ liệu trực tiếp. Lỗi thiết kế dùng `application/problem+json`, gồm `type`, `title`, `status`, `detail`, `instance`, `code`, `traceId`; lỗi nhập liệu bổ sung `errors` theo trường. Callback phản hồi theo hợp đồng của đối tác.
+Kết quả thành công hiện trả dữ liệu trực tiếp. `application/problem+json` với `type`, `title`, `status`, `detail`, `instance`, `code`, `traceId` là **mục tiêu**, chưa phải lỗi trả về thống nhất của hệ thống. Identity hiện trả `ErrorResponse` JSON gồm `timestamp`, `status`, `error`, `message`, `path`, `validationErrors` (khi có); callback tương lai phải theo hợp đồng của đối tác.
 
 ## 3. Identity Service
 
@@ -91,10 +102,10 @@ Kết quả thành công trả đối tượng dữ liệu trực tiếp. Lỗi 
 | ID12 | `PATCH /api/supplier-profile` | Cập nhật hồ sơ nhà cung cấp | Nhà cung cấp |
 | AD01* | `GET /api/users` | Tra cứu tài khoản phục vụ quản lý | Quản trị |
 | AD02* | `POST /api/users/{userId}/moderation` | Xử lý trạng thái tài khoản theo chính sách | Quản trị |
-| AD03 | `GET /api/suppliers` | Xem danh sách hồ sơ cần xác minh, có phân trang | Quản trị |
-| AD04 | `POST /api/suppliers/{supplierId}/verification` | Duyệt hồ sơ với `decision` và `reason` | Quản trị |
+| AD03 | `GET /api/suppliers` | Lọc hồ sơ theo `verificationStatus` (mặc định `PENDING`), có phân trang | Quản trị |
+| AD04 | `POST /api/suppliers/{supplierId}/verification` | Ra quyết định xác minh với `decision` và `reason` bắt buộc | Quản trị |
 
-Lịch sử xác minh: `GET /api/suppliers/{supplierId}/verification-history` (quản trị).
+Lịch sử xác minh: `GET /api/suppliers/{supplierId}/verification-history` (quản trị). Ba endpoint này thuộc `AdminSupplierVerificationController` trong Identity, được nhóm thành **Admin - Supplier Verification** trên Swagger. Đường dẫn vẫn là `/api/suppliers`, không có route `/api/admin/suppliers`. `decision` hiện là enum `VERIFIED`, `REJECTED` hoặc `SUSPENDED` tùy trạng thái hiện tại; không phải trường cho admin đặt trạng thái tùy ý. Transition đang được code cho phép: `PENDING → VERIFIED/REJECTED`, `VERIFIED → SUSPENDED`, `SUSPENDED → VERIFIED`; hồ sơ `REJECTED` chỉ quay lại `PENDING` khi supplier sửa/gửi lại hồ sơ. Mọi quyết định của admin được lưu vào lịch sử xác minh.
 
 Nhà cung cấp không tự thay đổi kết quả xác minh hoặc quyền quản trị.
 
@@ -284,7 +295,7 @@ Server kiểm tra quyền khi gửi và đăng ký nhận tin. Tin nhắn đư�
 
 ## 7. API nội bộ giữa các dịch vụ
 
-Các endpoint dưới đây yêu cầu xác thực dịch vụ. Frontend không gọi trực tiếp.
+Các endpoint dưới đây dành cho service-to-service, không được Gateway công khai và frontend không gọi trực tiếp. Identity/Catalog đang xác thực internal request bằng `X-Service-Name` và `X-Service-Token` theo service gọi, không dùng JWT người dùng thay thế service token; quyền mỗi caller được giới hạn theo route. Các controller `InternalAddressController`, `InternalSupplierController`, `InternalUserController` được ẩn khỏi Swagger UI của Identity bằng `@Hidden`, **không phải bị xóa hoặc đổi đường dẫn**. Việc ẩn tài liệu không phải biện pháp bảo mật thay cho xác thực. Những contract nội bộ chưa triển khai vẫn được liệt kê để phối hợp giữa các thành viên.
 
 | Mã | Phương thức và endpoint | Cung cấp → sử dụng | Dữ liệu trao đổi |
 |---|---|---|---|

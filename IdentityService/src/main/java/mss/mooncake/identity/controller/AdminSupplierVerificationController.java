@@ -1,5 +1,6 @@
 package mss.mooncake.identity.controller;
 
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.List;
 import mss.mooncake.identity.dto.request.ReviewSupplierRequest;
@@ -24,10 +25,11 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/suppliers")
-public class AdminSupplierController {
+@Tag(name = "Admin - Supplier Verification")
+public class AdminSupplierVerificationController {
     private final SupplierApplicationService supplierService;
 
-    public AdminSupplierController(SupplierApplicationService supplierService) {
+    public AdminSupplierVerificationController(SupplierApplicationService supplierService) {
         this.supplierService = supplierService;
     }
 

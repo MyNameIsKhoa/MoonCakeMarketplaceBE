@@ -69,13 +69,19 @@ Token hiện có thời hạn 24 giờ và chứa `userId`, `customerId`, `roles
 PowerShell local có thể tạo secret ngẫu nhiên cho phiên hiện tại bằng:
 
 ```powershell
-$env:JWT_SECRET = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
-$env:CATALOG_TO_IDENTITY_TOKEN = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
-$env:COMMERCE_TO_IDENTITY_TOKEN = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
-$env:RFQ_TO_IDENTITY_TOKEN = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
-$env:COMMERCE_TO_CATALOG_TOKEN = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
-$env:RFQ_TO_CATALOG_TOKEN = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
-$env:RFQ_TO_COMMERCE_TOKEN = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+function New-Secret {
+    $bytes = New-Object byte[] 32
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+    [Convert]::ToBase64String($bytes)
+}
+$env:JWT_SECRET = New-Secret
+$env:CATALOG_TO_IDENTITY_TOKEN = New-Secret
+$env:COMMERCE_TO_IDENTITY_TOKEN = New-Secret
+$env:RFQ_TO_IDENTITY_TOKEN = New-Secret
+$env:COMMERCE_TO_CATALOG_TOKEN = New-Secret
+$env:RFQ_TO_CATALOG_TOKEN = New-Secret
+$env:RFQ_TO_COMMERCE_TOKEN = New-Secret
 ```
 
 Với Docker Compose, đặt cùng giá trị `JWT_SECRET` trong file `.env` tại repository root (không commit file đó). Khi chạy từng service trực tiếp, đặt biến môi trường trong terminal trước khi chạy Maven Wrapper.

@@ -34,7 +34,10 @@ if (-not $ready) {
 }
 
 $email = "auth-demo-$([guid]::NewGuid().ToString('N').Substring(0, 12))@example.com"
-$password = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(24))
+$bytes = New-Object byte[] 24
+$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+$password = [Convert]::ToBase64String($bytes)
 $registerBody = @{ fullName = 'Auth Demo'; email = $email; password = $password } | ConvertTo-Json -Compress
 $registered = Invoke-RestMethod -Uri "$base/api/auth/register" -Method Post -ContentType 'application/json' -Body $registerBody
 if ($registered.email -ne $email) { throw 'Registration did not return the expected user.' }
