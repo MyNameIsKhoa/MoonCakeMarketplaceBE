@@ -34,6 +34,9 @@ public interface ProductVariantRepository extends JpaRepository<ProductVariantEn
 
     boolean existsByProductIdAndStatus(Long productId, ProductStatus status);
 
+    /** Còn variant khác (ngoài {@code id}) ở trạng thái {@code status} không — chặn tắt variant ACTIVE cuối cùng. */
+    boolean existsByProductIdAndStatusAndIdNot(Long productId, ProductStatus status, Long id);
+
     /**
      * Đếm số variant trong {@code variantIds} thuộc store {@code storeId}.
      * Dùng khi lưu promotion rule: kết quả khác số ID truyền vào nghĩa là có

@@ -32,6 +32,9 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
                 .authorizeHttpRequests(auth -> auth
+                        // 403 của Spring Security được forward sang /error; JWT filter không chạy lại ở lượt ERROR,
+                        // nếu /error cần auth thì user đã đăng nhập bị trả 401 thay vì 403.
+                        .requestMatchers("/error").permitAll()
                         // Public read: GET /api/stores và GET /api/stores/{id}
                         .requestMatchers(HttpMethod.GET, "/api/stores", "/api/stores/**").permitAll()
                         // Public read catalog (CA01, CA02, CA06, CA07, CA11, CA12, CA16, CA17).

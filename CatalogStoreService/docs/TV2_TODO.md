@@ -42,82 +42,167 @@ TV2 **không sửa** file `Store*` của TV1. Quyền chủ store đi qua `Store
 **Đã xong (2026-10-20):**
 
 - [x] Entity có getter/setter; `CategoryStatus`, `PromotionType` dạng enum
-- [x] Repository query cho 5 bảng; search product bằng `ProductSpecifications`
+- [x] Repository query cho 5 bảng; search product bằng Specification (static method trong `ProductRepository`)
 - [x] `SecurityConfig`: GET catalog public, ghi category chỉ admin
 - [x] `StoreAccessService(Impl)`: kiểm tra chủ store
 - [x] Service interface: `CategoryService`, `ProductService`, `ProductVariantService`, `PromotionService`, `PromotionCalculationService`, `CatalogApplicationService` (thêm IN07)
 - [x] Request/response DTO cho toàn bộ API của TV2
-- [x] Test `ProductSpecificationsTest` (5 test, H2)
+- [x] Test `ProductRepositorySearchTest` (5 test, H2)
 
-**Chưa có:** toàn bộ service impl (trừ `StoreAccessServiceImpl`), controller public CA*, IN07/IN08 controller, migration seed, test service/controller.
+- [x] Category CA01–CA04 + seed V3 (chi tiết ở Bước 2)
+- [x] Product CA06–CA09 (chi tiết ở Bước 3)
+- [x] Variant CA11–CA14 (chi tiết ở Bước 4)
+- [x] Snapshot IN06, IN07 + contract (chi tiết ở Bước 5)
+- [x] Promotion CA16–CA20 (chi tiết ở Bước 6)
+- [x] Promotion engine IN08 (chi tiết ở Bước 7)
+
+**Chưa có:** API trừ tồn kho (chờ TV3), FE, chạy thử với SQL Server + Gateway.
+
+### 3.1. Danh sách API TV2 đã làm (20 endpoint)
+
+Đối chiếu trực tiếp với mapping trong `controller/`. Quyền: **Public** = không cần JWT; **Owner** = JWT + supplier `VERIFIED` sở hữu store (xác minh qua Identity); **Admin** = `ROLE_ADMIN`; **Service** = header `X-Service-Name` + `X-Service-Token`.
+
+**Public API qua Gateway** (17)
+
+| Mã | Method + path | Quyền | Thành công | Controller |
+|---|---|---|---|---|
+| CA01 | `GET /api/categories?parentCategoryId=&page=&size=&sort=` | Public | 200 `PageResponse<CategoryResponse>` | `CategoryController` |
+| CA02 | `GET /api/categories/{categoryId}` | Public | 200 `CategoryResponse` | `CategoryController` |
+| CA03 | `POST /api/categories` | Admin | 201 + `Location` | `CategoryController` |
+| CA04 | `PATCH /api/categories/{categoryId}` | Admin | 200 | `CategoryController` |
+| CA06 | `GET /api/products?q=&storeId=&categoryId=&mine=&page=&size=&sort=` | Public; `mine=true` cần JWT | 200 `PageResponse<ProductSummaryResponse>` | `ProductController` |
+| CA07 | `GET /api/products/{productId}` | Public; owner thấy bản nháp | 200 `ProductResponse` (kèm variants) | `ProductController` |
+| CA08 | `POST /api/products` | Owner | 201 + `Location` | `ProductController` |
+| CA09 | `PATCH /api/products/{productId}` | Owner | 200 | `ProductController` |
+| CA11 | `GET /api/products/{productId}/variants?page=&size=&sort=` | Public; owner thấy mọi trạng thái | 200 `PageResponse<VariantResponse>` | `ProductVariantController` |
+| CA12 | `GET /api/products/{productId}/variants/{variantId}` | Public; owner thấy mọi trạng thái | 200 `VariantResponse` | `ProductVariantController` |
+| CA13 | `POST /api/products/{productId}/variants` | Owner | 201 + `Location` | `ProductVariantController` |
+| CA14 | `PATCH /api/products/{productId}/variants/{variantId}` | Owner | 200 | `ProductVariantController` |
+| CA16 | `GET /api/promotions?storeId=&mine=&page=&size=&sort=` | Public; `mine=true` cần JWT | 200 `PageResponse<PromotionResponse>` | `PromotionController` |
+| CA17 | `GET /api/promotions/{promotionId}` | Public; owner thấy bản nháp | 200 `PromotionResponse` (kèm rules) | `PromotionController` |
+| CA18 | `POST /api/promotions` | Owner | 201 + `Location` | `PromotionController` |
+| CA19 | `PATCH /api/promotions/{promotionId}` | Owner | 200 | `PromotionController` |
+| CA20 | `PUT /api/promotions/{promotionId}/rules` | Owner | 200 | `PromotionController` |
+
+**Internal API cho Commerce/RFQ, không qua Gateway** (3) — contract ở [`docs/contracts/README.md`](../../docs/contracts/README.md)
+
+| Mã | Method + path | Caller | Thành công | Controller |
+|---|---|---|---|---|
+| IN06 | `GET /internal/v1/products/{productId}/variants/{variantId}/snapshot` | Service (`commerce`, `rfq`) | 200 `ProductSnapshotResponse` | `InternalCatalogController` |
+| IN07 | `POST /internal/v1/variants/snapshots` | Service (`commerce`, `rfq`) | 200 `List<VariantSnapshotResponse>` | `InternalCatalogController` |
+| IN08 | `POST /internal/v1/promotions/calculate` | Service (`commerce`, `rfq`) | 200 `PromotionCalculationResult` | `InternalCatalogController` |
+
+**API trong spec nhưng chưa làm** (đều đánh dấu cần CHỐT trong spec hoặc chờ nhóm khác)
+
+| Mã | Method + path | Lý do chưa làm |
+|---|---|---|
+| CA05 | `DELETE /api/categories/{categoryId}` | Chưa chốt chính sách xóa/lưu trữ; tạm dùng `PATCH status=INACTIVE` |
+| CA10 | `DELETE /api/products/{productId}` | Chưa chốt chính sách xóa; tạm dùng `PATCH status=INACTIVE` |
+| CA15 | `DELETE /api/products/{productId}/variants/{variantId}` | Chưa chốt; variant đang được promotion rule tham chiếu (FK local) |
+| CA21 | `DELETE /api/promotions/{promotionId}` | Chưa chốt; tạm dùng `PATCH status=DISABLED` |
+| AD06 | `POST /api/products/{productId}/moderation` | Chưa chốt quy trình kiểm duyệt sản phẩm của admin |
+| — | API internal trừ tồn kho | Chờ TV3 chốt luồng checkout (Bước 8) |
+
+### 3.2. Chạy thử trên SQL Server local qua Gateway
+
+Đã chạy ngày 2026-10-20: **53/53 kiểm tra pass** (`scripts/catalog-smoke.ps1`).
+
+```powershell
+# 1. Một lần: tạo .env (secret ngẫu nhiên + MOONCAKE_DB_USER/PASSWORD), rồi tạo DB + login
+.\scripts\local-sqlserver-setup.ps1
+# 2. Build và chạy 3 service từ thư mục root backend (đọc .env ở root)
+.\mvnw.cmd -pl IdentityService,CatalogStoreService,API-Gateway clean package
+java -jar IdentityService\target\identity-service-0.0.1-SNAPSHOT.jar      # 8081
+java -jar CatalogStoreService\target\catalog-store-service-0.0.1-SNAPSHOT.jar  # 8082
+java -jar API-Gateway\target\api-gateway-0.0.1-SNAPSHOT.jar               # 8080
+# 3. Lần đầu: tạo admin, lấy userId, khởi động lại Identity với $env:ADMIN_USER_IDS=<userId>
+.\scripts\catalog-smoke.ps1 -RegisterAdmin -AdminEmail <email> -AdminPassword <password>
+# 4. Chạy smoke test
+.\scripts\catalog-smoke.ps1 -AdminEmail <email> -AdminPassword <password>
+```
+
+- [x] Migration V1–V3 chạy trên SQL Server (sau khi thêm `spring-boot-starter-flyway`)
+- [x] Gateway mở public GET catalog
+- [x] Non-admin ghi category trả 403 (sửa lỗi forward `/error`)
+- [ ] Search không dấu chưa hỗ trợ (collation `Vietnamese_CI_AS` phân biệt dấu) — **CHỐT** với nhóm
 
 ## 4. Checklist theo thứ tự làm
 
 Thứ tự theo phụ thuộc dữ liệu: `product.category_id` bắt buộc → làm Category trước; Variant cần Product; Promotion cần Variant.
 
-### Bước 2 — Category (~0.5 ngày)
+### Bước 2 — Category ✅ xong 2026-10-20
 
-- [ ] `db/migration/V3__seed_categories.sql`: seed 5 danh mục gốc (truyền thống, hiện đại, chay, cao cấp, thiếu nhi), slug khớp FE
-- [ ] `CategoryServiceImpl`
-  - [ ] CA01 `GET /api/categories?parentCategoryId=&page=&size=`: danh mục gốc hoặc con trực tiếp, chỉ `ACTIVE`
-  - [ ] CA02 `GET /api/categories/{categoryId}`: không tồn tại hoặc `INACTIVE` trả 404
-  - [ ] CA03 `POST /api/categories`: slug trùng 409, parent phải tồn tại
-  - [ ] CA04 `PATCH /api/categories/{categoryId}`: chặn chu trình parent, slug trùng 409
-- [ ] `CategoryController`
-- [ ] Test: slug trùng, parent tự trỏ chính nó, parent là con cháu, non-admin bị 403
+- [x] `db/migration/V3__seed_categories.sql`: seed 5 danh mục gốc `truyen-thong`, `hien-dai`, `chay`, `cao-cap`, `thieu-nhi` (FE đang dùng `hiện-đại` có dấu, cần đổi sang `hien-dai`)
+- [x] `CategoryServiceImpl`
+  - [x] CA01 `GET /api/categories?parentCategoryId=&page=&size=&sort=`: danh mục gốc hoặc con trực tiếp, chỉ `ACTIVE`; sort allowlist `name`, `slug`, `id`
+  - [x] CA02 `GET /api/categories/{categoryId}`: không tồn tại hoặc `INACTIVE` trả 404
+  - [x] CA03 `POST /api/categories`: slug trùng 409 (cả trường hợp hai request đồng thời), parent phải `ACTIVE`; trả 201 + `Location`
+  - [x] CA04 `PATCH /api/categories/{categoryId}`: chặn chu trình parent, slug trùng 409, status sai 400
+- [x] `CategoryController`
+- [x] `dto/request/PageQuery`: record `?page=&size=&sort=` kiểm tra phân trang, dùng chung cho mọi listing
+- [x] Tách route internal: `ProductController` cũ → `InternalCatalogController` (`/internal/v1/...`); route IN06 giữ nguyên
+- [x] Test: `CategoryServiceImplTest` (14), `CategoryControllerTest` (9: public GET, size/sort sai 400, 401, 403 non-admin, 201 + Location)
+- [ ] Chạy thử migration V3 trên SQL Server thật (test H2 tắt Flyway nên chưa kiểm tra)
+- [ ] Chưa hỗ trợ: đưa danh mục con về gốc qua PATCH (record chưa phân biệt field vắng/null); CA05 xóa danh mục
 
-### Bước 3 — Product (~1.5 ngày)
+### Bước 3 — Product ✅ xong 2026-10-20
 
-- [ ] `ProductServiceImpl`
-  - [ ] CA06 `GET /api/products?q=&storeId=&categoryId=&mine=&page=&size=&sort=`: dùng `ProductSpecifications.publicSearch` / `ownerSearch`; `mine=true` không đăng nhập thì 401; sort allowlist (`name`, `createdAt`, `id`), sort lạ trả 400
-  - [ ] `ProductSummaryResponse.minPrice/imageUrl` lấy từ variant `ACTIVE`, load theo lô bằng `findByProductIdInOrderByIdAsc` (tránh N+1)
-  - [ ] CA07 `GET /api/products/{productId}`: kèm variants; người ngoài chỉ thấy variant `ACTIVE`
-  - [ ] CA08 `POST /api/products`: `requireOwnedStore`, category `ACTIVE`, sinh productCode, status `DRAFT`
-  - [ ] CA09 `PATCH /api/products/{productId}`: owner; đổi status theo quy tắc mục 2
-- [ ] `ProductController` cho `/api/products`. Lưu ý: `ProductController` hiện có đang map `/internal/v1/products`, nên tách controller internal riêng (ví dụ `InternalCatalogController`) để không lẫn route
-- [ ] Test: supplier A không sửa product của B (403); supplier chưa `VERIFIED` (400); category `INACTIVE` (400); public không thấy `DRAFT` (404); `ACTIVE` khi chưa có variant (400)
+- [x] `ProductServiceImpl`
+  - [x] CA06 `GET /api/products?q=&storeId=&categoryId=&mine=&page=&size=&sort=`: dùng `ProductRepository.publicSearch` / `ownerSearch`; `mine=true` không đăng nhập thì 401; sort allowlist (`name`, `createdAt`, `id`), mặc định `createdAt,desc`; sort lạ trả 400
+  - [x] `ProductSummaryResponse.minPrice/imageUrl` lấy từ variant `ACTIVE`, load theo lô bằng `findByProductIdInOrderByIdAsc` (tránh N+1)
+  - [x] CA07 `GET /api/products/{productId}`: kèm variants; người ngoài chỉ thấy product `ACTIVE` của store `ACTIVE` và variant `ACTIVE`; owner thấy tất cả
+  - [x] CA08 `POST /api/products`: `requireOwnedStore`, category `ACTIVE`, sinh `PRD-XXXXXXXX`, status `DRAFT`; trả 201 + `Location`
+  - [x] CA09 `PATCH /api/products/{productId}`: owner; transition `DRAFT → ACTIVE/INACTIVE`, `ACTIVE ↔ INACTIVE`; không quay lại `DRAFT`; không đặt tay `OUT_OF_STOCK`; lên `ACTIVE` cần variant `ACTIVE`
+- [x] `ProductController` mới cho `/api/products`; mapping entity → DTO là method private trong từng `*ServiceImpl`
+- [x] Test: `ProductServiceImplTest` (14), `ProductControllerTest` (9)
+- [ ] Bổ sung unit test cho `StoreAccessServiceImpl` (supplier chưa `VERIFIED` → 400, store `SUSPENDED` → 403, Identity 404 → không phải owner)
 
-### Bước 4 — Variant (~1 ngày)
+### Bước 4 — Variant ✅ xong 2026-10-20
 
-- [ ] `ProductVariantServiceImpl`
-  - [ ] CA11 `GET /api/products/{productId}/variants`
-  - [ ] CA12 `GET /api/products/{productId}/variants/{variantId}`: dùng `findByIdAndProductId`, sai product trả 404
-  - [ ] CA13 `POST /api/products/{productId}/variants`: SKU trùng 409, status `DRAFT`
-  - [ ] CA14 `PATCH /api/products/{productId}/variants/{variantId}`: SKU mới trùng 409; không cho tắt variant `ACTIVE` cuối cùng khi product đang `ACTIVE` (hoặc tự chuyển product về `INACTIVE` — chốt một cách, ghi lại)
-- [ ] Endpoint đặt trong `ProductController` hoặc tách `ProductVariantController`
-- [ ] Test: SKU trùng, giá/tồn kho âm (400), variant sai product (404)
+- [x] `ProductVariantServiceImpl`
+  - [x] CA11 `GET /api/products/{productId}/variants`: owner thấy mọi trạng thái; public chỉ variant `ACTIVE` của product đã công bố
+  - [x] CA12 `GET /api/products/{productId}/variants/{variantId}`: dùng `findByIdAndProductId`, sai product trả 404
+  - [x] CA13 `POST /api/products/{productId}/variants`: SKU trùng 409 (kể cả request đồng thời), status `DRAFT`, 201 + `Location`
+  - [x] CA14 `PATCH /api/products/{productId}/variants/{variantId}`: SKU mới trùng 409; transition giống product; **chọn chặn (400)** khi tắt variant `ACTIVE` cuối cùng của product đang `ACTIVE`
+- [x] Tách `ProductVariantController` (`/api/products/{productId}/variants`), sort allowlist `basePrice`, `variantName`, `id`
+- [x] Test: `ProductVariantServiceImplTest` (12), `ProductVariantControllerTest` (5)
+- [ ] Tồn kho hiện đặt giá trị tuyệt đối qua PATCH (không có optimistic lock vì V1 không có cột version). Trừ kho khi checkout đi đường riêng (Bước 8)
 
-### Bước 5 — Snapshot cho TV3/TV4 (~0.5 ngày)
+### Bước 5 — Snapshot cho TV3/TV4 ✅ xong 2026-10-20
 
-- [ ] IN06 `CatalogApplicationServiceImpl.getProductSnapshot`: kiểm tra variant thuộc product, 404 nếu sai
-- [ ] IN07 `POST /internal/v1/variants/snapshots`: giữ thứ tự đầu vào, gộp ID trùng, thiếu ID trả 404 kèm danh sách ID thiếu; load product + store theo lô
-- [ ] Cập nhật `docs/contracts/README.md`: thêm IN07, mô tả field `VariantSnapshotResponse`, quyền caller (`commerce`, `rfq`)
-- [ ] Contract test: JSON field name đúng contract, 404, caller không có service token bị chặn
-- [ ] Báo TV3/TV4 contract đã sẵn sàng
+- [x] IN06 `CatalogApplicationServiceImpl.getProductSnapshot`: kiểm tra variant thuộc product, 404 nếu sai; giữ field `agreedUnitPrice`
+- [x] IN07 `POST /internal/v1/variants/snapshots`: giữ thứ tự đầu vào, gộp ID trùng, thiếu ID trả 404 kèm danh sách ID thiếu; load variant + product + store bằng 3 query cho cả batch
+- [x] Cập nhật `docs/contracts/README.md`: IN06 (ý nghĩa `agreedUnitPrice`, 404), IN07 (request, response, thứ tự, lỗi), quyền caller
+- [x] Contract test `InternalCatalogContractTest` (6, full context + H2 + filter internal thật): field JSON, thứ tự/gộp, 404, 400 rỗng, 401 thiếu/sai token
+- [ ] **Báo TV3/TV4 contract đã sẵn sàng** (gửi link `docs/contracts/README.md`)
 
-### Bước 6 — Promotion CRUD (~1 ngày)
+### Bước 6 — Promotion CRUD ✅ xong 2026-10-20
 
-- [ ] `PromotionServiceImpl`
-  - [ ] CA16 `GET /api/promotions?storeId=&mine=&page=&size=`
-  - [ ] CA17 `GET /api/promotions/{promotionId}`: kèm rules
-  - [ ] CA18 `POST /api/promotions`: owner, `startAt < endAt`, kiểm tra field theo `ruleType`, `countInStore` khớp số variant
-  - [ ] CA19 `PATCH /api/promotions/{promotionId}`: name/thời gian/status (`DRAFT`, `ACTIVE`, `DISABLED`)
-  - [ ] CA20 `PUT /api/promotions/{promotionId}/rules`: `deleteByPromotionId` + insert mới trong cùng `@Transactional`
-- [ ] `PromotionController`
-- [ ] Test: rule thiếu field theo loại (400), variant khác store (400), `startAt >= endAt` (400), non-owner (403)
+- [x] `PromotionServiceImpl`
+  - [x] CA16 `GET /api/promotions?storeId=&mine=&page=&size=&sort=`: public chỉ promotion `ACTIVE`, chưa kết thúc, thuộc store `ACTIVE` (`PromotionRepository.publicListing`); `mine=true` thấy mọi trạng thái; rules load theo lô
+  - [x] CA17 `GET /api/promotions/{promotionId}`: kèm rules; chưa công bố/đã kết thúc → 404 cho người ngoài
+  - [x] CA18 `POST /api/promotions`: owner, `startAt < endAt`, 1–20 rule, kiểm tra field theo `ruleType` (field không dùng phải null), `countInStore` khớp số variant; tạo `DRAFT`
+  - [x] CA19 `PATCH /api/promotions/{promotionId}`: transition `DRAFT → ACTIVE/DISABLED`, `ACTIVE ↔ DISABLED`; không về `DRAFT`, không đặt tay `EXPIRED`; không kích hoạt promotion đã kết thúc
+  - [x] CA20 `PUT /api/promotions/{promotionId}/rules`: validate trước, rồi `deleteByPromotionId` + insert mới trong cùng `@Transactional`
+- [x] `PromotionController`; body mảng của CA20 được validate từng phần tử bằng `Validator`
+- [x] `ClockConfig` (bean `Clock` UTC) để test cố định thời điểm; engine IN08 dùng lại
+- [x] Test: `PromotionServiceImplTest` (16), `PromotionControllerTest` (6), `PromotionRepositoryListingTest` (2, H2)
+- [ ] Trạng thái `EXPIRED` hiện chỉ suy ra khi đọc (`endAt <= now`), chưa có job cập nhật cột `status`
 
-### Bước 7 — Promotion engine IN08 (~1.5 ngày)
+### Bước 7 — Promotion engine IN08 ✅ xong 2026-10-20
 
-- [ ] Class thuần `PromotionCalculator` (không phụ thuộc Spring) để unit test
-- [ ] `PromotionCalculationServiceImpl`: load variant + promotion hiệu lực (`findEffective`) + rules, gọi calculator
-- [ ] `POST /internal/v1/promotions/calculate`
-- [ ] Quy tắc tính MVP:
-  - `PERCENT_DISCOUNT`: giảm `lineSubtotal × percent / 100` trên line target (target null = mọi line của store)
-  - `FIXED_DISCOUNT`: giảm số tiền cố định trên line target, không vượt line subtotal
-  - `BUY_X_GET_Y`: số lần áp dụng = `floor(qtyTarget / minQuantity)`; giảm `min(lần × rewardQuantity, qtyReward) × giá reward` trên line reward; reward phải có trong giỏ
-  - Mỗi line nhận tối đa 1 rule có lợi nhất; làm tròn VND `HALF_UP` theo line; `discountTotal ≤ subtotal`
-- [ ] Unit test: đủ 3 loại; trigger khác reward; reward không có trong giỏ; nhiều bội số X; promotion hết hạn/chưa bắt đầu/`DRAFT`; variant khác store (400); làm tròn
-- [ ] Ghi contract IN08 vào `docs/contracts/README.md`, gửi TV3 review
+- [x] Phần tính thuần `PromotionCalculationServiceImpl.computeDiscounts` (static, không truy cập DB) để unit test trực tiếp
+- [x] `PromotionCalculationServiceImpl`: gộp line trùng variant, kiểm tra variant tồn tại (404) và cùng store (400), load giá + promotion hiệu lực (`findEffective` với `Clock`) + rules, gọi calculator
+- [x] `POST /internal/v1/promotions/calculate` trong `InternalCatalogController`
+- [x] Quy tắc tính MVP:
+  - `PERCENT_DISCOUNT`: giảm `lineSubtotal × percent / 100` trên line target (target null = mọi line); cần quantity line ≥ `minQuantity`
+  - `FIXED_DISCOUNT` có target: giảm một lần cho cả line, không vượt line subtotal
+  - `FIXED_DISCOUNT` không target: giảm cả đơn khi tổng quantity ≥ `minQuantity`; **không cộng dồn** với rule theo line — chọn phương án giảm nhiều hơn, phân bổ theo tỷ lệ `lineSubtotal` (làm tròn xuống, phần dư vào line lớn nhất)
+  - `BUY_X_GET_Y`: lần áp dụng = `floor(qtyTarget / X)`; tặng `min(lần × Y, qtyReward)` unit, giảm trên line reward; reward phải có trong giỏ; target = reward thì tính theo nhóm `X + Y`
+  - Mỗi line tối đa 1 rule (giảm nhiều nhất, hòa thì ruleId nhỏ hơn); làm tròn VND `HALF_UP`; `discountTotal ≤ subtotal`
+- [x] Test: `service/impl/PromotionDiscountRulesTest` (20), `PromotionCalculationServiceImplTest` (4), contract IN08 trong `InternalCatalogContractTest` (2)
+- [x] Ghi contract IN08 vào `docs/contracts/README.md`
+- [ ] **Gửi TV3 review quy tắc tính** (mục 5, điểm #1–#3)
 
 ### Bước 8 — Chờ TV3 (chưa code)
 
@@ -133,13 +218,13 @@ Thứ tự theo phụ thuộc dữ liệu: `product.category_id` bắt buộc �
 
 | # | Câu hỏi | Đề xuất hiện tại | Chốt với |
 |---|---|---|---|
-| 1 | Nhiều promotion cùng áp dụng | Mỗi line 1 rule có lợi nhất, không cộng dồn | TV3, nhóm |
-| 2 | Làm tròn tiền | VND, scale 0, `HALF_UP`, theo line | TV3, TV5 |
-| 3 | `FIXED_DISCOUNT` khi `targetVariantId` null | Giảm trên tổng đơn của store, phân bổ theo line | TV3 |
+| 1 | Nhiều promotion cùng áp dụng | **Đã code:** mỗi line 1 rule có lợi nhất, không cộng dồn; giảm cả đơn so với tổng giảm theo line | TV3, nhóm |
+| 2 | Làm tròn tiền | **Đã code:** tiền giảm làm tròn VND `HALF_UP` theo line; giá gốc giữ nguyên `DECIMAL(18,2)` | TV3, TV5 |
+| 3 | `FIXED_DISCOUNT` khi `targetVariantId` null | **Đã code:** giảm cả đơn, phân bổ theo tỷ lệ line | TV3 |
 | 4 | Trừ tồn kho / chống bán quá | UPDATE có điều kiện + idempotency key | TV3 |
 | 5 | Xóa product/variant/promotion (CA10, CA15, CA21) | Chưa làm; dùng `INACTIVE`/`DISABLED` thay vì xóa | Nhóm |
-| 6 | Search không dấu trên SQL Server | Kiểm tra collation khi chạy DB thật; nếu cần thì thêm cột/chuẩn hóa sau | Nhóm |
-| 7 | Tắt variant `ACTIVE` cuối cùng của product đang `ACTIVE` | Chặn (400) | Tự quyết, ghi lại |
+| 6 | Search không dấu trên SQL Server | **Đã kiểm tra:** collation `Vietnamese_CI_AS` phân biệt dấu → "banh nuong" không ra "Bánh nướng". Lựa chọn: collation `_AI` cho cột `name` (migration V4) hoặc cột tên chuẩn hóa | Nhóm |
+| 7 | Tắt variant `ACTIVE` cuối cùng của product đang `ACTIVE` | **Đã chọn: chặn (400)**, đã code ở CA14 | Tự quyết, đã ghi lại |
 
 ## 6. Definition of Done cho mỗi bước
 

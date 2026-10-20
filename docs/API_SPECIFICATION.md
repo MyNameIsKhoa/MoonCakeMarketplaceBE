@@ -23,11 +23,11 @@ Mỗi dịch vụ sở hữu cơ sở dữ liệu riêng. Giao tiếp đồng b�
 | Dịch vụ | Public API có controller hiện tại | API còn ở mức thiết kế hoặc skeleton |
 |---|---|---|
 | Identity | ID01–ID12, AD03–AD04 và lịch sử xác minh supplier | AD01–AD02, AU01–AU05 |
-| Catalog & Store | ST01–ST04 | Danh mục, sản phẩm bán lẻ, biến thể, khuyến mãi và các thao tác kiểm duyệt/xóa trong mục 4 |
+| Catalog & Store | ST01–ST04; CA01–CA04, CA06–CA09, CA11–CA14, CA16–CA20 | Thao tác xóa CA05, CA10, CA15, CA21 (chờ chốt chính sách) và kiểm duyệt AD05–AD06 trong mục 4 |
 | Commerce | Chưa có public controller cho các mục 5.1–5.5 | Toàn bộ public API Commerce trong mục 5 |
 | RFQ & Negotiation | Có skeleton `POST /api/quotations/{quotationId}/accept`; chưa đủ contract và kiểm tra quyền như RQ15 thiết kế | Các API RFQ, báo giá còn lại và hội thoại/WebSocket trong mục 6 |
 
-“Có controller” chỉ xác nhận route đã khai báo, **không xác nhận nghiệp vụ đã hoàn chỉnh hoặc sẵn sàng production**. Các API nội bộ đã có controller gồm IN01–IN06, IN09 và IN11; IN07, IN08, IN10 chưa có. Gateway hiện chưa định tuyến `/api/seller-orders/**`, nên các endpoint đó cũng chưa thể gọi qua Gateway nếu chỉ thêm controller Commerce. Trạng thái này là ảnh chụp mã nguồn ngày cập nhật; khi triển khai thêm phải cập nhật tài liệu cùng contract và test.
+“Có controller” chỉ xác nhận route đã khai báo, **không xác nhận nghiệp vụ đã hoàn chỉnh hoặc sẵn sàng production**. Các API nội bộ đã có controller gồm IN01–IN09 và IN11; IN10 chưa có. Gateway hiện chưa định tuyến `/api/seller-orders/**`, nên các endpoint đó cũng chưa thể gọi qua Gateway nếu chỉ thêm controller Commerce. Trạng thái này là ảnh chụp mã nguồn ngày cập nhật; khi triển khai thêm phải cập nhật tài liệu cùng contract và test.
 
 ## 2. Quy ước API
 

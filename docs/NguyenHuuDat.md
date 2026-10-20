@@ -81,6 +81,151 @@ Checklist chi tiết những việc còn lại của TV2: [`CatalogStoreService/
 - **TV3:** review DTO `VariantSnapshotResponse` và `PromotionCalculationRequest/Result` khi bắt đầu Commerce; chốt cách trừ tồn kho khi checkout.
 - **SQL Server:** search có phân biệt dấu hay không phụ thuộc collation; cần kiểm tra lại khi chạy DB thật.
 
+### Category API (CA01–CA04)
+
+**Kết quả:** `mvnw.cmd -pl CatalogStoreService test` — **60/60 pass** (thêm 23 test).
+
+| Loại | File | Nội dung |
+|---|---|---|
+| Thêm | `src/main/resources/db/migration/V3__seed_categories.sql` | Seed 5 danh mục gốc: `truyen-thong`, `hien-dai`, `chay`, `cao-cap`, `thieu-nhi` |
+| Thêm | `util/PageRequestFactory.java` (ban đầu đặt ở `controller/`, đã chuyển sang `util/` ở Buổi 7) | Dựng `Pageable` theo quy ước MSS: size 1..100, sort allowlist, luôn thêm `id` làm tie-breaker; sai trả 400 |
+| Thêm | `service/impl/CategoryServiceImpl.java` | CA01–CA04: chỉ hiển thị `ACTIVE`, chặn chu trình parent, slug trùng 409 (kể cả request đồng thời nhờ `saveAndFlush` + bắt lỗi unique) |
+| Thêm | `controller/CategoryController.java` | `/api/categories`; POST trả 201 + `Location` |
+| Thêm | `controller/InternalCatalogController.java` | Nhận route IN06 `/internal/v1/products/{productId}/variants/{variantId}/snapshot` (đường dẫn không đổi) |
+| Xóa | `controller/ProductController.java` | Trước đây map `/internal/v1/products`; tách ra để `ProductController` mới dành cho `/api/products` |
+| Thêm | `src/test/.../service/CategoryServiceImplTest.java` | 14 test: slug trùng, parent tự trỏ/là cháu, status sai, tên rỗng, 404 |
+| Thêm | `src/test/.../controller/CategoryControllerTest.java` | 9 test: GET public, size/sort sai 400, 401 không JWT, 403 non-admin, 201 + Location |
+
+**Ghi chú:**
+
+- `GlobalExceptionHandler` (dùng chung với TV1) chưa xử lý lỗi validate `@RequestParam` và JSON sai định dạng (rơi vào 500). TV2 tự kiểm tra `page/size/sort` trong `PageRequestFactory`; cần trao đổi với TV1 để thêm handler cho `HttpMessageNotReadableException`, `MethodArgumentTypeMismatchException`.
+- Migration V3 chưa chạy trên SQL Server thật (test H2 tắt Flyway).
+- FE đang dùng category `hiện-đại` (có dấu) → cần đổi sang `hien-dai` khi nối API.
+
+### Product API (CA06–CA09)
+
+**Kết quả:** `mvnw.cmd -pl CatalogStoreService test` — **83/83 pass** (thêm 23 test).
+
+| Loại | File | Nội dung |
+|---|---|---|
+| Thêm | `service/impl/CatalogMapper.java` | Map product/variant → DTO; `minPrice`/`imageUrl` của list chỉ tính trên variant `ACTIVE`. Variant service sẽ dùng lại |
+| Thêm | `service/impl/ProductServiceImpl.java` | CA06–CA09: search bằng Specification + load variant theo lô; ẩn product chưa công bố (404); sinh `PRD-XXXXXXXX`; transition status; lên `ACTIVE` cần variant `ACTIVE` |
+| Thêm | `controller/ProductController.java` | `/api/products` (public); `mine=true` không JWT trả 401; POST 201 + `Location` |
+| Thêm | `src/test/.../service/ProductServiceImplTest.java` | 14 test: tạo DRAFT, 403 non-owner, category `INACTIVE` 400, transition sai 400, ẩn DRAFT/store chưa công bố, variant hiển thị theo quyền, summary |
+| Thêm | `src/test/.../controller/ProductControllerTest.java` | 9 test: search public, `mine` 401/200, sort sai 400, 404, 201 + Location, 401, 400 validation, 403 |
+
+**Quy tắc status product đã chọn:** `DRAFT → ACTIVE/INACTIVE`, `ACTIVE ↔ INACTIVE`, không quay về `DRAFT`, không đặt tay `OUT_OF_STOCK` (giống quy tắc store của TV1).
+
+### Variant API (CA11–CA14) + Snapshot IN06/IN07
+
+**Kết quả:** `mvnw.cmd -pl CatalogStoreService test` — **106/106 pass** (thêm 23 test).
+
+| Loại | File | Nội dung |
+|---|---|---|
+| Thêm | `service/impl/ProductVariantServiceImpl.java` | CA11–CA14: hiển thị theo quyền, SKU unique (409, kể cả đồng thời), transition giống product, chặn tắt variant `ACTIVE` cuối cùng của product đang bán |
+| Thêm | `controller/ProductVariantController.java` | `/api/products/{productId}/variants`; POST 201 + `Location` |
+| Sửa | `repository/ProductVariantRepository.java` | Thêm `existsByProductIdAndStatusAndIdNot` |
+| Sửa | `service/impl/CatalogApplicationServiceImpl.java` | Implement IN06 (bỏ stub `UnsupportedOperationException`) và IN07 (giữ thứ tự, gộp ID trùng, 404 liệt kê ID thiếu, 3 query cho cả batch) |
+| Sửa | `controller/InternalCatalogController.java` | Thêm `POST /internal/v1/variants/snapshots` (IN07) |
+| Sửa | `docs/contracts/README.md` | Mô tả IN06, IN07 và quyền caller cho TV3/TV4 |
+| Thêm | `src/test/.../service/ProductVariantServiceImplTest.java` | 12 test |
+| Thêm | `src/test/.../controller/ProductVariantControllerTest.java` | 5 test |
+| Thêm | `src/test/.../controller/InternalCatalogContractTest.java` | 6 contract test chạy full context + H2 + filter internal thật: tên field JSON, thứ tự, 404, 400, 401 |
+
+**Mốc:** phần TV3/TV4 cần từ Catalog (IN06, IN07) đã sẵn sàng → cần báo TV3/TV4.
+
+### Promotion API (CA16–CA20)
+
+**Kết quả:** `mvnw.cmd -pl CatalogStoreService test` — **130/130 pass** (thêm 24 test).
+
+| Loại | File | Nội dung |
+|---|---|---|
+| Thêm | `config/ClockConfig.java` | Bean `Clock` UTC cho rule phụ thuộc thời gian; test dùng `Clock.fixed` |
+| Thêm | `repository/PromotionSpecifications.java` | `publicListing` (ACTIVE, chưa kết thúc, store ACTIVE), `ownerListing` |
+| Sửa | `repository/PromotionRepository.java` | `extends JpaSpecificationExecutor`; bỏ 3 query listing cũ không còn dùng; giữ `findEffective` cho IN08 |
+| Thêm | `service/impl/PromotionServiceImpl.java` | CA16–CA20: kiểm tra field theo `ruleType`, variant cùng store, thời gian, transition; thay rules trong một transaction |
+| Thêm | `controller/PromotionController.java` | `/api/promotions`; POST 201 + `Location`; PUT `/rules` validate từng phần tử mảng |
+| Thêm | `src/test/.../service/PromotionServiceImplTest.java` | 16 test |
+| Thêm | `src/test/.../controller/PromotionControllerTest.java` | 6 test |
+| Thêm | `src/test/.../repository/PromotionSpecificationsTest.java` | 2 test H2 |
+
+**Quyết định:**
+
+- Rule chỉ được chứa field đúng loại; field thừa (ví dụ `discountAmount` trong `PERCENT_DISCOUNT`) bị từ chối 400 để engine không phải đoán.
+- `targetVariantId` null ở `PERCENT_DISCOUNT`/`FIXED_DISCOUNT` = áp dụng cho mọi line của store (cần TV3 xác nhận khi review IN08).
+- `EXPIRED` không đặt tay; promotion hết hạn được ẩn khi đọc dựa trên `endAt`.
+
+### Promotion engine IN08
+
+**Kết quả:** `mvnw.cmd -pl CatalogStoreService test` — **155/155 pass** (thêm 25 test).
+
+| Loại | File | Nội dung |
+|---|---|---|
+| Thêm | `service/impl/PromotionCalculator.java` | Engine thuần (không Spring/DB): 3 loại khuyến mãi, chọn rule tốt nhất mỗi line, giảm cả đơn vs theo line, phân bổ, làm tròn |
+| Thêm | `service/impl/PromotionCalculationServiceImpl.java` | Gộp line trùng, kiểm tra variant/store, nạp giá + promotion hiệu lực theo `Clock`, gọi engine |
+| Sửa | `controller/InternalCatalogController.java` | Thêm `POST /internal/v1/promotions/calculate` |
+| Sửa | `docs/contracts/README.md` | Contract IN08: request, response, lỗi, quy tắc tính |
+| Thêm | `src/test/.../service/PromotionCalculatorTest.java` | 20 test: đủ 3 loại, trigger ≠ reward, reward không có trong giỏ, cùng variant, làm tròn, chọn rule, giảm cả đơn, phân bổ, bất biến tổng |
+| Thêm | `src/test/.../service/PromotionCalculationServiceImplTest.java` | 4 test: gộp line, không có promotion, 404, 400 khác store |
+| Sửa | `src/test/.../controller/InternalCatalogContractTest.java` | +2 contract test IN08 (full context + H2) |
+
+**Mốc:** toàn bộ backend TV2 (CA01–CA04, CA06–CA09, CA11–CA14, CA16–CA20, IN06–IN08) đã có code và test. Còn lại: API trừ tồn kho (chờ TV3), FE, chạy thử trên SQL Server + Gateway.
+
+### Dọn package controller
+
+- Chuyển `PageRequestFactory` từ `controller/` sang package mới `util/` (`mss.mooncake.catalogstore.util`) để `controller/` chỉ chứa class API. Logic không đổi; cập nhật import ở `CategoryController`, `ProductController`, `ProductVariantController`, `PromotionController`.
+- Không dùng `Pageable` mặc định của Spring vì nó tự cắt `size` > max thay vì trả 400 và không có allowlist sort, trái quy ước mục 4.3.
+- `mvnw.cmd -pl CatalogStoreService test` — **155/155 pass**.
+
+### Chạy thật trên SQL Server qua Gateway
+
+**Kết quả:** `scripts/catalog-smoke.ps1` — **53/53 kiểm tra pass** trên SQL Server 2022 local (collation `Vietnamese_CI_AS`), luồng đi qua Gateway: đăng ký → supplier onboarding → admin duyệt → store → category → product → variant → search → promotion → IN06/IN07/IN08.
+
+**Lỗi thật phát hiện được (test H2/MockMvc không bắt được):**
+
+| # | Lỗi | Ảnh hưởng | Đã sửa |
+|---|---|---|---|
+| 1 | Spring Boot 4 tách auto-config Flyway thành module riêng; pom chỉ có `flyway-core` nên **migration không bao giờ chạy**, service vẫn khởi động nhưng DB không có bảng | Cả 4 service | Đã được sửa cho cả 4 pom ở commit `d25b99a` ("fix api name ...") của nhóm trên `origin/main`; bản sửa local trùng nội dung nên đã bỏ, dùng bản trên remote |
+| 2 | Gateway `SecurityConfig` chỉ mở public `GET /api/stores`; GET categories/products/promotions bị 403 khi không có JWT | FE không xem được catalog khi chưa đăng nhập | Thêm `permitAll` cho GET catalog trong `API-Gateway/.../SecurityConfig.java` |
+| 3 | 403 của Spring Security được forward sang `/error`; JWT filter không chạy lại ở lượt ERROR nên user đã đăng nhập nhận 401 thay vì 403 | Catalog (lộ ra client); Identity cũng bị nhưng Gateway che | Thêm `/error` permitAll trong Catalog `SecurityConfig`. **Identity còn lỗi** khi gọi trực tiếp — báo TV1 |
+
+**File thêm/sửa:**
+
+| Loại | File | Nội dung |
+|---|---|---|
+| Thêm | `scripts/local-sqlserver-setup.ps1` | Tạo DB `mss_identity`, `mss_catalog_store` + login riêng `mooncake_dev` (db_owner chỉ trên 2 DB) trên SQL Server local; chạy lại an toàn |
+| Thêm | `scripts/catalog-smoke.ps1` | Smoke test 53 kiểm tra; `-RegisterAdmin` để tạo admin lần đầu. Lưu UTF-8 **có BOM** để PowerShell 5.1 đọc đúng tiếng Việt |
+| Sửa | `API-Gateway/.../config/SecurityConfig.java` | Public GET catalog |
+| Sửa | `CatalogStoreService/.../security/SecurityConfig.java` | `/error` permitAll |
+
+**Ghi nhận khác:**
+
+- Search trên SQL Server: có dấu ✅, không phân biệt hoa thường ✅, **không dấu ("banh nuong") không tìm thấy** vì collation `Vietnamese_CI_AS` phân biệt dấu. Muốn hỗ trợ cần chốt với nhóm (collation `_AI` hoặc cột tên chuẩn hóa).
+- IN08 trả `subtotal` dạng `410000.00` (scale 2 theo giá DB) nhưng `discountTotal` dạng `86000` (scale 0 sau làm tròn). Giá trị đúng, nhưng nên báo TV3 so sánh bằng giá trị số, không so chuỗi.
+- Lệnh tạo secret trong README (`RandomNumberGenerator::GetBytes(32)`) **không chạy trên Windows PowerShell 5.1** (chỉ có ở PowerShell 7+).
+- Script PowerShell có tiếng Việt phải lưu UTF-8 có BOM; nếu không PowerShell 5.1 đọc theo ANSI và gửi chuỗi lỗi mã hóa lên server (đã gặp và sửa trong buổi này). DB local còn 1 product thử nghiệm (id 1) tên bị lỗi mã hóa từ lần chạy đó.
+- Sau khi thêm starter phải build `clean` — build tăng dần để lại class cũ trong `target/` làm test Identity báo lỗi giả.
+
+### Đưa code về đúng package theo quy ước
+
+Quy ước nhóm (`CODING_CONVENTION_AND_API_RULES.md` dòng 64) chỉ cho phép các package `controller`, `service`, `service.impl`, `repository`, `entity`, `dto.*`, `client`, `exception`, `security`, `config`, `enums`, `websocket`. Các class phụ trợ đã tạo ở các buổi trước nằm ngoài quy ước nên được chuyển vị trí; **logic và API không đổi**.
+
+| Trước | Sau |
+|---|---|
+| `repository/ProductSpecifications.java` | Static method `publicSearch`, `ownerSearch` trong interface `ProductRepository` |
+| `repository/PromotionSpecifications.java` | Static method `publicListing`, `ownerListing` trong interface `PromotionRepository` |
+| `service/impl/CatalogMapper.java` | Method private `toVariantResponse`, `toProductResponse`, `toSummary` trong `ProductServiceImpl` / `ProductVariantServiceImpl` (giống `StoreServiceImpl` của TV1) |
+| `service/impl/PromotionCalculator.java` | Gộp vào `PromotionCalculationServiceImpl`; phần tính thuần là `static computeDiscounts(...)` package-private |
+| `util/PageRequestFactory.java` (package `util` ngoài quy ước) | Record `dto/request/PageQuery(page, size, sort)` + `toPageable(...)`; controller nhận `PageQuery pageQuery` |
+| Test `ProductSpecificationsTest`, `PromotionSpecificationsTest`, `PromotionCalculatorTest` | `ProductRepositorySearchTest`, `PromotionRepositoryListingTest`, `service/impl/PromotionDiscountRulesTest` |
+
+**Kết quả:** `mvnw.cmd -pl CatalogStoreService clean package` — **155/155 pass**; `scripts/catalog-smoke.ps1` — **53/53 pass**.
+
+**Cải thiện phụ:** `?page=abc` trước đây trả 500, nay trả **400** (lỗi binding `PageQuery` được `GlobalExceptionHandler` xử lý như lỗi validation).
+
 ### Việc tiếp theo
 
-Category (seed V3 + `CategoryServiceImpl` + `CategoryController`), rồi đến Product → Variant → Snapshot IN06/IN07. Chi tiết trong [`TV2_TODO.md`](../CatalogStoreService/docs/TV2_TODO.md).
+- Báo nhóm 3 lỗi ở trên (đặc biệt Flyway cho Commerce/RFQ và `/error` cho Identity).
+- Gửi TV3: contract IN07 + IN08 và quy tắc tính khuyến mãi để review.
+- Chạy service với SQL Server thật (kiểm tra migration V3, search tiếng Việt có dấu).
+- FE: nối `ProductList`, `ProductDetail`, `BrandStore`, `SellerCenter` với API thật.
