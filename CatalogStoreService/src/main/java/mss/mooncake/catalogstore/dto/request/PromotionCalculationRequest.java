@@ -13,9 +13,9 @@ import java.util.List;
  * không nhận giá từ caller.
  */
 public record PromotionCalculationRequest(
-        @NotNull Long storeId,
+        @NotNull @Positive Long storeId,
         @NotEmpty @Size(max = 100) List<@Valid @NotNull Line> lines) {
 
-    public record Line(@NotNull Long variantId, @NotNull @Positive Integer quantity) {
+    public record Line(@NotNull @Positive Long variantId, @NotNull @Positive Integer quantity) {
     }
 }

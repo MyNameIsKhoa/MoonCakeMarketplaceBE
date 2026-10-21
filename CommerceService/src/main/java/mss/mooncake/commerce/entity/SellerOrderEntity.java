@@ -30,4 +30,23 @@ public class SellerOrderEntity extends BaseCommerceEntity {
     @Column(name = "shipping_method_snapshot", length = 100) private String shippingMethodSnapshot;
     @Column(name = "payment_terms_snapshot", columnDefinition = "NVARCHAR(MAX)") private String paymentTermsSnapshot;
     @Column(name = "status", nullable = false, length = 30) private String status;
+
+    public Long getOrderId() { return orderId; }
+    public String getSellerOrderNo() { return sellerOrderNo; }
+    public Long getStoreIdRef() { return storeIdRef; }
+    public Long getSupplierIdRef() { return supplierIdRef; }
+    public Long getQuotationIdRef() { return quotationIdRef; }
+    public String getStoreNameSnapshot() { return storeNameSnapshot; }
+    public String getSupplierNameSnapshot() { return supplierNameSnapshot; }
+    public BigDecimal getSubtotal() { return subtotal; }
+    public BigDecimal getShippingFee() { return shippingFee; }
+    public BigDecimal getTotalAmount() { return totalAmount; }
+    public BigDecimal getDepositPercent() { return depositPercent; }
+    public BigDecimal getDepositAmount() { return depositAmount; }
+    public BigDecimal getRemainingAmount() { return remainingAmount; }
+    public LocalDateTime getRemainingDueAt() { return remainingDueAt; }
+    public LocalDate getDeliveryDateSnapshot() { return deliveryDateSnapshot; }
+    public String getShippingMethodSnapshot() { return shippingMethodSnapshot; }
+    public String getPaymentTermsSnapshot() { return paymentTermsSnapshot; }
+    public String getStatus() { return status; }
 }

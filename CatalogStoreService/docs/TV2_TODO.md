@@ -49,7 +49,7 @@ TV2 **không sửa** file `Store*` của TV1. Quyền chủ store đi qua `Store
 - [x] Request/response DTO cho toàn bộ API của TV2
 - [x] Test `ProductSpecificationsTest` (5 test, H2)
 
-**Chưa có:** toàn bộ service impl (trừ `StoreAccessServiceImpl`), controller public CA*, IN07/IN08 controller, migration seed, test service/controller.
+**Đã bổ sung sau checklist gốc:** `CatalogApplicationServiceImpl` cho IN06/IN07, `InternalVariantController` cho IN07, contract IN12 giữ kho cùng migration/test. **Chưa có:** các service impl/controller public CA* còn lại, IN08 promotion engine/controller, migration seed.
 
 ## 4. Checklist theo thứ tự làm
 
@@ -89,9 +89,9 @@ Thứ tự theo phụ thuộc dữ liệu: `product.category_id` bắt buộc �
 
 ### Bước 5 — Snapshot cho TV3/TV4 (~0.5 ngày)
 
-- [ ] IN06 `CatalogApplicationServiceImpl.getProductSnapshot`: kiểm tra variant thuộc product, 404 nếu sai
-- [ ] IN07 `POST /internal/v1/variants/snapshots`: giữ thứ tự đầu vào, gộp ID trùng, thiếu ID trả 404 kèm danh sách ID thiếu; load product + store theo lô
-- [ ] Cập nhật `docs/contracts/README.md`: thêm IN07, mô tả field `VariantSnapshotResponse`, quyền caller (`commerce`, `rfq`)
+- [x] IN06 `CatalogApplicationServiceImpl.getProductSnapshot`: kiểm tra variant thuộc product, 404 nếu sai
+- [x] IN07 `POST /internal/v1/variants/snapshots`: giữ thứ tự đầu vào, gộp ID trùng, thiếu ID trả 404 kèm danh sách ID thiếu; load product + store theo lô
+- [x] Cập nhật `docs/contracts/README.md`: thêm IN07, mô tả field `VariantSnapshotResponse`, quyền caller (`commerce`, `rfq`)
 - [ ] Contract test: JSON field name đúng contract, 404, caller không có service token bị chặn
 - [ ] Báo TV3/TV4 contract đã sẵn sàng
 
@@ -108,20 +108,22 @@ Thứ tự theo phụ thuộc dữ liệu: `product.category_id` bắt buộc �
 
 ### Bước 7 — Promotion engine IN08 (~1.5 ngày)
 
-- [ ] Class thuần `PromotionCalculator` (không phụ thuộc Spring) để unit test
-- [ ] `PromotionCalculationServiceImpl`: load variant + promotion hiệu lực (`findEffective`) + rules, gọi calculator
-- [ ] `POST /internal/v1/promotions/calculate`
+- [x] Class thuần `PromotionCalculator` (không phụ thuộc Spring) để unit test
+- [x] `PromotionCalculationServiceImpl`: load variant + promotion hiệu lực (`findEffective`) + rules, gọi calculator
+- [x] `POST /internal/v1/promotions/calculate`
 - [ ] Quy tắc tính MVP:
   - `PERCENT_DISCOUNT`: giảm `lineSubtotal × percent / 100` trên line target (target null = mọi line của store)
   - `FIXED_DISCOUNT`: giảm số tiền cố định trên line target, không vượt line subtotal
   - `BUY_X_GET_Y`: số lần áp dụng = `floor(qtyTarget / minQuantity)`; giảm `min(lần × rewardQuantity, qtyReward) × giá reward` trên line reward; reward phải có trong giỏ
-  - Mỗi line nhận tối đa 1 rule có lợi nhất; làm tròn VND `HALF_UP` theo line; `discountTotal ≤ subtotal`
+  - **Quyết định mới TV3/nhóm (21/10/2026):** nhiều promotion được cộng dồn; áp dụng giảm tiền cố định trước, sau đó giảm theo phần trăm; làm tròn **lên 1 VND tại tổng cuối mỗi seller order**; `discountTotal ≤ subtotal`. Không dùng quy tắc cũ “1 rule tốt nhất/line” hoặc `HALF_UP` theo line.
+  - **Đã chốt thêm:** mỗi reward line chọn một `BUY_X_GET_Y` có lợi nhất; `FIXED_DISCOUNT` toàn store phân bổ xuống ORDER_ITEM theo tỷ lệ subtotal, phần lẻ vào dòng cuối. Reward line và tổng sau làm tròn phải đối soát bằng nhau.
+  - **Đã chốt:** BUY_X_GET_Y tốt nhất trước fixed; cộng các tỷ lệ phần trăm trên phần còn lại sau fixed, tối đa 100%/line. IN08 engine/controller đã có; kiểm thử đối soát với Commerce trước checkout.
 - [ ] Unit test: đủ 3 loại; trigger khác reward; reward không có trong giỏ; nhiều bội số X; promotion hết hạn/chưa bắt đầu/`DRAFT`; variant khác store (400); làm tròn
-- [ ] Ghi contract IN08 vào `docs/contracts/README.md`, gửi TV3 review
+- [x] Ghi contract IN08 vào `docs/contracts/README.md`, có Feign mirror ở Commerce
 
 ### Bước 8 — Chờ TV3 (chưa code)
 
-- [ ] Đề xuất API internal trừ tồn kho: `UPDATE ... SET stock_quantity = stock_quantity - :qty WHERE variant_id = :id AND stock_quantity >= :qty`, có idempotency key. Chỉ ghi vào contract, code khi TV3 chốt flow checkout
+- [x] Đã có IN12 reserve/get/confirm/release, migration V2 trong Catalog và Feign mirror Commerce; stock_quantity là on-hand, hold còn hiệu lực được trừ khỏi availability. TTL đã chốt 15 phút; checkout/payment chưa dùng contract này, mốc confirm/release vẫn cần TV5 chốt.
 
 ### Bước 9 — Frontend (`MoonCakeMarketplaceFE`)
 
@@ -133,10 +135,10 @@ Thứ tự theo phụ thuộc dữ liệu: `product.category_id` bắt buộc �
 
 | # | Câu hỏi | Đề xuất hiện tại | Chốt với |
 |---|---|---|---|
-| 1 | Nhiều promotion cùng áp dụng | Mỗi line 1 rule có lợi nhất, không cộng dồn | TV3, nhóm |
-| 2 | Làm tròn tiền | VND, scale 0, `HALF_UP`, theo line | TV3, TV5 |
-| 3 | `FIXED_DISCOUNT` khi `targetVariantId` null | Giảm trên tổng đơn của store, phân bổ theo line | TV3 |
-| 4 | Trừ tồn kho / chống bán quá | UPDATE có điều kiện + idempotency key | TV3 |
+| 1 | Nhiều promotion cùng áp dụng | Đã chốt cộng dồn; một BUY_X_GET_Y tốt nhất trước fixed, sau đó cộng tỷ lệ percent | TV3, nhóm |
+| 2 | Làm tròn tiền | Đã chốt lên 1 VND tại tổng cuối từng seller order; phân bổ chênh lệch xuống line còn TODO | TV3, TV5 |
+| 3 | `FIXED_DISCOUNT` khi `targetVariantId` null | Đã chốt giảm trên tổng store, phân bổ theo tỷ lệ line subtotal, phần lẻ vào line cuối | TV3 |
+| 4 | Trừ tồn kho / chống bán quá | IN12 giữ 15 phút; chốt payment transition và đảm bảo mọi stock update kiểm tra hold | TV3, TV5 |
 | 5 | Xóa product/variant/promotion (CA10, CA15, CA21) | Chưa làm; dùng `INACTIVE`/`DISABLED` thay vì xóa | Nhóm |
 | 6 | Search không dấu trên SQL Server | Kiểm tra collation khi chạy DB thật; nếu cần thì thêm cột/chuẩn hóa sau | Nhóm |
 | 7 | Tắt variant `ACTIVE` cuối cùng của product đang `ACTIVE` | Chặn (400) | Tự quyết, ghi lại |

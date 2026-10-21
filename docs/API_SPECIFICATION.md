@@ -24,10 +24,10 @@ Mỗi dịch vụ sở hữu cơ sở dữ liệu riêng. Giao tiếp đồng b�
 |---|---|---|
 | Identity | ID01–ID12, AD03–AD04 và lịch sử xác minh supplier | AD01–AD02, AU01–AU05 |
 | Catalog & Store | ST01–ST04 | Danh mục, sản phẩm bán lẻ, biến thể, khuyến mãi và các thao tác kiểm duyệt/xóa trong mục 4 |
-| Commerce | Chưa có public controller cho các mục 5.1–5.5 | Toàn bộ public API Commerce trong mục 5 |
-| RFQ & Negotiation | Có skeleton `POST /api/quotations/{quotationId}/accept`; chưa đủ contract và kiểm tra quyền như RQ15 thiết kế | Các API RFQ, báo giá còn lại và hội thoại/WebSocket trong mục 6 |
+| Commerce | OR01–OR06, OR08–OR11 đã có controller/backend đọc-ghi cơ bản | OR07, OR12 và các API TV5/TV6 trong mục 5 chưa triển khai đầy đủ |
+| RFQ & Negotiation | `POST /api/quotations/{quotationId}/accept` nhận version/addressId và buyer principal, nhưng conversion vẫn trả 501 | Các API RFQ, báo giá còn lại và hội thoại/WebSocket trong mục 6 |
 
-“Có controller” chỉ xác nhận route đã khai báo, **không xác nhận nghiệp vụ đã hoàn chỉnh hoặc sẵn sàng production**. Các API nội bộ đã có controller gồm IN01–IN06, IN09 và IN11; IN07, IN08, IN10 chưa có. Gateway hiện chưa định tuyến `/api/seller-orders/**`, nên các endpoint đó cũng chưa thể gọi qua Gateway nếu chỉ thêm controller Commerce. Trạng thái này là ảnh chụp mã nguồn ngày cập nhật; khi triển khai thêm phải cập nhật tài liệu cùng contract và test.
+“Có controller” chỉ xác nhận route đã khai báo, **không xác nhận nghiệp vụ đã hoàn chỉnh hoặc sẵn sàng production**. `GET /api/cart` chỉ trả ID/quantity; `POST /api/cart/pricing` gọi Catalog IN07/IN08 để trả giá/tổng theo store nhưng không giữ kho hay tạo đơn. Order read hiện chưa có dữ liệu từ checkout thực tế. Các API nội bộ đã có controller gồm IN01–IN09, IN11 và IN12; IN10 chưa có. Gateway đã định tuyến `/api/seller-orders/**` về Commerce. Trạng thái này là ảnh chụp mã nguồn ngày cập nhật; khi triển khai thêm phải cập nhật tài liệu cùng contract và test.
 
 ## 2. Quy ước API
 
@@ -171,6 +171,8 @@ Hỗ trợ `PERCENT_DISCOUNT`, `FIXED_DISCOUNT`, `BUY_X_GET_Y`. Sản phẩm đi
 | OR05 | `DELETE /api/cart/items` | Xóa toàn bộ mục trong giỏ | Khách hàng |
 | OR06 | `POST /api/cart/pricing` | Tính thử giá, khuyến mãi và tổng tiền | Khách hàng |
 | OR07 | `POST /api/checkout` | Đặt hàng, tách đơn theo cửa hàng | Khách hàng |
+
+OR06 không nhận giá hoặc danh sách item từ client: server đọc toàn bộ cart active của principal, gọi IN07/IN08 theo store và trả `subtotal`, `discountTotal`, `totalAmount`, `stores[]` với line snapshot. Preview không giữ tồn kho; OR07 phải tính lại giá và reserve trước khi tạo đơn.
 | OR08 | `GET /api/orders` | Xem lịch sử đơn hàng | Khách hàng |
 | OR09 | `GET /api/orders/{orderId}` | Xem chi tiết đơn hàng tổng | Khách hàng |
 | OR10 | `GET /api/seller-orders` | Xem danh sách đơn của nhà cung cấp | Nhà cung cấp |
@@ -309,10 +311,13 @@ Các endpoint dưới đây dành cho service-to-service, không được Gatewa
 | IN08 | `POST /internal/v1/promotions/calculate` | Catalog → Commerce | Kết quả tính khuyến mãi theo cửa hàng và các mục hàng |
 | IN09 | `POST /internal/v1/orders/from-accepted-quotation` | Commerce ← RFQ | Tạo đơn từ báo giá được chấp nhận |
 | IN10 | `GET /internal/v1/orders/by-quotation/{quotationId}` | Commerce → RFQ | Tra cứu đơn đã tạo từ báo giá |
+| IN12 | `POST /internal/v1/inventory/reservations`, `GET /{reservationKey}`, `PUT /{reservationKey}/confirm`, `PUT /{reservationKey}/release` | Catalog → Commerce | Giữ, tra cứu, xác nhận hoặc giải phóng tồn kho bằng cùng reservation key; chỉ caller `commerce` |
 
-IN09 nhận định danh RFQ/báo giá/phiên bản, khách hàng, nhà cung cấp, cửa hàng, thời điểm chấp nhận, bản lưu địa chỉ, các mục hàng, giá và điều khoản đã thống nhất. Kết quả gồm `orderId`, `sellerOrderId`, `quotationId`, `quotationVersion`, `status`.
+IN09 đã có DTO cho định danh RFQ/báo giá/phiên bản, khách hàng, nhà cung cấp, cửa hàng, thời điểm chấp nhận, snapshot cửa hàng/địa chỉ, các mục hàng, giá và điều khoản. Kết quả định nghĩa `orderId`, `sellerOrderId`, `quotationId`, `quotationVersion`, `status`. Controller hiện trả 501 với payload hợp lệ vì chưa có conversion/idempotency/obligation; không coi DTO này là chức năng đã hoàn thành. IN10 chưa có route.
 
 Endpoint IN11 `GET /internal/v1/seller-orders/{sellerOrderId}/payment-context` hiện có trong mã nguồn. Chức năng này phục vụ trao đổi trong Commerce và được thiết kế sử dụng lời gọi service nội bộ; không bắt buộc gọi HTTP giữa TV3, TV5 và TV6.
+
+IN12 hiện có contract và migration Catalog, nhưng chưa được checkout/payment gọi. `expiresAt` do Commerce cung cấp với TTL giữ kho 15 phút; Catalog trả `EXPIRED` khi hết hạn và không cho confirm. Dùng cùng key/payload khi retry; xem chi tiết tại `docs/contracts/README.md`.
 
 ## 8. Dữ liệu request và response chính
 

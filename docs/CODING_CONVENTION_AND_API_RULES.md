@@ -502,7 +502,7 @@ Admin response reuse các projection đã có và chỉ bổ sung field cần ch
 
 ### 11.4. Internal REST/OpenFeign contracts
 
-Internal URL không nằm trong Gateway public route. Có controller không có nghĩa đã an toàn: Identity/Catalog hiện còn `/internal/**` permitAll, phải hoàn thiện service authentication.
+Internal URL không nằm trong Gateway public route. Identity/Catalog/Commerce đã có service-token authentication cho các route nội bộ hiện tại; mỗi route mới phải khai báo đúng caller role, không dùng `permitAll`.
 
 | Mã / hiện trạng | Method + path | Provider → consumer | Input → output | Ghi chú |
 |---|---|---|---|---|
@@ -513,10 +513,11 @@ Internal URL không nằm trong Gateway public route. Có controller không có 
 | IN05 C | `GET /internal/v1/stores/{storeId}/summary` | Catalog → Commerce/RFQ | storeId → StoreSummaryResponse | Snapshot display + supplier binding. |
 | IN06 S | `GET /internal/v1/products/{productId}/variants/{variantId}/snapshot` | Catalog → Commerce/RFQ | IDs → ProductSnapshotResponse | Kiểm tra đúng parent; DTO hiện có còn thiếu productCode/image/store/availability. |
 | IN07 N | `POST /internal/v1/variants/snapshots` | Catalog → Commerce | variantIds[] → VariantSnapshotResponse[] | Cart chỉ giữ variantId; batch này tránh bắt caller biết productId trước và tránh N+1. Limit kỹ thuật phải công bố; missing items fail rõ, không âm thầm bỏ. |
-| IN08 N | `POST /internal/v1/promotions/calculate` | Catalog → Commerce | storeId + lines(variantId,quantity) → PromotionCalculationResult | Catalog quyết price/rules/evaluation time; trả applied rules + line discounts/reward lines; caller không gửi arbitrary price để được tin. |
-| IN09 S,K | `POST /internal/v1/orders/from-accepted-quotation` | Commerce ← RFQ | AcceptedQuotationOrderRequest → OrderCreationResponse | Snapshot đầy đủ, authenticated RFQ caller, dedup quotation; controller hiện trả 200, target create 201/replay contract thống nhất. |
+| IN08 C | `POST /internal/v1/promotions/calculate` | Catalog → Commerce | storeId + lines(variantId,quantity) → PromotionCalculationResult | Catalog quyết price/rules/evaluation time; trả applied rules + line discounts/reward lines; caller không gửi arbitrary price để được tin. |
+| IN09 S,K | `POST /internal/v1/orders/from-accepted-quotation` | Commerce ← RFQ | AcceptedQuotationOrderRequest → OrderCreationResponse | Hai phía đã có DTO snapshot; authenticated RFQ caller; conversion hiện 501. Cần dedup quotation, create 201/replay contract thống nhất. |
 | IN10 N | `GET /internal/v1/orders/by-quotation/{quotationId}` | Commerce → RFQ | quotationId → OrderCreationResponse | Lookup kết quả khi POST timeout; 404 chưa đủ kết luận POST cũ không còn đang chạy. |
 | IN11 S, legacy | `GET /internal/v1/seller-orders/{sellerOrderId}/payment-context` | Commerce hiện có route | sellerOrderId → SellerOrderPaymentContext | TV3/TV5/TV6 dùng Java service; không bắt nội bộ Commerce phải gọi HTTP endpoint này. |
+| IN12 C | `POST /internal/v1/inventory/reservations`; `GET /{reservationKey}`; `PUT /{reservationKey}/confirm`, `/release` | Catalog → Commerce | reservationKey + expiresAt + variant quantities → trạng thái hold | Chỉ caller `commerce`; Catalog giữ kho theo key, hết hạn không còn chiếm availability; checkout/payment chưa tích hợp. |
 
 `VariantSnapshotResponse` đích cần variantId, productId, storeId, supplierId, productCode, productName, variantName, sku, imageUrl?, basePrice, availability/status. Retail dùng giá Catalog; negotiated quotation dùng giá đã accept, không đổi trường `agreedUnitPrice` hiện có sang ý nghĩa mới mà chưa migrate consumer.
 
@@ -528,9 +529,9 @@ IN09 payload đích gồm:
 - `items[] {variantId?, productCodeSnapshot?, productNameSnapshot, variantNameSnapshot?, skuSnapshot?, imageUrlSnapshot?, quantity, unitPrice, discountAmount, subtotal}`: map QUOTATION_ITEM custom name sang order display; Commerce validate cấu trúc/tổng nhưng không reprice Catalog.
 - `subtotal`, `totalAmount`: ngữ nghĩa shipping/discount phải được TV3–TV4 chốt. Currency chung, rounding và zero-obligation treatment phải thống nhất TV5.
 
-OrderCreationResponse đích: `orderId`, `sellerOrderId`, `quotationId`, `quotationVersion`, `status`. Wire version truyền rõ; physical SELLER_ORDER hiện chỉ có quotationId ref, nếu cần persist version riêng phải cập nhật physical hoặc thống nhất dùng immutable quotation ID làm định danh version. Hai DTO hiện tại ở RFQ/Commerce chỉ có ID/version, chưa đáp ứng payload trên.
+OrderCreationResponse DTO đã có: `orderId`, `sellerOrderId`, `quotationId`, `quotationVersion`, `status`. Wire version truyền rõ; physical SELLER_ORDER hiện chỉ có quotationId ref, nếu cần persist version riêng phải cập nhật physical hoặc thống nhất dùng immutable quotation ID làm định danh version. Request DTO RFQ/Commerce đã có snapshot nhưng TV4 chưa lấy dữ liệu tin cậy để dựng payload và TV3 chưa persist conversion.
 
-Inventory reservation là quyết định còn thiếu, **chưa phải API đã có**. Nếu nhóm chọn reservation thì contract cần đủ reserve/confirm/release và tra cứu kết quả bằng idempotency key, do Catalog sở hữu; kèm schema, TTL, concurrency, compensation và contract tests. Không thêm chỉ một endpoint decrement rồi coi distributed checkout đã hoàn chỉnh.
+Nhóm đã chọn inventory reservation và Catalog có IN12 cùng migration V2. **TTL đã chốt 15 phút; còn cần TV5 chốt điểm confirm/release và compensation/recovery giữa các DB**; vì vậy có API giữ kho chưa đồng nghĩa checkout distributed đã hoàn chỉnh. Tham khảo `docs/contracts/README.md` để xem payload/status.
 
 ### 11.5. Contract Java trong Commerce
 
@@ -541,7 +542,7 @@ Inventory reservation là quyết định còn thiếu, **chưa phải API đã 
 | TV6 → TV3/TV5 | `confirmDelivered`, `acceptSellerOrder` | Persist shipment/order state rồi đánh giá settlement theo local transaction boundary. |
 | TV5 → TV3/TV6 | `getDisputeBlockingStatus`, `getSettlementStatus` | Chặn payout và phản ánh kết quả finance. |
 
-Đây là tên đề xuất cho interface/method trong service layer; không tạo module/shared service hoặc Feign vì khác thành viên. Đặt trách nhiệm state transition tại một owner rõ ràng để không có ba implementation cập nhật status khác nhau.
+Đây là contract Java nội bộ cần TV3–TV5–TV6 chốt trước khi bật tạo đơn: TV3 gọi TV5 tạo initial `FULL` obligation cho retail (hoặc `DEPOSIT` cho RFQ) trong cùng Commerce transaction; TV5 gọi Catalog IN12 để confirm/release theo kết quả thanh toán đã xác minh, và có retry bền vững khi gọi mạng lỗi. `PaymentApplicationService` hiện chỉ thực thi `getPaymentContext`; chưa có obligation/callback. Không thêm Feign giữa các phần cùng Commerce và không tự cho checkout thành công khi chưa có các transition này. Đặt trách nhiệm state transition tại một owner rõ ràng để không có ba implementation cập nhật status khác nhau.
 
 ## 12. Flow bắt buộc và trường hợp lỗi
 
@@ -577,7 +578,7 @@ Inventory reservation là quyết định còn thiếu, **chưa phải API đã 
 
 Spec có các chuỗi trạng thái **gợi ý**; bảng CHECK thực tế và policy phải được đối chiếu trước khi chuyển thành code. Mỗi flow cần bảng `fromState + command + actor + guard → toState + sideEffect`, kèm test cho transition bị cấm.
 
-Các quyết định còn mở: required verification để bán; draft/publish và chỉnh RFQ sau báo giá; revision/accept race; quote allocation/master-order grouping; promotion stacking/rounding; stock reservation; lifecycle payment/hold; refund matrix; dispute authority; nhiều shipment/return/failure; acceptance timeout; review eligibility; archive/delete; currency và due-time timezone. Không đưa enum như `ARCHIVED` hoặc cột `acceptedAt` vào entity nếu DB/contract chưa hỗ trợ.
+Các quyết định còn mở: required verification để bán; draft/publish và chỉnh RFQ sau báo giá; revision/accept race; quote allocation/master-order grouping; phân bổ chênh lệch khi ghi `ORDER_ITEM DECIMAL(18,2)`; lifecycle payment/hold; refund matrix; dispute authority; nhiều shipment/return/failure; acceptance timeout; review eligibility; archive/delete; currency và due-time timezone. Đã chốt promotion cộng dồn, BUY_X_GET_Y tốt nhất trên mỗi reward line trước fixed, rồi cộng tỷ lệ percent trên phần còn lại; fixed toàn store phân bổ theo tỷ lệ line subtotal, làm tròn lên 1 VND tại tổng seller order; giữ kho 15 phút. Không đưa enum như `ARCHIVED` hoặc cột `acceptedAt` vào entity nếu DB/contract chưa hỗ trợ.
 
 ## 13. Gateway, compatibility và lộ trình áp dụng
 

@@ -21,4 +21,16 @@ public class OrderItemEntity extends BaseCommerceEntity {
     @Column(name = "unit_price", nullable = false, precision = 18, scale = 2) private BigDecimal unitPrice;
     @Column(name = "discount_amount", nullable = false, precision = 18, scale = 2) private BigDecimal discountAmount;
     @Column(name = "subtotal", nullable = false, precision = 18, scale = 2) private BigDecimal subtotal;
+
+    public Long getSellerOrderId() { return sellerOrderId; }
+    public Long getVariantIdRef() { return variantIdRef; }
+    public String getProductCodeSnapshot() { return productCodeSnapshot; }
+    public String getProductNameSnapshot() { return productNameSnapshot; }
+    public String getSkuSnapshot() { return skuSnapshot; }
+    public String getVariantNameSnapshot() { return variantNameSnapshot; }
+    public String getImageUrlSnapshot() { return imageUrlSnapshot; }
+    public Integer getQuantity() { return quantity; }
+    public BigDecimal getUnitPrice() { return unitPrice; }
+    public BigDecimal getDiscountAmount() { return discountAmount; }
+    public BigDecimal getSubtotal() { return subtotal; }
 }

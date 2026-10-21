@@ -21,4 +21,15 @@ public class CustomerOrderEntity extends BaseCommerceEntity {
     @Column(name = "grand_total", nullable = false, precision = 18, scale = 2) private BigDecimal grandTotal;
     @Column(name = "status", nullable = false, length = 30) private String status;
     @Column(name = "placed_at", nullable = false) private LocalDateTime placedAt;
+
+    public String getOrderNo() { return orderNo; }
+    public Long getCustomerIdRef() { return customerIdRef; }
+    public String getSourceType() { return sourceType; }
+    public Long getRfqIdRef() { return rfqIdRef; }
+    public BigDecimal getSubtotal() { return subtotal; }
+    public BigDecimal getDiscountTotal() { return discountTotal; }
+    public BigDecimal getShippingTotal() { return shippingTotal; }
+    public BigDecimal getGrandTotal() { return grandTotal; }
+    public String getStatus() { return status; }
+    public LocalDateTime getPlacedAt() { return placedAt; }
 }

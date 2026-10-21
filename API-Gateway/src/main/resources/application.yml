@@ -23,7 +23,7 @@ spring:
             - id: commerce-service
               uri: ${COMMERCE_SERVICE_URL:http://localhost:8083}
               predicates:
-                - Path=/api/cart/**,/api/checkout/**,/api/orders/**,/api/payments/**,/api/cancellations/**,/api/refunds/**,/api/shipments/**,/api/disputes/**,/api/settlements/**,/api/reviews/**
+                - Path=/api/cart,/api/cart/**,/api/checkout,/api/checkout/**,/api/orders,/api/orders/**,/api/seller-orders,/api/seller-orders/**,/api/payments/**,/api/cancellations/**,/api/refunds/**,/api/shipments/**,/api/disputes/**,/api/settlements/**,/api/reviews/**
             - id: rfq-negotiation-service
               uri: ${RFQ_SERVICE_URL:http://localhost:8084}
               predicates:
