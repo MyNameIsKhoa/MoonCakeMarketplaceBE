@@ -22,7 +22,8 @@ Callers send both `X-Service-Name` and `X-Service-Token`. The name must match th
 | User summary | `commerce`, `rfq` |
 | Address summary | `commerce` |
 | Supplier summary | `catalog`, `commerce`, `rfq` |
-| Catalog store/product summaries | `commerce`, `rfq` |
+| Catalog store/product summaries and variant snapshots (IN06, IN07) | `commerce`, `rfq` |
+| Catalog promotion calculation (IN08) | `commerce` only |
 | Catalog inventory reservations | `commerce` only |
 | Commerce internal order/payment-context endpoints | `rfq` |
 
@@ -38,9 +39,9 @@ Browser development can call Gateway from `http://localhost:5173`. Configure `CO
 
 | Contract / owner | Endpoint / consumer | Current versioned payload |
 |---|---|---|
-| Product variant snapshot / Catalog | `GET /internal/v1/products/{productId}/variants/{variantId}/snapshot`; Commerce, RFQ | `productId`, `variantId`, `productName`, `variantName`, `sku`, `agreedUnitPrice` |
-| Variant snapshots / Catalog | `POST /internal/v1/variants/snapshots`; Commerce | `variantIds` (1–100, positive); ordered, deduplicated `variantId`, `productId`, `storeId`, `supplierId`, names/codes/image, `basePrice`, `stockQuantity`, variant/product/store statuses. Missing variant is `404`. |
-| Promotion pricing / Catalog | `POST /internal/v1/promotions/calculate`; Commerce only | `{storeId,lines:[{variantId,quantity}]}` → `storeId`, UTC `calculatedAt`, `subtotal`, `discountTotal`, rounded `totalAmount`, per-line prices/discounts/rules and applied promotions. Prices/rules are loaded by Catalog, not accepted from caller. |
+| Product variant snapshot (IN06) / Catalog | `GET /internal/v1/products/{productId}/variants/{variantId}/snapshot`; Commerce, RFQ | `productId`, `variantId`, `productName`, `variantName`, `sku`, `agreedUnitPrice` (= Catalog `base_price` hiện tại; tên field giữ nguyên vì consumer đã mirror). `404` khi variant không thuộc `productId`. Trả cả variant không ACTIVE. |
+| Variant snapshots batch (IN07) / Catalog | `POST /internal/v1/variants/snapshots`; Commerce (RFQ cũng được gọi) | Request `{"variantIds":[...]}`, 1–100 ID. Response theo thứ tự đầu vào, ID trùng được gộp: `variantId`, `productId`, `storeId`, `supplierId`, `productCode`, `productName`, `variantName`, `sku`, `imageUrl`, `basePrice`, `stockQuantity`, `variantStatus`, `productStatus`, `storeStatus`. Có ID không tồn tại → `404`; danh sách rỗng hoặc >100 → `400`. |
+| Promotion calculation (IN08) / Catalog | `POST /internal/v1/promotions/calculate`; Commerce only | `{storeId,lines:[{variantId,quantity}]}` → `storeId`, UTC `calculatedAt`, `subtotal`, `discountTotal`, rounded `totalAmount`, `lines[]` với `appliedRules[]`, `appliedPromotions[]`. Giá và rules do Catalog nạp; không nhận arbitrary price từ caller. Quy tắc cộng dồn và làm tròn ở dưới. |
 | Inventory hold / Catalog | `POST /internal/v1/inventory/reservations`; Commerce | `{reservationKey, expiresAt, lines:[{variantId,quantity}]}` → `{reservationKey,status,expiresAt,lines}`. Unique key, exact-payload replay, atomic availability check. |
 | Inventory recovery / Catalog | `GET /internal/v1/inventory/reservations/{reservationKey}`; Commerce | Returns `HELD`, `EXPIRED`, `CONFIRMED` or `RELEASED`; missing key is `404`. |
 | Inventory settlement / Catalog | `PUT /internal/v1/inventory/reservations/{reservationKey}/confirm` or `/release`; Commerce | Confirm deducts on-hand stock once; release frees an unconfirmed hold. Repeated same transition is idempotent; opposite transition is `409`. |

@@ -19,8 +19,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 @SpringBootTest
 @Transactional
-@DisplayName("ProductSpecifications — search CA06 trên H2")
-class ProductSpecificationsTest {
+@DisplayName("ProductRepository search — search CA06 trên H2")
+class ProductRepositorySearchTest {
 
     @Autowired ProductRepository productRepository;
     @Autowired StoreRepository storeRepository;
@@ -69,34 +69,34 @@ class ProductSpecificationsTest {
     @Test
     @DisplayName("public: bỏ product DRAFT và product thuộc store không ACTIVE")
     void publicSearchHidesDraftAndUnpublishedStore() {
-        assertEquals(List.of("PRD-1", "PRD-2", "PRD-5"), codes(ProductSpecifications.publicSearch(null, null, null)));
+        assertEquals(List.of("PRD-1", "PRD-2", "PRD-5"), codes(ProductRepository.publicSearch(null, null, null)));
     }
 
     @Test
     @DisplayName("public: q không phân biệt hoa thường, kết hợp categoryId")
     void publicSearchByNameAndCategory() {
-        assertEquals(List.of("PRD-1"), codes(ProductSpecifications.publicSearch("  BÁNH NƯỚNG ", null, 1L)));
+        assertEquals(List.of("PRD-1"), codes(ProductRepository.publicSearch("  BÁNH NƯỚNG ", null, 1L)));
     }
 
     @Test
     @DisplayName("public: ký tự % trong q được hiểu là ký tự thường")
     void publicSearchEscapesWildcards() {
-        assertEquals(List.of("PRD-5"), codes(ProductSpecifications.publicSearch("100%", null, null)));
-        assertTrue(codes(ProductSpecifications.publicSearch("%", null, 2L)).isEmpty());
+        assertEquals(List.of("PRD-5"), codes(ProductRepository.publicSearch("100%", null, null)));
+        assertTrue(codes(ProductRepository.publicSearch("%", null, 2L)).isEmpty());
     }
 
     @Test
     @DisplayName("owner: thấy cả DRAFT trong store của mình, không thấy store khác")
     void ownerSearchIncludesDraftOfOwnedStores() {
         assertEquals(List.of("PRD-1", "PRD-2", "PRD-3", "PRD-5"),
-                codes(ProductSpecifications.ownerSearch(List.of(activeStoreId), null, null, null)));
+                codes(ProductRepository.ownerSearch(List.of(activeStoreId), null, null, null)));
         assertEquals(List.of("PRD-4"),
-                codes(ProductSpecifications.ownerSearch(List.of(inactiveStoreId), "nướng", null, null)));
+                codes(ProductRepository.ownerSearch(List.of(inactiveStoreId), "nướng", null, null)));
     }
 
     @Test
     @DisplayName("owner: user không có store nào trả rỗng thay vì lỗi SQL IN ()")
     void ownerSearchWithoutStoresReturnsEmpty() {
-        assertTrue(codes(ProductSpecifications.ownerSearch(List.of(), null, null, null)).isEmpty());
+        assertTrue(codes(ProductRepository.ownerSearch(List.of(), null, null, null)).isEmpty());
     }
 }

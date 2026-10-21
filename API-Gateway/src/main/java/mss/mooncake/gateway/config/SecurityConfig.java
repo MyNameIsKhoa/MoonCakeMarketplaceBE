@@ -34,6 +34,10 @@ public class SecurityConfig {
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/stores", "/api/stores/**").permitAll()
+                        // Catalog public read (CA01, CA02, CA06, CA07, CA11, CA12, CA16, CA17); Catalog tự lọc dữ liệu chưa công bố.
+                        .requestMatchers(HttpMethod.GET, "/api/categories", "/api/categories/**",
+                                "/api/products", "/api/products/**",
+                                "/api/promotions", "/api/promotions/**").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/suppliers", "/api/suppliers/**").hasRole("ADMIN")
                         .anyRequest().hasAnyAuthority("ROLE_CUSTOMER", "ROLE_SUPPLIER", "ROLE_ADMIN"))

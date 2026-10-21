@@ -45,7 +45,9 @@ final class PromotionCalculator {
             Line trigger = lines.get(rule.getTargetVariantId());
             Line reward = lines.get(rule.getRewardVariantId());
             if (trigger == null || reward == null) continue;
-            long eligible = (long) (trigger.quantity / rule.getMinQuantity()) * rule.getRewardQuantity();
+            long groupSize = rule.getTargetVariantId().equals(rule.getRewardVariantId())
+                    ? (long) rule.getMinQuantity() + rule.getRewardQuantity() : rule.getMinQuantity();
+            long eligible = trigger.quantity / groupSize * rule.getRewardQuantity();
             int freeQuantity = (int) Math.min(eligible, reward.quantity);
             BigDecimal amount = reward.unitPrice.multiply(BigDecimal.valueOf(freeQuantity));
             RewardCandidate previous = bestRewards.get(reward.variantId);
@@ -62,10 +64,13 @@ final class PromotionCalculator {
         for (var rule : orderedRules) {
             if (rule.getRuleType() != PromotionType.FIXED_DISCOUNT || rule.getTargetVariantId() == null) continue;
             Line line = lines.get(rule.getTargetVariantId());
-            if (line != null) apply(line, rule, rule.getDiscountAmount(), null, applied);
+            if (line != null && line.quantity >= minimumQuantity(rule)) {
+                apply(line, rule, rule.getDiscountAmount(), null, applied);
+            }
         }
         for (var rule : orderedRules) {
-            if (rule.getRuleType() == PromotionType.FIXED_DISCOUNT && rule.getTargetVariantId() == null) {
+            if (rule.getRuleType() == PromotionType.FIXED_DISCOUNT && rule.getTargetVariantId() == null
+                    && lines.values().stream().mapToLong(line -> line.quantity).sum() >= minimumQuantity(rule)) {
                 allocateStoreFixed(new ArrayList<>(lines.values()), rule, applied);
             }
         }
@@ -75,7 +80,8 @@ final class PromotionCalculator {
             BigDecimal basis = line.remaining();
             for (var rule : orderedRules) {
                 if (rule.getRuleType() != PromotionType.PERCENT_DISCOUNT
-                        || rule.getTargetVariantId() != null && !rule.getTargetVariantId().equals(line.variantId)) {
+                        || rule.getTargetVariantId() != null && !rule.getTargetVariantId().equals(line.variantId)
+                        || line.quantity < minimumQuantity(rule)) {
                     continue;
                 }
                 BigDecimal amount = basis.multiply(rule.getDiscountPercent()).movePointLeft(2);
@@ -140,6 +146,8 @@ final class PromotionCalculator {
 
     private void validate(PromotionRuleEntity rule) {
         if (rule.getRuleType() == null) throw new ConflictException("Active promotion rule has no type");
+        if (rule.getMinQuantity() != null && rule.getMinQuantity() <= 0)
+            throw new ConflictException("Invalid minimum quantity");
         switch (rule.getRuleType()) {
             case FIXED_DISCOUNT -> {
                 if (rule.getDiscountAmount() == null || rule.getDiscountAmount().signum() < 0)
@@ -157,6 +165,10 @@ final class PromotionCalculator {
                     throw new ConflictException("Invalid buy-X-get-Y rule");
             }
         }
+    }
+
+    private int minimumQuantity(PromotionRuleEntity rule) {
+        return rule.getMinQuantity() == null ? 1 : rule.getMinQuantity();
     }
 
     private static final class Line {
