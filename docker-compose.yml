@@ -67,6 +67,14 @@ services:
       context: .
       dockerfile: CommerceService/Dockerfile
     environment:
+      PAYOS_CLIENT_ID: ${PAYOS_CLIENT_ID:-}
+      PAYOS_API_KEY: ${PAYOS_API_KEY:-}
+      PAYOS_CHECKSUM_KEY: ${PAYOS_CHECKSUM_KEY:-}
+      PAYOS_RETURN_URL: ${PAYOS_RETURN_URL:-http://localhost:5173/?finance=return}
+      PAYOS_CANCEL_URL: ${PAYOS_CANCEL_URL:-http://localhost:5173/?finance=cancel}
+      FINANCE_FEE_BASIS: ${FINANCE_FEE_BASIS:-}
+      FINANCE_FEE_ROUNDING: ${FINANCE_FEE_ROUNDING:-}
+      FINANCE_DISPUTE_ADMIN_ENABLED: ${FINANCE_DISPUTE_ADMIN_ENABLED:-false}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a random value of at least 32 characters}
       JWT_ISSUER: ${JWT_ISSUER:-mooncake-identity}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-mooncake-api}
