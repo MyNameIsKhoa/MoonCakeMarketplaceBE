@@ -318,3 +318,26 @@ Commit TV3 (`e9e6498`) tạo lại `service/impl/PromotionCalculator.java` với
 **Logic tính của TV3 giữ nguyên từng dòng** (chỉ đổi method instance → static). `mvnw.cmd -pl CatalogStoreService test` — **161/161 pass**.
 
 **Báo TV3:** engine IN08 nay nằm trong `PromotionCalculationServiceImpl.computeDiscounts`; khi sửa quy tắc tính thì sửa ở đây, không tạo lại class riêng trong `service/impl`.
+
+---
+
+## 2026-10-23
+
+### Buổi 1 (23/10) — Sửa `docker-compose.yml` để chạy backend trong Docker
+
+Giữ thiết kế **mỗi service một SQL Server riêng**; bật một service sẽ tự bật DB của nó.
+
+| Vấn đề trước | Đã sửa |
+|---|---|
+| Không ai tạo database (`mss_identity`, `mss_catalog_store`, …) → Flyway lỗi | Thêm `<svc>-db-init` chạy `IF DB_ID(...) IS NULL CREATE DATABASE ...` rồi thoát |
+| Service bật khi SQL Server chưa sẵn sàng | Healthcheck `sqlcmd SELECT 1`; chuỗi `db (healthy) → db-init (completed) → service`, `restart: on-failure` |
+| Catalog không có `IDENTITY_SERVICE_URL` → gọi Identity qua `localhost` trong container | Thêm `http://identity-service:8081` + `depends_on` identity |
+| CORS mặc định thiếu cổng FE 3000 | `http://localhost:3000,http://localhost:5173` |
+| Dữ liệu mất khi xóa container | Named volume cho 4 DB |
+| Gateway chờ cả 4 service | Gateway chỉ phụ thuộc Identity + Catalog |
+
+Mật khẩu SA lấy từ `MSSQL_SA_PASSWORD` trong `.env`. README thêm mục "Docker: toàn bộ backend"; `TODO_IMPLEMENTATION.md` ghi phần đã làm.
+
+**Kiểm tra:** `docker compose config -q` OK. Bản nhỏ (`api-gateway catalog-store-service` → kéo theo Identity + 2 DB): Flyway Identity V1–V3, Catalog V1–V4; smoke test **65/65 pass** qua Gateway trong Docker.
+
+**Chưa kiểm được bản đầy đủ (4 SQL Server + 5 JVM):** máy 7,7 GB RAM, WSL giới hạn 3,2 GB (`.wslconfig`, swap=0). Lúc build Commerce/RFQ, `catalog-db` bị kill (exit 137). Mỗi SQL Server cần ~700 MB nên bản đầy đủ cần khoảng 5–6 GB cho WSL. Commerce/RFQ chưa xác nhận chạy trong Docker.

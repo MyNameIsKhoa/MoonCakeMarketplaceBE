@@ -96,6 +96,26 @@ Mỗi business service có datasource SQL Server và Flyway location riêng. V1 
 
 Khi chạy service trực tiếp trên máy, `application.yml` mặc định kết nối SQL Server ở `localhost:1433`; đổi bằng `*_DB_URL`, `*_DB_USERNAME`, `*_DB_PASSWORD`. Compose đầy đủ publish bốn SQL container ra host lần lượt ở `14331`–`14334`, còn trong mạng Docker mỗi SQL Server vẫn nghe `1433`. `ddl-auto` là `none`; migration là nguồn tạo schema.
 
+## Docker: toàn bộ backend (`docker-compose.yml`)
+
+Mỗi business service có SQL Server riêng (database-per-service). Với mỗi service, Compose bật theo thứ tự: `<svc>-db` (đợi healthcheck `SELECT 1`) → `<svc>-db-init` (tạo database nếu chưa có, chạy xong thì thoát) → service (Flyway tạo bảng). Service cũng tự bật các service mà nó gọi tới: Catalog → Identity; Commerce → Identity, Catalog; RFQ → Identity, Catalog, Commerce. Gateway chỉ phụ thuộc Identity và Catalog. Dữ liệu lưu trong volume `*-db-data`.
+
+`.env` ở root cần có: `JWT_SECRET`, sáu biến `*_TO_*_TOKEN`, và nên có `MSSQL_SA_PASSWORD` (mật khẩu đủ mạnh cho SQL Server; nếu thiếu sẽ dùng mật khẩu mặc định trong file).
+
+```powershell
+docker compose up -d --build                                   # toàn bộ: 5 service + 4 SQL Server (~7–8GB RAM)
+docker compose up -d --build api-gateway catalog-store-service # chỉ Gateway + Catalog + Identity + 2 SQL Server (~4GB)
+docker compose ps                                              # trạng thái; *-db-init "Exited (0)" là bình thường
+docker compose logs -f catalog-store-service                   # xem log một service
+docker compose down                                            # tắt, giữ dữ liệu; thêm -v để xóa sạch dữ liệu
+```
+
+Cổng trên máy: Gateway `8080`, Identity `8081`, Catalog `8082`, Commerce `8083`, RFQ `8084`, SQL Server `14331`–`14334` (user `sa`, mật khẩu `MSSQL_SA_PASSWORD`). Tắt các service đang chạy bằng `java -jar` trước, vì trùng cổng 8080–8084.
+
+Admin: DB mới chưa có user nào. Đăng ký tài khoản admin, lấy `userId`, rồi tạo lại container Identity với biến này (PowerShell): `$env:ADMIN_USER_IDS="1"; docker compose up -d identity-service`. `scripts/catalog-smoke.ps1 -RegisterAdmin ...` làm bước đăng ký và in ra `userId`.
+
+CORS mặc định cho phép FE ở `http://localhost:3000` và `http://localhost:5173`.
+
 ## Demo Docker: Gateway + Identity + JWT
 
 [`compose.auth-demo.yml`](compose.auth-demo.yml) chỉ khởi động SQL Server cho Identity, một bước tạo database `mss_identity`, Identity Service và API Gateway. Demo dùng project/volume riêng, không thay đổi Compose đầy đủ. Dockerfiles hiện có build hai Spring Boot JAR thành image. Chỉ Gateway mở `http://localhost:8080`; Identity nghe `8081` và SQL Server nghe `1433` **bên trong** Docker, không publish hai port đó ra host.
