@@ -56,7 +56,7 @@ TV2 **không sửa** file `Store*` của TV1. Quyền chủ store đi qua `Store
 - [x] Promotion CA16–CA20 (chi tiết ở Bước 6)
 - [x] Promotion engine IN08 (chi tiết ở Bước 7)
 
-**Đã bổ sung khi tích hợp TV3:** IN12 reserve/get/confirm/release và migration V2; chưa được checkout/payment gọi. FE chưa nối API thật.
+**Đã bổ sung khi tích hợp TV3:** IN12 reserve/get/confirm/release và migration V4 (`V4__stock_reservation.sql`, đổi từ V2 vì trùng version); chưa được checkout/payment gọi. FE chưa nối API thật.
 
 ### 3.1. Danh sách API TV2 đã làm (20 endpoint)
 
@@ -200,7 +200,7 @@ Thứ tự theo phụ thuộc dữ liệu: `product.category_id` bắt buộc �
 
 ### Bước 8 — Chờ TV3 (chưa code)
 
-- [x] Đã có IN12 reserve/get/confirm/release, migration V2 trong Catalog và Feign mirror Commerce; stock_quantity là on-hand, hold còn hiệu lực được trừ khỏi availability. TTL đã chốt 15 phút; checkout/payment chưa dùng contract này, mốc confirm/release vẫn cần TV5 chốt.
+- [x] Đã có IN12 reserve/get/confirm/release, migration V4 trong Catalog và Feign mirror Commerce; stock_quantity là on-hand, hold còn hiệu lực được trừ khỏi availability. TTL đã chốt 15 phút; checkout/payment chưa dùng contract này, mốc confirm/release vẫn cần TV5 chốt.
 
 ### Bước 9 — Frontend (`MoonCakeMarketplaceFE`)
 

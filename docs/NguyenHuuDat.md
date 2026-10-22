@@ -229,3 +229,34 @@ Quy ước nhóm (`CODING_CONVENTION_AND_API_RULES.md` dòng 64) chỉ cho phép
 - Gửi TV3: contract IN07 + IN08 và quy tắc tính khuyến mãi để review.
 - Chạy service với SQL Server thật (kiểm tra migration V3, search tiếng Việt có dấu).
 - FE: nối `ProductList`, `ProductDetail`, `BrandStore`, `SellerCenter` với API thật.
+
+---
+
+## 2026-10-22
+
+### Rà soát thay đổi của TV3 trên phần Catalog
+
+Sau commit TV2 `50172c7`, TV3 push `e9e6498` (wip TV3 commerce + cross-service contracts) và `4ebc415` (merge). 27 file trong `CatalogStoreService` thay đổi:
+
+- **IN08 viết lại theo quy tắc nhóm chốt 21/10:** cộng dồn khuyến mãi — một `BUY_X_GET_Y` tốt nhất trên reward line → fixed discount → tổng các percent (tối đa 100%/line); chỉ làm tròn lên tại `totalAmount` của seller order. Response line có `appliedRules[]`. Quy tắc MVP ở Buổi 6 (không cộng dồn, HALF_UP từng line) **không còn áp dụng**. Test Catalog giảm 155 → 145.
+- **IN12 giữ tồn kho** (reserve/get/confirm/release, TTL 15 phút) được TV3 thêm vào Catalog, kèm bảng `stock_reservation`, `stock_reservation_line`.
+- IN08 chỉ cho `commerce` gọi; `PromotionCalculator.java` xuất hiện lại trong `service/impl`.
+
+### Sửa lỗi chặn: trùng version migration
+
+`V2__stock_reservation.sql` trùng version với `V2__catalog_store_status_constraint.sql` → Catalog **không khởi động được** trên SQL Server (`FlywayException: Found more than one migration with version 2`). Test H2 tắt Flyway nên không phát hiện.
+
+| Loại | File | Nội dung |
+|---|---|---|
+| Đổi tên | `db/migration/V2__stock_reservation.sql` → `V4__stock_reservation.sql` | Version trống tiếp theo sau V3 seed category. An toàn vì Flyway chặn trùng version trước khi chạy bất kỳ migration nào, nên chưa DB nào áp dụng file cũ |
+| Sửa | `CatalogStoreService/docs/TV2_TODO.md`, `docs/CODING_CONVENTION_AND_API_RULES.md` | Đổi "migration V2" của IN12 thành V4 |
+
+**Kết quả:** `mvnw.cmd -pl CatalogStoreService clean package` — 145/145 pass; SQL Server local áp dụng V1–V4 thành công; `scripts/catalog-smoke.ps1` — **53/53 pass** với engine IN08 mới (2 A + 1 B: subtotal 410.000, giảm 86.000, tổng 324.000).
+
+**Ghi nhận:** IN08 mới trả `discountTotal` dạng `86000.000000` (scale 6) — đúng giá trị, consumer nên so sánh số, không so chuỗi.
+
+### Việc tiếp theo
+
+- Báo TV3: đã đổi migration sang V4; DB local của ai đã tạo tay bảng stock thì cần kiểm tra lại.
+- TV2: CA14 (PATCH `stockQuantity`) và `stockQuantity` của IN07 chưa trừ lượng đang giữ (hold còn hiệu lực) theo contract IN12.
+- Bàn với TV3: đưa `PromotionCalculator` về đúng quy ước package; đối soát `minQuantity`, trigger = reward, giá có số lẻ.

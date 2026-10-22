@@ -6,7 +6,7 @@ spring:
   datasource:
     url: ${CATALOG_DB_URL:jdbc:sqlserver://localhost:1433;databaseName=mss_catalog_store;encrypt=false;trustServerCertificate=true}
     username: ${CATALOG_DB_USERNAME:sa}
-    password: ${CATALOG_DB_PASSWORD:sa}
+    password: ${CATALOG_DB_PASSWORD:12345}
     driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
   jpa:
     hibernate.ddl-auto: none

@@ -531,7 +531,7 @@ IN09 payload đích gồm:
 
 OrderCreationResponse DTO đã có: `orderId`, `sellerOrderId`, `quotationId`, `quotationVersion`, `status`. Wire version truyền rõ; physical SELLER_ORDER hiện chỉ có quotationId ref, nếu cần persist version riêng phải cập nhật physical hoặc thống nhất dùng immutable quotation ID làm định danh version. Request DTO RFQ/Commerce đã có snapshot nhưng TV4 chưa lấy dữ liệu tin cậy để dựng payload và TV3 chưa persist conversion.
 
-Nhóm đã chọn inventory reservation và Catalog có IN12 cùng migration V2. **TTL đã chốt 15 phút; còn cần TV5 chốt điểm confirm/release và compensation/recovery giữa các DB**; vì vậy có API giữ kho chưa đồng nghĩa checkout distributed đã hoàn chỉnh. Tham khảo `docs/contracts/README.md` để xem payload/status.
+Nhóm đã chọn inventory reservation và Catalog có IN12 cùng migration V4 (`V4__stock_reservation.sql`). **TTL đã chốt 15 phút; còn cần TV5 chốt điểm confirm/release và compensation/recovery giữa các DB**; vì vậy có API giữ kho chưa đồng nghĩa checkout distributed đã hoàn chỉnh. Tham khảo `docs/contracts/README.md` để xem payload/status.
 
 ### 11.5. Contract Java trong Commerce
 
