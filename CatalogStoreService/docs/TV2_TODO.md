@@ -191,7 +191,7 @@ Thứ tự theo phụ thuộc dữ liệu: `product.category_id` bắt buộc �
 
 ### Bước 7 — Promotion engine IN08 ✅ xong 2026-10-20
 
-- [x] Class thuần `PromotionCalculator` (không phụ thuộc Spring) để unit test
+- [x] Phần tính thuần `PromotionCalculationServiceImpl.computeDiscounts(...)` (static, không truy cập DB) để unit test trực tiếp — gộp từ `PromotionCalculator` ngày 22/10 theo quy ước package
 - [x] `PromotionCalculationServiceImpl`: load variant + promotion hiệu lực (`findEffective`) + rules, gọi calculator
 - [x] `POST /internal/v1/promotions/calculate` trong `InternalCatalogController`
 - [x] Quy tắc nhóm đã chốt ngày 21/10/2026: một `BUY_X_GET_Y` có lợi nhất trên reward line, sau đó cộng dồn fixed theo tỷ lệ line subtotal (phần lẻ vào line cuối), cuối cùng cộng các tỷ lệ percent trên phần còn lại; tổng seller order làm tròn lên VND. Không dùng quy tắc TV2 cũ “1 rule tốt nhất/line” hoặc `HALF_UP` theo line.
@@ -205,6 +205,8 @@ Thứ tự theo phụ thuộc dữ liệu: `product.category_id` bắt buộc �
 
 ### Bước 9 — Frontend (`MoonCakeMarketplaceFE`)
 
+- [x] **Nền tảng (2026-10-22):** `src/services/api/http.ts` (axios → Gateway `VITE_API_BASE_URL`, mặc định `http://localhost:8080`; gắn `Bearer` token; `ApiError` với `status`/`fieldErrors`; `setAccessToken` cho màn đăng nhập của TV1), `catalogTypes.ts` (type khớp DTO backend), `catalogApi.ts` (CA01–CA04, CA06–CA09, CA11–CA14, CA16–CA20), export qua `services/api/index.ts`. `npm run lint` + `npm run build` pass; đã gọi thật qua Gateway (9/9)
+- [x] CORS: Gateway mặc định cho phép `http://localhost:3000` (FE `npm run dev`) và `:5173`
 - [ ] Thay `src/services/api/mockBackend.ts` bằng API thật cho `ProductList`, `ProductDetail`, `BrandStore`
 - [ ] `pages/seller/SellerCenter.tsx`: quản lý product/variant/promotion
 - [ ] Bỏ phần tự tính khuyến mãi ở FE; giá cuối do server tính

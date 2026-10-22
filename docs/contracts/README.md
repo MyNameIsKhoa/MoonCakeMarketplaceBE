@@ -33,7 +33,7 @@ Clients should branch on the HTTP status, not parse an error message. A missing 
 
 The Gateway owns external HTTP routing and CORS. Identity routes include auth, users, addresses, admin operations, and a dedicated `/api/supplier-profile/**` route to Identity. Store/catalog paths route to Catalog; order/payment paths to Commerce; RFQ/quotation/chat paths to RFQ. `/internal/**` is not exposed as a Gateway route.
 
-Browser development can call Gateway from `http://localhost:5173`. Configure `CORS_ALLOWED_ORIGINS` as a comma-separated list for other explicit FE origins. The Gateway allows credentialed requests with the supported API methods and headers. This repository has no FE code or Vite configuration; when the FE is added, it should use the Gateway base URL and keep its own Vite proxy in the FE repository if preferred.
+Browser development can call Gateway from `http://localhost:3000` (FE `npm run dev`, Express + Vite) and `http://localhost:5173`. Configure `CORS_ALLOWED_ORIGINS` as a comma-separated list for other explicit FE origins. The Gateway allows credentialed requests with the supported API methods and headers. This repository has no FE code or Vite configuration; when the FE is added, it should use the Gateway base URL and keep its own Vite proxy in the FE repository if preferred.
 
 ## Other internal contracts
 

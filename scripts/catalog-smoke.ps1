@@ -152,6 +152,10 @@ $noAccentFound = Search 'banh nuong'
 Write-Host ("INFO  search khong dau 'banh nuong' -> {0} (phu thuoc collation cua DB)" -f $(if ($noAccentFound) { 'TIM THAY' } else { 'KHONG tim thay' }))
 $detail = Expect (Invoke-Api GET "$gateway/api/products/$($product.productId)") 200 'CA07 public xem product ACTIVE'
 Assert ($detail.variants.Count -eq 2) 'CA07 tra 2 variant ACTIVE'
+$variantPage = Expect (Invoke-Api GET "$gateway/api/products/$($product.productId)/variants") 200 'CA11 GET variants (public, sort mac dinh id)'
+Assert ($variantPage.items.Count -eq 2) 'CA11 tra 2 variant ACTIVE'
+[void](Expect (Invoke-Api GET "$gateway/api/products?storeId=$($store.storeId)&sort=id,desc") 200 'CA06 sort=id,desc (khong lap ORDER BY id)')
+[void](Expect (Invoke-Api GET "$gateway/api/categories?sort=id") 200 'CA01 sort=id')
 $summary = (Expect (Invoke-Api GET "$gateway/api/products?storeId=$($store.storeId)") 200 'CA06 listing theo store').items | Where-Object { $_.productId -eq $product.productId }
 Assert ([decimal]$summary.minPrice -eq 50000) "CA06 minPrice = gia variant ACTIVE thap nhat ($($summary.minPrice))"
 

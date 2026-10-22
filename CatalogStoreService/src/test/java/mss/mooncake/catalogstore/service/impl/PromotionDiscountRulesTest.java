@@ -14,7 +14,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
 class PromotionDiscountRulesTest {
-    private final PromotionCalculator calculator = new PromotionCalculator();
 
     @Test
     void sameVariantBuyXGetYUsesGroupsOfXPlusYAndRespectsOtherRuleThresholds() {
@@ -53,7 +52,7 @@ class PromotionDiscountRulesTest {
         var promotion = new PromotionEntity();
         ReflectionTestUtils.setField(promotion, "id", 1L);
         promotion.setName("Promotion");
-        return calculator.calculate(request, List.of(snapshot), List.of(promotion), rules, LocalDateTime.now());
+        return PromotionCalculationServiceImpl.computeDiscounts(request, List.of(snapshot), List.of(promotion), rules, LocalDateTime.now());
     }
 
     private PromotionRuleEntity rule(Long id, PromotionType type, Long target, Integer minimum) {

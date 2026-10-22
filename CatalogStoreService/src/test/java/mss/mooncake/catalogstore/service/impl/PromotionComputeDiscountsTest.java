@@ -13,14 +13,13 @@ import mss.mooncake.catalogstore.enums.PromotionType;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
-class PromotionCalculatorTest {
-    private final PromotionCalculator calculator = new PromotionCalculator();
+class PromotionComputeDiscountsTest {
 
     @Test
     void bestRewardThenFixedThenSummedPercentages() {
         var basket = basket(new PromotionCalculationRequest.Line(1L, 2),
                 new PromotionCalculationRequest.Line(2L, 2));
-        var results = calculator.calculate(basket, List.of(snapshot(1L, "100.00"), snapshot(2L, "40.00")),
+        var results = PromotionCalculationServiceImpl.computeDiscounts(basket, List.of(snapshot(1L, "100.00"), snapshot(2L, "40.00")),
                 List.of(promotion(1L), promotion(2L)),
                 List.of(buy(1L, 1L, 1L, 2L, 2, 1), buy(2L, 1L, 1L, 2L, 2, 2),
                         fixed(3L, 1L, null, "30.00"), percent(4L, 2L, null, "10.00"),
@@ -38,7 +37,7 @@ class PromotionCalculatorTest {
 
     @Test
     void storeFixedIsProportionalAndRemainderGoesToLastLine() {
-        var result = calculator.calculate(basket(new PromotionCalculationRequest.Line(1L, 1),
+        var result = PromotionCalculationServiceImpl.computeDiscounts(basket(new PromotionCalculationRequest.Line(1L, 1),
                         new PromotionCalculationRequest.Line(2L, 1)),
                 List.of(snapshot(1L, "100.00"), snapshot(2L, "50.00")), List.of(promotion(1L)),
                 List.of(fixed(1L, 1L, null, "10.00")), LocalDateTime.now());
@@ -49,13 +48,13 @@ class PromotionCalculatorTest {
 
     @Test
     void percentagesAreCappedAndOnlySellerTotalRoundsUp() {
-        var result = calculator.calculate(basket(new PromotionCalculationRequest.Line(1L, 1)),
+        var result = PromotionCalculationServiceImpl.computeDiscounts(basket(new PromotionCalculationRequest.Line(1L, 1)),
                 List.of(snapshot(1L, "0.60")), List.of(promotion(1L)),
                 List.of(percent(1L, 1L, null, "25.00"), percent(2L, 1L, null, "25.00")),
                 LocalDateTime.now());
         assertThat(result.lines().getFirst().lineTotal()).isEqualByComparingTo("0.3000");
         assertThat(result.totalAmount()).isEqualByComparingTo("1");
-        var capped = calculator.calculate(basket(new PromotionCalculationRequest.Line(1L, 1)),
+        var capped = PromotionCalculationServiceImpl.computeDiscounts(basket(new PromotionCalculationRequest.Line(1L, 1)),
                 List.of(snapshot(1L, "100.00")), List.of(promotion(1L)),
                 List.of(percent(1L, 1L, null, "80"), percent(2L, 1L, null, "80")),
                 LocalDateTime.now());
@@ -67,13 +66,13 @@ class PromotionCalculatorTest {
     void buyXGetYCountsMultipleTriggersAndNeedsRewardInBasket() {
         var promotion = promotion(1L);
         var rule = buy(1L, 1L, 1L, 2L, 2, 1);
-        var result = calculator.calculate(basket(new PromotionCalculationRequest.Line(1L, 4),
+        var result = PromotionCalculationServiceImpl.computeDiscounts(basket(new PromotionCalculationRequest.Line(1L, 4),
                         new PromotionCalculationRequest.Line(2L, 3)),
                 List.of(snapshot(1L, "10.00"), snapshot(2L, "5.00")),
                 List.of(promotion), List.of(rule), LocalDateTime.now());
         assertThat(result.discountTotal()).isEqualByComparingTo("10.00");
         assertThat(result.appliedPromotions().getFirst().rewardQuantity()).isEqualTo(2);
-        var withoutReward = calculator.calculate(basket(new PromotionCalculationRequest.Line(1L, 4)),
+        var withoutReward = PromotionCalculationServiceImpl.computeDiscounts(basket(new PromotionCalculationRequest.Line(1L, 4)),
                 List.of(snapshot(1L, "10.00")), List.of(promotion), List.of(rule), LocalDateTime.now());
         assertThat(withoutReward.discountTotal()).isEqualByComparingTo("0");
         assertThat(withoutReward.appliedPromotions()).isEmpty();

@@ -277,3 +277,44 @@ Sau commit TV2 `50172c7`, TV3 push `e9e6498` (wip TV3 commerce + cross-service c
 | Sửa | `scripts/catalog-smoke.ps1` | Bước 8: giữ 5 hộp → IN07 45/50 → CA14 đặt 3 bị 409, đặt 5 được → release → available 5 |
 
 **Lưu ý cho TV3:** Commerce mirror `VariantSnapshotResponse` chưa có `availableQuantity` (field thừa trong JSON được bỏ qua nên không lỗi); khi kiểm tra tồn ở giỏ/checkout nên thêm field này vào DTO mirror và dùng nó thay `stockQuantity`.
+
+### Buổi 3 (22/10) — Giai đoạn 1 FE: lớp gọi API catalog + sửa lỗi phân trang trên SQL Server
+
+**Frontend (`MoonCakeMarketplaceFE`):**
+
+| Loại | File | Nội dung |
+|---|---|---|
+| Thêm | `src/services/api/http.ts` | axios trỏ Gateway (`VITE_API_BASE_URL`, mặc định `http://localhost:8080`), gắn `Authorization: Bearer` từ `getAccessToken()`; `setAccessToken()` để màn đăng nhập (TV1) lưu token; lỗi chuẩn hóa thành `ApiError(status, message, fieldErrors)` với thông báo tiếng Việt |
+| Thêm | `src/services/api/catalogTypes.ts` | Type khớp DTO backend: `PageResponse`, category/product/variant/promotion request/response, status enum |
+| Thêm | `src/services/api/catalogApi.ts` | `catalogApi.categories/products/variants/promotions` cho 17 public endpoint của TV2 |
+| Sửa | `src/services/api/index.ts` | Export `catalogApi`, `ApiError`, `setAccessToken`, type catalog; ghi rõ `USE_MOCK_API` chỉ còn áp dụng cho address/checkout/order |
+| Sửa | `.env.example` | Thêm `VITE_API_BASE_URL` |
+
+`npm run lint` (tsc) và `npm run build` pass. Script gọi thật `catalogApi` qua Gateway: **9/9 pass** (list/search/get/variants/promotions + lỗi 400/401/403/404).
+
+**Backend:**
+
+| Loại | File | Nội dung |
+|---|---|---|
+| Sửa | `API-Gateway/src/main/resources/application.yml` | CORS mặc định thêm `http://localhost:3000` (FE chạy Express + Vite ở cổng 3000; trước đó preflight bị 403) |
+| Sửa | `docs/contracts/README.md` | Ghi cổng FE 3000 được phép CORS |
+| **Sửa lỗi** | `CatalogStoreService/.../dto/request/PageQuery.java` | `GET /api/products/{id}/variants` trả **500 trên SQL Server**: sort mặc định `id` + tie-breaker `id` → `ORDER BY variant_id, variant_id` (SQL Server từ chối, H2 chấp nhận). Mọi API gửi `?sort=id` cũng bị. Nay chỉ thêm tie-breaker khi sort chưa có `id` |
+| Thêm | `CatalogStoreService/src/test/.../dto/request/PageQueryTest.java` | 3 test: mặc định, không lặp `id`, giới hạn size/page/sort |
+| Sửa | `scripts/catalog-smoke.ps1` | Thêm CA11 GET variants, `sort=id,desc`, `sort=id` |
+
+**Kết quả:** Catalog **161/161 test pass**; smoke test **65/65 pass** trên SQL Server.
+
+**Ghi nhận:** Gateway trả **403** (không phải 401) cho request ghi khi chưa đăng nhập — FE nên coi "403 mà chưa có token" là cần đăng nhập. Lỗi CA11 chỉ lộ ra khi FE gọi thật: smoke test trước đó chưa gọi endpoint này.
+
+### Buổi 4 (22/10) — Đưa `PromotionCalculator` về đúng quy ước package (lần 2)
+
+Commit TV3 (`e9e6498`) tạo lại `service/impl/PromotionCalculator.java` với engine IN08 mới, trong khi `service/impl` theo quy ước chỉ chứa `*ServiceImpl` (đã dọn ở Buổi 9 ngày 20/10).
+
+| Trước | Sau |
+|---|---|
+| `service/impl/PromotionCalculator.java` (instance `calculate(...)`, class phụ `Line`, `RewardCandidate`, `Applied`) | Gộp vào `PromotionCalculationServiceImpl`: phần tính thuần là `static computeDiscounts(request, snapshots, promotions, rules, now)` package-private; class phụ thành nested `private static` |
+| `test/.../service/impl/PromotionCalculatorTest.java` | Đổi tên `PromotionComputeDiscountsTest.java`; cùng `PromotionDiscountRulesTest` gọi `PromotionCalculationServiceImpl.computeDiscounts(...)` |
+
+**Logic tính của TV3 giữ nguyên từng dòng** (chỉ đổi method instance → static). `mvnw.cmd -pl CatalogStoreService test` — **161/161 pass**.
+
+**Báo TV3:** engine IN08 nay nằm trong `PromotionCalculationServiceImpl.computeDiscounts`; khi sửa quy tắc tính thì sửa ở đây, không tạo lại class riêng trong `service/impl`.
