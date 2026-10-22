@@ -49,7 +49,7 @@ class PromotionDiscountRulesTest {
         var request = new PromotionCalculationRequest(9L,
                 List.of(new PromotionCalculationRequest.Line(1L, quantity)));
         var snapshot = new VariantSnapshotResponse(1L, 10L, 9L, 11L, "P", "Cake", "Box", "SKU", null,
-                new BigDecimal("100"), 20, "ACTIVE", "ACTIVE", "ACTIVE");
+                new BigDecimal("100"), 20, 20, "ACTIVE", "ACTIVE", "ACTIVE");
         var promotion = new PromotionEntity();
         ReflectionTestUtils.setField(promotion, "id", 1L);
         promotion.setName("Promotion");

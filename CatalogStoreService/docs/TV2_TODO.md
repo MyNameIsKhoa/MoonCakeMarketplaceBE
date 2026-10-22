@@ -155,7 +155,7 @@ Thứ tự theo phụ thuộc dữ liệu: `product.category_id` bắt buộc �
   - [x] CA09 `PATCH /api/products/{productId}`: owner; transition `DRAFT → ACTIVE/INACTIVE`, `ACTIVE ↔ INACTIVE`; không quay lại `DRAFT`; không đặt tay `OUT_OF_STOCK`; lên `ACTIVE` cần variant `ACTIVE`
 - [x] `ProductController` mới cho `/api/products`; mapping entity → DTO là method private trong từng `*ServiceImpl`
 - [x] Test: `ProductServiceImplTest` (14), `ProductControllerTest` (9)
-- [ ] Bổ sung unit test cho `StoreAccessServiceImpl` (supplier chưa `VERIFIED` → 400, store `SUSPENDED` → 403, Identity 404 → không phải owner)
+- [x] Unit test `StoreAccessServiceImplTest` (10): supplier chưa `VERIFIED` → 400, store `SUSPENDED` → 403, không phải owner → 403, Identity 404 → không phải supplier, Identity 500 → lỗi hệ thống (2026-10-22)
 
 ### Bước 4 — Variant ✅ xong 2026-10-20
 
@@ -201,6 +201,7 @@ Thứ tự theo phụ thuộc dữ liệu: `product.category_id` bắt buộc �
 ### Bước 8 — Chờ TV3 (chưa code)
 
 - [x] Đã có IN12 reserve/get/confirm/release, migration V4 trong Catalog và Feign mirror Commerce; stock_quantity là on-hand, hold còn hiệu lực được trừ khỏi availability. TTL đã chốt 15 phút; checkout/payment chưa dùng contract này, mốc confirm/release vẫn cần TV5 chốt.
+- [x] **TV2 (2026-10-22):** IN07 thêm `availableQuantity` (= tồn thực tế − hold `HELD` còn hạn, tính theo lô 1 query); CA14 khóa dòng variant rồi chặn đặt `stockQuantity` thấp hơn lượng đang giữ (409). Smoke test bước 8 kiểm tra trên SQL Server.
 
 ### Bước 9 — Frontend (`MoonCakeMarketplaceFE`)
 

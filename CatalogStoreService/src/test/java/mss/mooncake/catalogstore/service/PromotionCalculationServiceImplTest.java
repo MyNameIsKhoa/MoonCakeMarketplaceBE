@@ -68,6 +68,6 @@ class PromotionCalculationServiceImplTest {
 
     private VariantSnapshotResponse snapshot(Long storeId) {
         return new VariantSnapshotResponse(11L, 5L, storeId, 7L, "P", "Cake", "Box", "SKU", null,
-                new BigDecimal("100000"), 10, "ACTIVE", "ACTIVE", "ACTIVE");
+                new BigDecimal("100000"), 10, 10, "ACTIVE", "ACTIVE", "ACTIVE");
     }
 }

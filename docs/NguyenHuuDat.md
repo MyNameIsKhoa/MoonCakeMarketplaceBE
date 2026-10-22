@@ -260,3 +260,20 @@ Sau commit TV2 `50172c7`, TV3 push `e9e6498` (wip TV3 commerce + cross-service c
 - Báo TV3: đã đổi migration sang V4; DB local của ai đã tạo tay bảng stock thì cần kiểm tra lại.
 - TV2: CA14 (PATCH `stockQuantity`) và `stockQuantity` của IN07 chưa trừ lượng đang giữ (hold còn hiệu lực) theo contract IN12.
 - Bàn với TV3: đưa `PromotionCalculator` về đúng quy ước package; đối soát `minQuantity`, trigger = reward, giá có số lẻ.
+
+### Buổi 2 (22/10) — Tồn kho theo hold IN12 + test StoreAccessService
+
+**Kết quả:** `mvnw.cmd -pl CatalogStoreService test` — **158/158 pass** (thêm 13 test); `scripts/catalog-smoke.ps1` — **61/61 pass** trên SQL Server (thêm 8 bước tồn kho).
+
+| Loại | File | Nội dung |
+|---|---|---|
+| Sửa | `repository/StockReservationLineRepository.java` | Thêm `heldQuantities(variantIds, now)` — tổng hold `HELD` chưa hết hạn theo lô (group by), projection `HeldQuantity` |
+| Sửa | `dto/response/VariantSnapshotResponse.java` | Thêm `availableQuantity` sau `stockQuantity`; `stockQuantity` vẫn là tồn thực tế (on-hand) theo contract IN12 |
+| Sửa | `service/impl/CatalogApplicationServiceImpl.java` | IN07 tính `availableQuantity = max(0, stockQuantity − held)` bằng 1 query cho cả batch; inject `Clock` |
+| Sửa | `service/impl/ProductVariantServiceImpl.java` | CA14: khi đổi `stockQuantity` thì khóa dòng variant (cùng cách IN12 reserve) rồi đếm hold; thấp hơn hold → **409** |
+| Sửa | `docs/contracts/README.md` | IN07 mô tả `availableQuantity`; Commerce nên dùng field này để kiểm tra còn bán được |
+| Thêm | `src/test/.../service/StoreAccessServiceImplTest.java` | 10 test: VERIFIED owner, 404 store, supplier chưa VERIFIED, Identity 404/500, không phải owner, store SUSPENDED, findOwnedStoreIds, isOwner, isPublic |
+| Sửa | `ProductVariantServiceImplTest`, `InternalCatalogContractTest`, 3 test promotion | +2 test CA14 hold; +1 contract test hold → IN07 → release; constructor DTO thêm `availableQuantity` |
+| Sửa | `scripts/catalog-smoke.ps1` | Bước 8: giữ 5 hộp → IN07 45/50 → CA14 đặt 3 bị 409, đặt 5 được → release → available 5 |
+
+**Lưu ý cho TV3:** Commerce mirror `VariantSnapshotResponse` chưa có `availableQuantity` (field thừa trong JSON được bỏ qua nên không lỗi); khi kiểm tra tồn ở giỏ/checkout nên thêm field này vào DTO mirror và dùng nó thay `stockQuantity`.

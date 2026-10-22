@@ -85,7 +85,7 @@ class PromotionCalculatorTest {
 
     private VariantSnapshotResponse snapshot(Long id, String price) {
         return new VariantSnapshotResponse(id, 10L, 9L, 11L, "P", "Cake", "Box", "SKU", null,
-                new BigDecimal(price), 20, "ACTIVE", "ACTIVE", "ACTIVE");
+                new BigDecimal(price), 20, 20, "ACTIVE", "ACTIVE", "ACTIVE");
     }
 
     private PromotionEntity promotion(Long id) {

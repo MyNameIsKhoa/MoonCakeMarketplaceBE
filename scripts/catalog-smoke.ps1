@@ -189,5 +189,19 @@ Assert ([decimal]$calc.discountTotal -eq 86000) "IN08 discountTotal = 86000 ($($
 Assert ([decimal]$calc.totalAmount -eq 324000) "IN08 totalAmount = 324000 ($($calc.totalAmount))"
 [void](Expect (Invoke-Api POST "$catalog/internal/v1/promotions/calculate" @{ storeId = ($store.storeId + 999999); lines = @(@{ variantId = $variantA.variantId; quantity = 1 }) } -Headers $commerceHeaders) 400 'IN08 variant khac store -> 400')
 
+# ─── 8. Tồn kho: hold IN12 → availableQuantity (IN07) và chặn giảm tồn dưới hold (CA14) ─
+$holdKey = "smoke-$run"
+$hold = @{ reservationKey = $holdKey; expiresAt = [DateTimeOffset]::UtcNow.AddMinutes(15).ToString('o')
+           lines = @(@{ variantId = $variantA.variantId; quantity = 5 }) }
+[void](Expect (Invoke-Api POST "$catalog/internal/v1/inventory/reservations" $hold -Headers $commerceHeaders) 200 'IN12 giu 5 hop A (stock 50)')
+$afterHold = Expect (Invoke-Api POST "$catalog/internal/v1/variants/snapshots" @{ variantIds = @($variantA.variantId) } -Headers $commerceHeaders) 200 'IN07 sau khi giu hang'
+Assert ($afterHold[0].stockQuantity -eq 50 -and $afterHold[0].availableQuantity -eq 45) "IN07 stockQuantity=50, availableQuantity=45 ($($afterHold[0].stockQuantity)/$($afterHold[0].availableQuantity))"
+$variantUrl = "$gateway/api/products/$($product.productId)/variants/$($variantA.variantId)"
+[void](Expect (Invoke-Api PATCH $variantUrl @{ stockQuantity = 3 } $supplierToken) 409 'CA14 giam ton xuong 3 < 5 dang giu -> 409')
+[void](Expect (Invoke-Api PATCH $variantUrl @{ stockQuantity = 5 } $supplierToken) 200 'CA14 dat ton = 5 (bang luong dang giu) -> 200')
+[void](Expect (Invoke-Api PUT "$catalog/internal/v1/inventory/reservations/$holdKey/release" -Headers $commerceHeaders) 200 'IN12 release hold')
+$afterRelease = Expect (Invoke-Api POST "$catalog/internal/v1/variants/snapshots" @{ variantIds = @($variantA.variantId) } -Headers $commerceHeaders) 200 'IN07 sau khi release'
+Assert ($afterRelease[0].availableQuantity -eq 5) "IN07 availableQuantity tro lai 5 ($($afterRelease[0].availableQuantity))"
+
 Write-Host ''
 Write-Host "PASS ALL: $script:passed kiem tra. Du lieu test: store $($store.storeId), product $($product.productId) ($($product.productCode))."
