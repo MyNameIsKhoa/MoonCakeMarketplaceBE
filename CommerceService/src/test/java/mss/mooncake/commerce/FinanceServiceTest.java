@@ -30,8 +30,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import vn.payos.model.webhooks.Webhook;
 
 class FinanceServiceTest {
-    private static final FinanceService.Actor BUYER = new FinanceService.Actor(10, false, false);
-    private static final FinanceService.Actor ADMIN = new FinanceService.Actor(30, true, false);
+    private static final FinanceService.Actor BUYER = new FinanceService.Actor(101, 10L, null, false);
+    private static final FinanceService.Actor ADMIN = new FinanceService.Actor(303, null, null, true);
     private FinanceRepository repository;
     private FinanceService service;
     private FinanceIntegrationService integration;
@@ -275,7 +275,7 @@ class FinanceServiceTest {
     @Test
     void ownershipAndIdempotencyAreEnforcedOnServer() {
         context(true, null, 1, null);
-        var stranger = new FinanceService.Actor(99, false, false);
+        var stranger = new FinanceService.Actor(999, 99L, null, false);
         assertThatThrownBy(() -> service.summary(1, stranger)).hasMessage("FINANCE_ACCESS_DENIED");
         assertThatThrownBy(() -> service.initiate(repository.payments(1).getFirst().id(), key(), stranger))
                 .hasMessage("FINANCE_ACCESS_DENIED");
@@ -289,9 +289,9 @@ class FinanceServiceTest {
     void supplierRoleDoesNotPreventBuyingOwnCustomerOrderAndOtherSupplierCannotInitiate() {
         context(true, null, 1, null);
         long id = repository.payments(1).getFirst().id();
-        service.initiate(id, key(), new FinanceService.Actor(10, false, true));
-        assertThat(service.summary(1, new FinanceService.Actor(10, false, true)).payments().getFirst().checkoutUrl()).isNotNull();
-        var seller = new FinanceService.Actor(20, false, true);
+        service.initiate(id, key(), new FinanceService.Actor(101, 10L, 77L, false));
+        assertThat(service.summary(1, new FinanceService.Actor(101, 10L, 77L, false)).payments().getFirst().checkoutUrl()).isNotNull();
+        var seller = new FinanceService.Actor(202, 88L, 20L, false);
         assertThat(service.summary(1, seller).payments().getFirst().checkoutUrl()).isNull();
         var payment = repository.payment(id);
         when(provider.get(payment.orderCode())).thenReturn(new PaymentProvider.Status(payment.orderCode(),
@@ -318,6 +318,31 @@ class FinanceServiceTest {
         }
         assertThat(repository.count("SELECT COUNT(*) FROM finance_ledger")).isEqualTo(1);
         assertThat(repository.count("SELECT COUNT(*) FROM finance_outbox WHERE event_type='PAYMENT_SUCCESS'")).isEqualTo(1);
+    }
+
+    @Test
+    void userAndProfileIdCollisionsCannotGrantFinanceAccess() {
+        fullPayment();
+        var customerCollision = new FinanceService.Actor(10, 99L, null, false);
+        var supplierCollision = new FinanceService.Actor(20, null, 99L, false);
+        var noProfiles = new FinanceService.Actor(10, null, null, false);
+        for (var actor : new FinanceService.Actor[]{customerCollision, supplierCollision, noProfiles}) {
+            assertThatThrownBy(() -> service.summary(1, actor)).hasMessage("FINANCE_ACCESS_DENIED");
+            assertThatThrownBy(() -> service.initiate(repository.payments(1).getFirst().id(), key(), actor))
+                    .hasMessage("FINANCE_ACCESS_DENIED");
+            assertThatThrownBy(() -> service.openDispute(1, "reason", null, key(), actor))
+                    .hasMessage("FINANCE_ACCESS_DENIED");
+        }
+    }
+
+    @Test
+    void auditAndDisputeRecordUserIdRatherThanCustomerProfileId() {
+        fullPayment();
+        service.openDispute(1, "reason", null, key(), BUYER);
+        assertThat(repository.count("SELECT opened_by_user_id_ref FROM dispute")).isEqualTo(101);
+        assertThat(repository.history(1).getFirst().actor()).isEqualTo("101");
+        service.requestCancellation(1, "reason", key(), BUYER);
+        assertThat(repository.count("SELECT actor_id_ref FROM cancellation")).isEqualTo(101);
     }
 
     @Test

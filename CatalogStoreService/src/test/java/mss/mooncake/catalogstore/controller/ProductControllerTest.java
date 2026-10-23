@@ -79,7 +79,7 @@ class ProductControllerTest {
     private static final Long USER_ID = 10L;
 
     private static UserPrincipal supplier() {
-        return UserPrincipal.create(USER_ID, "supplier@test.com", List.of("ROLE_CUSTOMER"));
+        return UserPrincipal.create(USER_ID, "supplier@test.com", List.of("ROLE_CUSTOMER", "ROLE_SUPPLIER"));
     }
 
     private static ProductResponse product() {

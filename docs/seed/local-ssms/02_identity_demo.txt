@@ -1,0 +1,109 @@
+-- SSMS local; chạy SAU Identity Flyway V3. Dữ liệu DEMO, supplier không đăng nhập được.
+-- Không đại diện cho nhà bán chính thức của các thương hiệu.
+USE mss_identity;
+GO
+-- Development-only catalog owners. Run after Identity Flyway V2/V3.
+-- No passwords are seeded: these accounts cannot log in. Never use on production data.
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF OBJECT_ID(N'dbo.app_user', N'U') IS NULL OR OBJECT_ID(N'dbo.supplier_profile', N'U') IS NULL
+   OR COL_LENGTH(N'dbo.app_user', N'password_hash') IS NULL
+    THROW 51001, 'Run Identity Flyway migrations before the demo seed.', 1;
+
+DECLARE @demo TABLE (email NVARCHAR(255) PRIMARY KEY, company_name NVARCHAR(255), tax_code NVARCHAR(100));
+INSERT INTO @demo (email, company_name, tax_code) VALUES
+    (N'trang-moc@demo.mss.invalid', N'Trăng Mộc (demo)', N'DEMO-TRANG-MOC-001'),
+    (N'nguyet-vien@demo.mss.invalid', N'Nguyệt Viên (demo)', N'DEMO-NGUYET-VIEN-001'),
+    (N'sao-nho@demo.mss.invalid', N'Sao Nhỏ (demo)', N'DEMO-SAO-NHO-001');
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF EXISTS (SELECT 1 FROM @demo d JOIN dbo.app_user u ON u.email = d.email
+               WHERE u.status <> N'ACTIVE')
+        THROW 51002, 'A demo email belongs to an inactive account; no existing account was changed.', 1;
+    IF EXISTS (SELECT 1 FROM @demo d JOIN dbo.app_user u ON u.email = d.email
+               WHERE u.password_hash IS NOT NULL)
+        THROW 51005, 'A demo email belongs to a login-capable account; refusing to grant supplier verification.', 1;
+    IF EXISTS (SELECT 1 FROM @demo d JOIN dbo.supplier_profile s ON s.tax_code = d.tax_code
+               JOIN dbo.app_user u ON u.user_id = s.user_id WHERE u.email <> d.email)
+        THROW 51003, 'A demo tax code belongs to another user; no existing supplier was changed.', 1;
+    IF EXISTS (SELECT 1 FROM @demo d JOIN dbo.app_user u ON u.email = d.email
+               JOIN dbo.supplier_profile s ON s.user_id = u.user_id
+               WHERE s.tax_code <> d.tax_code OR s.verification_status <> N'VERIFIED')
+        THROW 51004, 'An existing supplier has a different tax code or verification status.', 1;
+
+    INSERT INTO dbo.app_user (email, status, password_hash)
+    SELECT d.email, N'ACTIVE', NULL FROM @demo d
+    WHERE NOT EXISTS (SELECT 1 FROM dbo.app_user u WHERE u.email = d.email);
+
+    INSERT INTO dbo.supplier_profile (user_id, company_name, tax_code, verification_status)
+    SELECT u.user_id, d.company_name, d.tax_code, N'VERIFIED'
+    FROM @demo d JOIN dbo.app_user u ON u.email = d.email
+    WHERE NOT EXISTS (SELECT 1 FROM dbo.supplier_profile s WHERE s.user_id = u.user_id);
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+SELECT d.email, d.tax_code, s.supplier_id
+FROM @demo d JOIN dbo.app_user u ON u.email = d.email
+JOIN dbo.supplier_profile s ON s.user_id = u.user_id
+ORDER BY d.email;
+GO
+-- Fictional, passwordless catalog owners for named-brand demo listings.
+-- These are NOT accounts of, or authorized sellers for, the named businesses.
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF OBJECT_ID(N'dbo.app_user', N'U') IS NULL OR OBJECT_ID(N'dbo.supplier_profile', N'U') IS NULL
+   OR COL_LENGTH(N'dbo.app_user', N'password_hash') IS NULL
+    THROW 51201, 'Run Identity Flyway migrations before the brand demo seed.', 1;
+
+DECLARE @demo TABLE (email NVARCHAR(255) PRIMARY KEY, company_name NVARCHAR(255), tax_code NVARCHAR(100));
+INSERT INTO @demo VALUES
+    (N'kinh-do@demo.mss.invalid', N'Kinh Đô — tham chiếu demo', N'DEMO-BRAND-KINH-DO'),
+    (N'nhu-lan@demo.mss.invalid', N'Như Lan — tham chiếu demo', N'DEMO-BRAND-NHU-LAN'),
+    (N'madame-huong@demo.mss.invalid', N'Madame Hương — tham chiếu demo', N'DEMO-BRAND-MADAME-HUONG'),
+    (N'brodard@demo.mss.invalid', N'Brodard — tham chiếu demo', N'DEMO-BRAND-BRODARD'),
+    (N'givral@demo.mss.invalid', N'Givral — tham chiếu demo', N'DEMO-BRAND-GIVRAL'),
+    (N'kidos@demo.mss.invalid', N'KIDO''s Bakery — tham chiếu demo', N'DEMO-BRAND-KIDOS'),
+    (N'maison@demo.mss.invalid', N'Maison — tham chiếu demo', N'DEMO-BRAND-MAISON');
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+    IF EXISTS (SELECT 1 FROM @demo d JOIN dbo.app_user u ON u.email = d.email
+               WHERE u.status <> N'ACTIVE' OR u.password_hash IS NOT NULL)
+        THROW 51202, 'A demo email belongs to an inactive or login-capable account.', 1;
+    IF EXISTS (SELECT 1 FROM @demo d JOIN dbo.supplier_profile s ON s.tax_code = d.tax_code
+               JOIN dbo.app_user u ON u.user_id = s.user_id WHERE u.email <> d.email)
+        THROW 51203, 'A demo tax code belongs to another user.', 1;
+    IF EXISTS (SELECT 1 FROM @demo d JOIN dbo.app_user u ON u.email = d.email
+               JOIN dbo.supplier_profile s ON s.user_id = u.user_id
+               WHERE s.tax_code <> d.tax_code OR s.verification_status <> N'VERIFIED')
+        THROW 51204, 'An existing demo supplier conflicts with the seed.', 1;
+
+    INSERT INTO dbo.app_user (email, status, password_hash)
+    SELECT d.email, N'ACTIVE', NULL FROM @demo d
+    WHERE NOT EXISTS (SELECT 1 FROM dbo.app_user u WHERE u.email = d.email);
+
+    INSERT INTO dbo.supplier_profile (user_id, company_name, tax_code, verification_status)
+    SELECT u.user_id, d.company_name, d.tax_code, N'VERIFIED'
+    FROM @demo d JOIN dbo.app_user u ON u.email = d.email
+    WHERE NOT EXISTS (SELECT 1 FROM dbo.supplier_profile s WHERE s.user_id = u.user_id);
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+SELECT d.email, d.tax_code, s.supplier_id
+FROM @demo d JOIN dbo.app_user u ON u.email = d.email
+JOIN dbo.supplier_profile s ON s.user_id = u.user_id ORDER BY d.email;
+GO
+SELECT COUNT(*) AS demo_supplier_count FROM dbo.supplier_profile WHERE tax_code LIKE N'DEMO-%';

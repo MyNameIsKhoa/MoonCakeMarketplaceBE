@@ -6,6 +6,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
 import mss.mooncake.catalogstore.enums.StoreStatus;
 
 @Entity
@@ -34,6 +35,12 @@ public class StoreEntity extends BaseCatalogEntity {
     @Column(name = "theme_key", length = 100)
     private String themeKey;
 
+    @Column(name = "description", length = 2000)
+    private String description;
+
+    @Column(name = "shipping_fee", precision = 18, scale = 2)
+    private BigDecimal shippingFee;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 30)
     private StoreStatus status;
@@ -46,6 +53,8 @@ public class StoreEntity extends BaseCatalogEntity {
     public String getLogoUrl() { return logoUrl; }
     public String getBannerUrl() { return bannerUrl; }
     public String getThemeKey() { return themeKey; }
+    public String getDescription() { return description; }
+    public BigDecimal getShippingFee() { return shippingFee; }
     public StoreStatus getStatus() { return status; }
 
     // ─── Setters ────────────────────────────────────────────────────────────────
@@ -56,6 +65,8 @@ public class StoreEntity extends BaseCatalogEntity {
     public void setLogoUrl(String logoUrl) { this.logoUrl = logoUrl; }
     public void setBannerUrl(String bannerUrl) { this.bannerUrl = bannerUrl; }
     public void setThemeKey(String themeKey) { this.themeKey = themeKey; }
+    public void setDescription(String description) { this.description = description; }
+    public void setShippingFee(BigDecimal shippingFee) { this.shippingFee = shippingFee; }
     public void setStatus(StoreStatus status) { this.status = status; }
 }
 

@@ -68,7 +68,7 @@ class StoreControllerTest {
 
     private StoreResponse sampleResponse() {
         return new StoreResponse(STORE_ID, SUPPLIER_ID, "STR-ABCD1234", "Store A",
-                "store-a", null, null, null, "DRAFT");
+                "store-a", null, null, null, "DRAFT", null);
     }
 
     // ── GET /api/stores — public ──────────────────────────────────────────────────
@@ -120,7 +120,7 @@ class StoreControllerTest {
         when(storeService.createStore(any(CreateStoreRequest.class), eq(USER_ID)))
                 .thenReturn(sampleResponse());
 
-        CreateStoreRequest req = new CreateStoreRequest("Store A", null, null, null);
+        CreateStoreRequest req = new CreateStoreRequest("Store A", null, null, null, null);
 
         mockMvc.perform(post("/api/stores")
                         .with(SecurityMockMvcRequestPostProcessors.user(principalA()))
@@ -133,7 +133,7 @@ class StoreControllerTest {
     @Test
     @DisplayName("POST /api/stores trả 401 khi không có JWT")
     void createStore_401_noJwt() throws Exception {
-        CreateStoreRequest req = new CreateStoreRequest("Store A", null, null, null);
+        CreateStoreRequest req = new CreateStoreRequest("Store A", null, null, null, null);
 
         mockMvc.perform(post("/api/stores")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -142,10 +142,24 @@ class StoreControllerTest {
     }
 
     @Test
+    @DisplayName("POST /api/stores trả 403 khi JWT chỉ có ROLE_CUSTOMER (chưa là supplier VERIFIED)")
+    void createStore_403_customerRoleOnly() throws Exception {
+        CreateStoreRequest req = new CreateStoreRequest("Store A", null, null, null, null);
+        UserPrincipal customer = UserPrincipal.create(USER_ID, "buyer@test.com", List.of("ROLE_CUSTOMER"));
+
+        mockMvc.perform(post("/api/stores")
+                        .with(SecurityMockMvcRequestPostProcessors.user(customer))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isForbidden());
+        org.mockito.Mockito.verifyNoInteractions(storeService);
+    }
+
+    @Test
     @DisplayName("POST /api/stores trả 400 khi thiếu name")
     void createStore_400_missingName() throws Exception {
         // name = blank
-        CreateStoreRequest req = new CreateStoreRequest("", null, null, null);
+        CreateStoreRequest req = new CreateStoreRequest("", null, null, null, null);
 
         mockMvc.perform(post("/api/stores")
                         .with(SecurityMockMvcRequestPostProcessors.user(principalA()))
@@ -162,7 +176,7 @@ class StoreControllerTest {
         when(storeService.updateStore(eq(STORE_ID), any(UpdateStoreRequest.class), eq(USER_ID), eq(false)))
                 .thenReturn(sampleResponse());
 
-        UpdateStoreRequest req = new UpdateStoreRequest("New Name", null, null, "dark", null);
+        UpdateStoreRequest req = new UpdateStoreRequest("New Name", null, null, "dark", null, null);
 
         mockMvc.perform(patch("/api/stores/{id}", STORE_ID)
                         .with(SecurityMockMvcRequestPostProcessors.user(principalA()))
@@ -177,7 +191,7 @@ class StoreControllerTest {
         when(storeService.updateStore(eq(STORE_ID), any(UpdateStoreRequest.class), eq(USER_ID), eq(false)))
                 .thenThrow(new ForbiddenException("Bạn không có quyền"));
 
-        UpdateStoreRequest req = new UpdateStoreRequest("Hacked", null, null, null, null);
+        UpdateStoreRequest req = new UpdateStoreRequest("Hacked", null, null, null, null, null);
 
         mockMvc.perform(patch("/api/stores/{id}", STORE_ID)
                         .with(SecurityMockMvcRequestPostProcessors.user(principalA()))
@@ -189,7 +203,7 @@ class StoreControllerTest {
     @Test
     @DisplayName("PATCH /api/stores/{id} trả 401 khi không có JWT")
     void updateStore_401_noJwt() throws Exception {
-        UpdateStoreRequest req = new UpdateStoreRequest(null, null, null, null, null);
+        UpdateStoreRequest req = new UpdateStoreRequest(null, null, null, null, null, null);
 
         mockMvc.perform(patch("/api/stores/{id}", STORE_ID)
                         .contentType(MediaType.APPLICATION_JSON)
