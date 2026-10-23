@@ -3,11 +3,18 @@ package mss.mooncake.rfqnegotiation.entity;
 import jakarta.persistence.AttributeOverride;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import lombok.Getter;
+import lombok.Setter;
+import mss.mooncake.rfqnegotiation.enums.RfqStatus;
 
+@Getter
+@Setter
 @Entity
 @Table(name = "rfq")
 @AttributeOverride(name = "id", column = @Column(name = "rfq_id"))
@@ -21,7 +28,8 @@ public class RfqEntity extends BaseRfqEntity {
     @Column(name = "requested_delivery_date") private LocalDate requestedDeliveryDate;
     @Column(name = "delivery_location", length = 500) private String deliveryLocation;
     @Column(name = "customization_requirements", columnDefinition = "NVARCHAR(MAX)") private String customizationRequirements;
-    @Column(name = "status", nullable = false, length = 30) private String status;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 30) private RfqStatus status;
     @Column(name = "expires_at") private LocalDateTime expiresAt;
     @Column(name = "created_at", nullable = false) private LocalDateTime createdAt;
 }

@@ -19,4 +19,23 @@ public class QuotationItemEntity extends BaseRfqEntity {
     @Column(name = "discount_amount", nullable = false, precision = 18, scale = 2) private BigDecimal discountAmount;
     @Column(name = "subtotal", nullable = false, precision = 18, scale = 2) private BigDecimal subtotal;
     @Column(name = "customization_note", columnDefinition = "NVARCHAR(MAX)") private String customizationNote;
+
+    public Long getQuotationId() { return quotationId; }
+    public void setQuotationId(Long quotationId) { this.quotationId = quotationId; }
+    public Long getVariantIdRef() { return variantIdRef; }
+    public void setVariantIdRef(Long variantIdRef) { this.variantIdRef = variantIdRef; }
+    public String getItemNameSnapshot() { return itemNameSnapshot; }
+    public void setItemNameSnapshot(String itemNameSnapshot) { this.itemNameSnapshot = itemNameSnapshot; }
+    public String getSkuSnapshot() { return skuSnapshot; }
+    public void setSkuSnapshot(String skuSnapshot) { this.skuSnapshot = skuSnapshot; }
+    public Integer getQuantity() { return quantity; }
+    public void setQuantity(Integer quantity) { this.quantity = quantity; }
+    public BigDecimal getUnitPrice() { return unitPrice; }
+    public void setUnitPrice(BigDecimal unitPrice) { this.unitPrice = unitPrice; }
+    public BigDecimal getDiscountAmount() { return discountAmount; }
+    public void setDiscountAmount(BigDecimal discountAmount) { this.discountAmount = discountAmount; }
+    public BigDecimal getSubtotal() { return subtotal; }
+    public void setSubtotal(BigDecimal subtotal) { this.subtotal = subtotal; }
+    public String getCustomizationNote() { return customizationNote; }
+    public void setCustomizationNote(String customizationNote) { this.customizationNote = customizationNote; }
 }
