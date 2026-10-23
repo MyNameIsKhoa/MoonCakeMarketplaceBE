@@ -1,5 +1,6 @@
 package mss.mooncake.identity.controller;
 
+import io.swagger.v3.oas.annotations.Hidden;
 import mss.mooncake.identity.dto.response.SupplierSummaryResponse;
 import mss.mooncake.identity.service.SupplierApplicationService;
 import org.springframework.http.ResponseEntity;
@@ -9,12 +10,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/internal/v1/suppliers")
-public class InternalSupplierController {
+@RequestMapping("/api/supplier")
+@Hidden
+public class SupplierLookupController {
 
     private final SupplierApplicationService supplierService;
 
-    public InternalSupplierController(SupplierApplicationService supplierService) {
+    public SupplierLookupController(SupplierApplicationService supplierService) {
         this.supplierService = supplierService;
     }
 

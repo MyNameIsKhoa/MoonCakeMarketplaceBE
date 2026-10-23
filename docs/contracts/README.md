@@ -6,9 +6,9 @@ This file is the source of truth for the internal summaries implemented in the c
 
 | Contract / owner | Endpoint and consumers | Response fields (JSON names) | Not found |
 |---|---|---|---|
-| User summary / Identity | `GET /internal/v1/users/{userId}/summary`; Commerce, RFQ | `userId` (Identity `APP_USER.user_id`), `customerId` (nullable), `fullName` (nullable), `email`, `phone` (nullable) | `404` when `userId` does not exist. A user without a customer profile still returns `200`; profile fields are `null`. |
-| Address summary / Identity | `GET /internal/v1/addresses/{id}/summary`; Commerce | `addressId`, `customerId`, `recipientName`, `recipientPhone`, `addressLine`, `ward` (nullable), `district` (nullable), `city` | `404` when the address ID does not exist. |
-| Supplier summary / Identity | `GET /internal/v1/suppliers/{id}/summary` or `/by-user/{userId}/summary`; Catalog, Commerce, RFQ | `supplierId`, `userId`, `companyName`, `taxCode`, `verificationStatus` | `404` when the supplier ID or user ID has no supplier profile. |
+| User summary / Identity | `GET /api/user/{userId}/summary`; Commerce, RFQ | `userId` (Identity `APP_USER.user_id`), `customerId` (nullable), `fullName` (nullable), `email`, `phone` (nullable) | `404` when `userId` does not exist. A user without a customer profile still returns `200`; profile fields are `null`. |
+| Address summary / Identity | `GET /api/address/{id}/summary`; Commerce | `addressId`, `customerId`, `recipientName`, `recipientPhone`, `addressLine`, `ward` (nullable), `district` (nullable), `city` | `404` when the address ID does not exist. |
+| Supplier summary / Identity | `GET /api/supplier/{id}/summary` or `/by-user/{userId}/summary`; Catalog, Commerce, RFQ | `supplierId`, `userId`, `companyName`, `taxCode`, `verificationStatus` | `404` when the supplier ID or user ID has no supplier profile. |
 | Store summary / Catalog & Store | `GET /internal/v1/stores/{id}/summary`; Commerce, RFQ | `storeId`, `supplierIdRef` (Identity supplier ID), `storeCode`, `name`, `slug`, `logoUrl` (nullable), `status` | `404` when the store ID does not exist. This internal summary can include non-public statuses. |
 
 All paths use `/internal/v1`. The version belongs to the URI; there is no `version` property in the JSON body. Add a `/v2` endpoint for a breaking field or meaning change, and keep `/v1` compatible while consumers migrate. JSON property names and ID ownership above are part of the contract.

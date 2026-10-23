@@ -1,5 +1,6 @@
 package mss.mooncake.identity.controller;
 
+import io.swagger.v3.oas.annotations.Hidden;
 import mss.mooncake.identity.dto.response.AddressSummaryResponse;
 import mss.mooncake.identity.service.AddressApplicationService;
 import org.springframework.http.ResponseEntity;
@@ -9,12 +10,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/internal/v1/addresses")
-public class InternalAddressController {
+@RequestMapping("/api/address")
+@Hidden
+public class AddressLookupController {
 
     private final AddressApplicationService addressService;
 
-    public InternalAddressController(AddressApplicationService addressService) {
+    public AddressLookupController(AddressApplicationService addressService) {
         this.addressService = addressService;
     }
 

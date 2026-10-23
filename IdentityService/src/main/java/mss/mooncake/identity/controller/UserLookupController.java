@@ -1,5 +1,6 @@
 package mss.mooncake.identity.controller;
 
+import io.swagger.v3.oas.annotations.Hidden;
 import mss.mooncake.identity.dto.response.UserSummaryResponse;
 import mss.mooncake.identity.service.AccountApplicationService;
 import org.springframework.http.ResponseEntity;
@@ -9,12 +10,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/internal/v1/users")
-public class InternalUserController {
+@RequestMapping("/api/user")
+@Hidden
+public class UserLookupController {
 
     private final AccountApplicationService accountApplicationService;
 
-    public InternalUserController(AccountApplicationService accountApplicationService) {
+    public UserLookupController(AccountApplicationService accountApplicationService) {
         this.accountApplicationService = accountApplicationService;
     }
 

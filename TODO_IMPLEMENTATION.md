@@ -96,9 +96,9 @@
 | `GET/POST/PATCH /api/supplier-profile` | Đã implement ở backend | Onboarding/profile của supplier; Gateway route Identity. Profile mới `PENDING`; supplier sửa hồ sơ `REJECTED` gửi lại `PENDING`. |
 | `GET /api/admin/suppliers?status=PENDING`, `PATCH /api/admin/suppliers/{id}/verification` | Đã implement ở backend | Chỉ `ROLE_ADMIN`; yêu cầu reason, audit persistent; transitions `PENDING → VERIFIED/REJECTED`, `VERIFIED → SUSPENDED`, `SUSPENDED → VERIFIED`. |
 | `GET/POST /api/stores`, `GET/PATCH /api/stores/{id}` | Đề xuất | Catalog quản lý store; quyền sửa theo supplier owner. |
-| `GET /internal/v1/users/{userId}/summary` | Đã implement | Identity owner; `userId`, nullable `customerId/fullName/phone`, `email`; 404 nếu user không tồn tại; service auth; version trong `/v1`. |
-| `GET /internal/v1/addresses/{id}/summary`, `GET /internal/v1/suppliers/{id}/summary` | Đã implement | Identity owner; field/consumer/auth/not-found đã ghi trong `docs/contracts/README.md`; version `/v1`. |
-| `GET /internal/v1/stores/{id}/summary` | Đã implement | Catalog owner; ID/fields/status, caller authority và 404 được chốt trong `docs/contracts/README.md`; version `/v1`. |
+| `GET /api/user/{userId}/summary` | Đã implement | Identity owner; `userId`, nullable `customerId/fullName/phone`, `email`; 404 nếu user không tồn tại; service auth bằng `X-Service-Name` và `X-Service-Token`. |
+| `GET /api/address/{id}/summary`, `GET /api/supplier/{id}/summary` | Đã implement | Identity owner; field/consumer/auth/not-found đã ghi trong `docs/contracts/README.md`; user summary giữ version `/v1`. |
+| `GET /internal/v1/stores/{id}/summary` | Đã implement | Catalog owner; ID/fields/status, caller authority và 404 được chốt trong `docs/contracts/README.md`; user summary giữ version `/v1`. |
 
 - [ ] Backend: implement controller/service/repository, validation, auth & ownership; thay stub hiện tại bằng logic thật; mapping DTO/entity; lỗi trùng email/tax/slug/code và không tìm thấy ID.
 - [ ] DB: dùng đúng V1 Identity/Catalog; nếu cần thêm constraint/index, tạo V2 sau khi cập nhật physical. Không dời `SUPPLIER_PROFILE` sang Catalog.
@@ -161,6 +161,8 @@
 - [ ] FE: cart, checkout nhiều store, order history/detail đọc snapshot; không để FE gọi trực tiếp nhiều service để tự ghép một quyết định checkout.
 - [ ] Test: hai store → một customer order + đúng seller orders; thay product sau mua không thay order detail; order khác owner bị `403/404`; retry RFQ không tạo đơn trùng; migration SQL Server.
 - [ ] Handoff: nhận summary TV1 và snapshot/promotion TV2; cung cấp order response cho TV4, seller-order state/context qua Java service cho TV5/TV6.
+- [ ] TV4/TV1: RFQ lấy address summary tin cậy khi accept để dựng IN09; Identity hiện chỉ cho `ROLE_INTERNAL_COMMERCE` gọi `/api/address/**`, nên cần thống nhất mở đúng quyền RFQ hoặc để Commerce tự fetch/verify snapshot. Không copy address/customer/store từ body FE.
+- [ ] TV5/TV3: chốt và triển khai Java service tạo `FULL`/`DEPOSIT` obligation cùng transaction lưu đơn; payment callback đã xác minh mới confirm IN12, failure/cancel/15 phút timeout thì release và cập nhật state bền vững; retry các bước mạng. Xác nhận xử lý tổng 0 đồng/deposit 0% trước khi bật checkout.
 - [ ] **CHỐT:** mã order, inventory reservation/oversell, transaction & lỗi Feign, idempotency retail checkout, payload accepted quotation từ TV4.
 
 ## 6. TV4 — Public RFQ, Quotation, Chat
