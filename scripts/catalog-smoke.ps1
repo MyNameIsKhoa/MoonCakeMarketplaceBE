@@ -105,6 +105,9 @@ $supplierPassword = "Pw-$run-$(New-Suffix)"
 $supplierToken = Login $supplierEmail $supplierPassword
 $profile = Expect (Invoke-Api POST "$gateway/api/supplier-profile" @{ companyName = "Banh Trung Thu $run"; taxCode = "TAX$run" } $supplierToken) 201, 200 'supplier onboarding (PENDING)'
 [void](Expect (Invoke-Api POST "$gateway/api/suppliers/$($profile.supplierId)/verification" @{ decision = 'VERIFIED'; reason = 'smoke test' } $adminToken) 200 'admin VERIFIED supplier')
+# Role chốt lúc đăng nhập: token cũ chỉ có ROLE_CUSTOMER, đăng nhập lại để nhận ROLE_SUPPLIER.
+[void](Expect (Invoke-Api POST "$gateway/api/stores" @{ name = "Truoc khi login lai $run" } $supplierToken) 403 'token truoc khi duyet (khong co ROLE_SUPPLIER) tao store -> 403')
+$supplierToken = Login $supplierEmail $supplierPassword
 
 $strangerEmail = "tv2-stranger-$run@example.com"
 [void](Expect (Invoke-Api POST "$gateway/api/auth/register" @{ fullName = 'Stranger'; email = $strangerEmail; password = $supplierPassword }) 201, 200 'register user khac (khong phai owner)')

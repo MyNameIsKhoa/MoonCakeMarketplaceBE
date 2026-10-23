@@ -22,7 +22,7 @@ import vn.payos.model.webhooks.Webhook;
 
 @Service
 public class FinanceService {
-    public record Actor(long id, boolean admin, boolean supplier) { }
+    public record Actor(long userId, Long customerId, Long supplierId, boolean admin) { }
     private final FinanceRepository repository;
     private final PaymentProvider provider;
     private final TransactionTemplate transaction;
@@ -48,10 +48,14 @@ public class FinanceService {
     }
 
     private void access(Context context, Actor actor, boolean buyerOnly) {
-        boolean allowed = buyerOnly ? actor.id() == context.customerId()
-                : actor.admin() || actor.id() == context.customerId()
-                        || (actor.supplier() && actor.id() == context.supplierId());
+        boolean allowed = buyerOnly ? isBuyer(context, actor)
+                : actor.admin() || isBuyer(context, actor)
+                        || (actor.supplierId() != null && actor.supplierId() == context.supplierId());
         if (!allowed) { throw new FinanceException(HttpStatus.FORBIDDEN, "FINANCE_ACCESS_DENIED"); }
+    }
+
+    private boolean isBuyer(Context context, Actor actor) {
+        return actor.customerId() != null && actor.customerId() == context.customerId();
     }
 
     private void admin(Actor actor) {
@@ -59,7 +63,7 @@ public class FinanceService {
     }
 
     private FinanceResponse.Payment paymentResponse(Payment payment, Context context, Actor actor) {
-        if (actor.id() == context.customerId()) { return payment.response(); }
+        if (isBuyer(context, actor)) { return payment.response(); }
         return new FinanceResponse.Payment(payment.id(), payment.orderId(), payment.type(), payment.amount(),
                 payment.status(), payment.hold(), payment.dueAt(), payment.expiresAt(), null, null);
     }
@@ -161,7 +165,7 @@ public class FinanceService {
                     status='CREATING',context_version=? WHERE payment_id=?
                     """, amount, FinanceRepository.utc(due), FinanceRepository.utc(expiry), repository.nextOrderCode(),
                     checkedKey, context.sourceVersion(), id);
-            repository.event(context.id(), "PAYMENT_LINK_RESERVED", id, Long.toString(actor.id()), original.type());
+            repository.event(context.id(), "PAYMENT_LINK_RESERVED", id, Long.toString(actor.userId()), original.type());
             return repository.payment(id);
         });
         // A committed reservation can only be sent by this caller. A replay sees CREATING and reconciles.
@@ -267,7 +271,7 @@ public class FinanceService {
                 String next = remote.paid() > 0 ? "RECONCILING"
                         : List.of("CANCELLED", "EXPIRED").contains(remote.status()) ? remote.status() : "PENDING";
                 repository.update("UPDATE payment SET status=?,payment_link_id=? WHERE payment_id=?", next, remote.linkId(), paymentId);
-                repository.event(current.orderId(), "PAYMENT_RECONCILED", paymentId, Long.toString(actor.id()), next);
+                repository.event(current.orderId(), "PAYMENT_RECONCILED", paymentId, Long.toString(actor.userId()), next);
             }
             return paymentResponse(repository.payment(paymentId), repository.context(reservation.orderId()), actor);
         });
@@ -281,7 +285,7 @@ public class FinanceService {
             String hash;
             try {
                 hash = java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                        .digest((orderId + ":" + actor.id() + ":" + fingerprint).getBytes(StandardCharsets.UTF_8)));
+                        .digest((orderId + ":" + actor.userId() + ":" + fingerprint).getBytes(StandardCharsets.UTF_8)));
             } catch (java.security.NoSuchAlgorithmException ex) { throw new IllegalStateException(ex); }
             if (repository.count("SELECT COUNT(*) FROM finance_command WHERE command_key=?", checked) > 0) {
                 require(repository.count("SELECT COUNT(*) FROM finance_command WHERE command_key=? AND fingerprint=? AND seller_order_id=?",
@@ -300,9 +304,9 @@ public class FinanceService {
             long id = repository.insert("""
                     INSERT INTO cancellation(seller_order_id,actor_type,actor_id_ref,reason,status,requested_at)
                     VALUES(?,?,?,?,'REQUESTED',?)
-                    """, orderId, actor.admin() ? "ADMIN" : actor.id() == repository.context(orderId).customerId()
-                            ? "CUSTOMER" : "SUPPLIER", actor.id(), reason, FinanceRepository.utc(Instant.now()));
-            repository.event(orderId, "CANCELLATION_REQUESTED", id, Long.toString(actor.id()), reason);
+                    """, orderId, actor.admin() ? "ADMIN" : isBuyer(repository.context(orderId), actor)
+                            ? "CUSTOMER" : "SUPPLIER", actor.userId(), reason, FinanceRepository.utc(Instant.now()));
+            repository.event(orderId, "CANCELLATION_REQUESTED", id, Long.toString(actor.userId()), reason);
         });
     }
 
@@ -314,7 +318,7 @@ public class FinanceService {
             require(!approve || !repository.active(orderId), "CANCEL_UNPAID_LINKS_FIRST");
             repository.update("UPDATE cancellation SET status=?,decision_reason=?,cancelled_at=? WHERE cancellation_id=?",
                     approve ? "APPROVED" : "REJECTED", reason, approve ? FinanceRepository.utc(Instant.now()) : null, id);
-            repository.event(orderId, "CANCELLATION_DECIDED", id, Long.toString(actor.id()), reason);
+            repository.event(orderId, "CANCELLATION_DECIDED", id, Long.toString(actor.userId()), reason);
         });
     }
 
@@ -324,8 +328,8 @@ public class FinanceService {
             long id = repository.insert("""
                     INSERT INTO dispute(seller_order_id,opened_by_user_id_ref,reason,evidence_url,status,opened_at)
                     VALUES(?,?,?,?,'OPEN',?)
-                    """, orderId, actor.id(), reason, evidence, FinanceRepository.utc(Instant.now()));
-            repository.event(orderId, "DISPUTE_OPENED", id, Long.toString(actor.id()), reason);
+                    """, orderId, actor.userId(), reason, evidence, FinanceRepository.utc(Instant.now()));
+            repository.event(orderId, "DISPUTE_OPENED", id, Long.toString(actor.userId()), reason);
         });
     }
 
@@ -336,7 +340,7 @@ public class FinanceService {
             require(repository.disputes(orderId).stream().anyMatch(c -> c.id() == id && "OPEN".equals(c.status())), "DISPUTE_NOT_OPEN");
             repository.update("UPDATE dispute SET status='RESOLVED',resolution=?,resolved_at=? WHERE dispute_id=?",
                     resolution, FinanceRepository.utc(Instant.now()), id);
-            repository.event(orderId, "DISPUTE_RESOLVED", id, Long.toString(actor.id()), resolution);
+            repository.event(orderId, "DISPUTE_RESOLVED", id, Long.toString(actor.userId()), resolution);
         });
     }
 
@@ -344,7 +348,7 @@ public class FinanceService {
         command(orderId, commandKey, "evidence:" + id + ":" + evidence, actor, () -> {
             require(repository.disputes(orderId).stream().anyMatch(c -> c.id() == id && "OPEN".equals(c.status())), "DISPUTE_NOT_OPEN");
             // Append to immutable audit history; preserve the original evidence link on the dispute.
-            repository.event(orderId, "DISPUTE_EVIDENCE_ADDED", id, Long.toString(actor.id()), evidence);
+            repository.event(orderId, "DISPUTE_EVIDENCE_ADDED", id, Long.toString(actor.userId()), evidence);
         });
     }
 
@@ -353,7 +357,7 @@ public class FinanceService {
         command(orderId, commandKey, "reject-refund:" + id + ":" + reason, actor, () -> {
             require(repository.refunds(orderId).stream().anyMatch(c -> c.id() == id && "MANUAL_REVIEW".equals(c.status())), "REFUND_NOT_PENDING");
             repository.update("UPDATE refund SET status='REJECTED' WHERE refund_id=?", id);
-            repository.event(orderId, "REFUND_REJECTED", id, Long.toString(actor.id()), reason);
+            repository.event(orderId, "REFUND_REJECTED", id, Long.toString(actor.userId()), reason);
         });
     }
 
@@ -373,7 +377,7 @@ public class FinanceService {
                     VALUES(?,?,?,'MANUAL_REVIEW',?,?,?)
                     """, paymentId, amount, reason, FinanceRepository.utc(Instant.now()), commandKey, policy);
             repository.update("UPDATE refund SET transfer_reference=? WHERE refund_id=?", "mss-refund-" + id, id);
-            repository.event(orderId, "REFUND_REVIEW_REQUESTED", id, Long.toString(actor.id()), policy);
+            repository.event(orderId, "REFUND_REVIEW_REQUESTED", id, Long.toString(actor.userId()), policy);
         });
     }
 
@@ -388,7 +392,7 @@ public class FinanceService {
             repository.update("UPDATE refund SET status='SUCCESS',transfer_reference=?,evidence_url=?,refunded_at=? WHERE refund_id=?",
                     reference, evidence, FinanceRepository.utc(Instant.now()), id);
             repository.ledger(orderId, "refund:" + id, "REFUNDED", refund.amount());
-            repository.event(orderId, "REFUND_SUCCESS", id, Long.toString(actor.id()), reference);
+            repository.event(orderId, "REFUND_SUCCESS", id, Long.toString(actor.userId()), reference);
         });
     }
 
@@ -404,7 +408,7 @@ public class FinanceService {
                     INSERT INTO settlement(seller_order_id,gross_amount,fee_rate,fee_amount,supplier_payout_amount,
                     status,idempotency_key,fee_basis,rounding_rule) VALUES(?,?,5.00,?,?,'READY',?,?,?)
                     """, orderId, context.total(), fee, context.total() - fee, commandKey, feeBasis, rounding);
-            repository.event(orderId, "SETTLEMENT_READY", id, Long.toString(actor.id()), "feeRate=5;basis=" + feeBasis + ";rounding=" + rounding);
+            repository.event(orderId, "SETTLEMENT_READY", id, Long.toString(actor.userId()), "feeRate=5;basis=" + feeBasis + ";rounding=" + rounding);
         });
     }
 
@@ -415,7 +419,7 @@ public class FinanceService {
             require(repository.settlements(orderId).stream().anyMatch(s -> s.settlementId() == id && "READY".equals(s.status())), "SETTLEMENT_NOT_READY");
             repository.update("UPDATE settlement SET status='PROCESSING',payout_reference=? WHERE settlement_id=?",
                     "mss-settlement-" + id, id);
-            repository.event(orderId, "PAYOUT_MANUAL_PROCESSING", id, Long.toString(actor.id()), "reference=mss-settlement-" + id);
+            repository.event(orderId, "PAYOUT_MANUAL_PROCESSING", id, Long.toString(actor.userId()), "reference=mss-settlement-" + id);
         });
     }
 
@@ -432,7 +436,7 @@ public class FinanceService {
             repository.update("UPDATE payment SET hold_status='RELEASED' WHERE seller_order_id=? AND status='SUCCESS' AND hold_status='HELD'", orderId);
             repository.ledger(orderId, "payout:" + id, "RELEASED", settlement.supplierPayoutAmount());
             if (settlement.feeAmount() > 0) { repository.ledger(orderId, "fee:" + id, "PLATFORM_FEE", settlement.feeAmount()); }
-            repository.event(orderId, "SETTLEMENT_SUCCESS", id, Long.toString(actor.id()), reference);
+            repository.event(orderId, "SETTLEMENT_SUCCESS", id, Long.toString(actor.userId()), reference);
         });
     }
 }

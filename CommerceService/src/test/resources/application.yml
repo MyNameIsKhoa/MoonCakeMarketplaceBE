@@ -15,3 +15,6 @@ security:
     rfq: test-rfq-commerce-token-32-bytes-minimum
   outgoing-identity-token: test-commerce-identity-token-32-bytes-minimum
   outgoing-catalog-token: test-commerce-catalog-token-32-bytes-minimum
+commerce:
+  checkout:
+    recovery-cron: "-"
