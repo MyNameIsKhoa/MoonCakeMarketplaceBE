@@ -13,12 +13,15 @@ const GATEWAY = (process.env.GATEWAY_URL ?? 'http://localhost:8080').replace(/\/
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? 'admin@mooncake.local';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? 'MoonCake@Admin2026';
 const SUPPLIER_PASSWORD = process.env.SUPPLIER_PASSWORD ?? 'MoonCake@Supplier2026';
+// Demo fixture only; each seller may edit its own flat fee through PATCH /api/stores/{id}.
+const DEMO_SHIPPING_FEE = 30000;
 
 const IMG = '/images/demo';
 const BANNERS = ['nguyet-vien-banner.webp', 'trang-moc-banner.webp', 'sao-nho-banner.webp'];
 
 /** product image file → public/images/demo/products/<file> */
 const P = (file) => `${IMG}/products/${file}.webp`;
+const BP = (file) => `${IMG}/brands/products/${file}.webp`;
 
 const STORES = [
   {
@@ -135,6 +138,42 @@ const STORES = [
         description: 'Bánh chay trà xanh nhân đậu đỏ.',
         variants: [['Bánh 150g', 78000, 90]] }
     ]
+  },
+  // Named-brand listings below are illustrative, not authorized brand storefronts.
+  {
+    key: 'nhu-lan', name: 'Như Lan (demo)', logoUrl: `${IMG}/brands/stores/demo-store-logo.svg`,
+    bannerUrl: `${IMG}/brands/stores/nhu-lan-banner.webp`,
+    description: 'Gian hàng tham chiếu để thử giao diện; ảnh, giá và người bán chỉ là dữ liệu mẫu.',
+    products: [{ key: 'TC', name: 'Bánh nướng thập cẩm (demo)', category: 'truyen-thong',
+      image: BP('nhu-lan-thap-cam'), description: 'Sản phẩm và giá minh họa.', variants: [['Bánh 150g minh họa', 155000, 50]] }]
+  },
+  {
+    key: 'madame-huong', name: 'Madame Hương (demo)', logoUrl: `${IMG}/brands/stores/demo-store-logo.svg`,
+    bannerUrl: `${IMG}/brands/stores/madame-huong-banner.webp`,
+    description: 'Gian hàng tham chiếu, không đại diện nhà bán chính thức.',
+    products: [{ key: 'CS', name: 'Bánh cốm sen (demo)', category: 'hien-dai',
+      image: BP('madame-huong-com-sen'), description: 'Sản phẩm và giá minh họa.', variants: [['Bánh 150g minh họa', 165000, 45]] }]
+  },
+  {
+    key: 'brodard', name: 'Brodard (demo)', logoUrl: `${IMG}/brands/stores/demo-store-logo.svg`,
+    bannerUrl: `${IMG}/brands/stores/brodard-banner.webp`,
+    description: 'Gian hàng tham chiếu, không đại diện nhà bán chính thức.',
+    products: [{ key: 'HS', name: 'Bánh hải sản (demo)', category: 'cao-cap',
+      image: BP('brodard-hai-san'), description: 'Sản phẩm và giá minh họa.', variants: [['Bánh 200g minh họa', 240000, 35]] }]
+  },
+  {
+    key: 'kidos', name: "KIDO's Bakery (demo)", logoUrl: `${IMG}/brands/stores/demo-store-logo.svg`,
+    bannerUrl: `${IMG}/brands/stores/kidos-banner.webp`,
+    description: 'Gian hàng tham chiếu, không đại diện nhà bán chính thức.',
+    products: [{ key: 'MTC', name: 'Bánh trà xanh phô mai (demo)', category: 'hien-dai',
+      image: BP('kidos-tra-xanh-pho-mai'), description: 'Sản phẩm và giá minh họa.', variants: [['Bánh 150g minh họa', 160000, 50]] }]
+  },
+  {
+    key: 'maison', name: 'Maison (demo)', logoUrl: `${IMG}/brands/stores/demo-store-logo.svg`,
+    bannerUrl: `${IMG}/brands/stores/maison-banner.webp`,
+    description: 'Gian hàng tham chiếu, không đại diện nhà bán chính thức.',
+    products: [{ key: 'HQ', name: 'Hộp quà Trung thu (demo)', category: 'cao-cap',
+      image: BP('maison-hop-qua'), description: 'Sản phẩm và giá minh họa.', variants: [['Hộp 4 bánh minh họa', 890000, 30]] }]
   }
 ];
 
@@ -187,6 +226,11 @@ async function seedStore(def, index, adminToken, categoryIdBySlug) {
 
   const mine = await expect(api('GET', '/api/stores?mine=true', { token }), [200], `stores mine ${def.key}`);
   if (mine.length > 0) {
+    if (mine[0].shippingFee == null) {
+      await expect(api('PATCH', `/api/stores/${mine[0].storeId}`, {
+        token, body: { shippingFee: DEMO_SHIPPING_FEE }
+      }), [200], `shipping fee ${def.key}`);
+    }
     console.log(`SKIP  ${def.name}: đã có gian hàng #${mine[0].storeId}`);
     return;
   }
@@ -196,12 +240,14 @@ async function seedStore(def, index, adminToken, categoryIdBySlug) {
     body: {
       name: def.name,
       description: def.description,
-      logoUrl: `${IMG}/stores/${def.key}/${def.logo}`,
-      bannerUrl: `${IMG}/stores/${BANNERS[index % BANNERS.length]}`
+      logoUrl: def.logoUrl ?? `${IMG}/stores/${def.key}/${def.logo}`,
+      bannerUrl: def.bannerUrl ?? `${IMG}/stores/${BANNERS[index % BANNERS.length]}`
     }
   }), [201], `tạo store ${def.key}`);
-  await expect(api('PATCH', `/api/stores/${store.storeId}`, { token, body: { status: 'ACTIVE' } }), [200], `store ${def.key} ACTIVE`);
-  await expect(api('POST', `/api/stores/${store.storeId}/branches`, { token, body: { ...def.branch, primary: true } }), [201, 200], `chi nhánh ${def.key}`);
+  await expect(api('PATCH', `/api/stores/${store.storeId}`, {
+    token, body: { status: 'ACTIVE', shippingFee: DEMO_SHIPPING_FEE }
+  }), [200], `store ${def.key} ACTIVE`);
+  if (def.branch) await expect(api('POST', `/api/stores/${store.storeId}/branches`, { token, body: { ...def.branch, primary: true } }), [201, 200], `chi nhánh ${def.key}`);
 
   for (const p of def.products) {
     const categoryId = categoryIdBySlug.get(p.category);
