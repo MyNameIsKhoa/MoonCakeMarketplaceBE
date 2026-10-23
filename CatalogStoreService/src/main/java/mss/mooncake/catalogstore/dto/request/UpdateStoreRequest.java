@@ -15,5 +15,8 @@ public record UpdateStoreRequest(
     @Size(max = 100, message = "Theme key tối đa 100 ký tự")
     String themeKey,
 
-    String status
+    String status,
+
+    @Size(max = 2000, message = "Mô tả store tối đa 2000 ký tự")
+    String description
 ) { }
