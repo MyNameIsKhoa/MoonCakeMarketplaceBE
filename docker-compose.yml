@@ -119,6 +119,14 @@ services:
       dockerfile: CommerceService/Dockerfile
     environment:
       <<: *jwt-env
+      PAYOS_CLIENT_ID: ${PAYOS_CLIENT_ID:-}
+      PAYOS_API_KEY: ${PAYOS_API_KEY:-}
+      PAYOS_CHECKSUM_KEY: ${PAYOS_CHECKSUM_KEY:-}
+      PAYOS_RETURN_URL: ${PAYOS_RETURN_URL:-http://localhost:5173/?finance=return}
+      PAYOS_CANCEL_URL: ${PAYOS_CANCEL_URL:-http://localhost:5173/?finance=cancel}
+      FINANCE_FEE_BASIS: ${FINANCE_FEE_BASIS:-}
+      FINANCE_FEE_ROUNDING: ${FINANCE_FEE_ROUNDING:-}
+      FINANCE_DISPUTE_ADMIN_ENABLED: ${FINANCE_DISPUTE_ADMIN_ENABLED:-false}
       COMMERCE_TO_IDENTITY_TOKEN: ${COMMERCE_TO_IDENTITY_TOKEN:?Set a unique 32+ character token}
       COMMERCE_TO_CATALOG_TOKEN: ${COMMERCE_TO_CATALOG_TOKEN:?Set a unique 32+ character token}
       RFQ_TO_COMMERCE_TOKEN: ${RFQ_TO_COMMERCE_TOKEN:?Set a unique 32+ character token}

@@ -33,3 +33,15 @@ security:
 springdoc:
   api-docs.path: /v3/api-docs
   swagger-ui.path: /swagger-ui.html
+payos:
+  client-id: ${PAYOS_CLIENT_ID:}
+  api-key: ${PAYOS_API_KEY:}
+  checksum-key: ${PAYOS_CHECKSUM_KEY:}
+  return-url: ${PAYOS_RETURN_URL:http://localhost:5173/?finance=return}
+  cancel-url: ${PAYOS_CANCEL_URL:http://localhost:5173/?finance=cancel}
+finance:
+  settlement:
+    fee-basis: ${FINANCE_FEE_BASIS:}
+    rounding: ${FINANCE_FEE_ROUNDING:}
+  dispute:
+    admin-adjudication-enabled: ${FINANCE_DISPUTE_ADMIN_ENABLED:false}
