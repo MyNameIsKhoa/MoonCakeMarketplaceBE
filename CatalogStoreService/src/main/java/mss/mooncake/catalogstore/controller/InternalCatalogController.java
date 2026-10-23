@@ -1,5 +1,6 @@
 package mss.mooncake.catalogstore.controller;
 
+import io.swagger.v3.oas.annotations.Hidden;
 import jakarta.validation.Valid;
 import java.util.List;
 import mss.mooncake.catalogstore.dto.request.PromotionCalculationRequest;
@@ -24,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/internal/v1")
+@Hidden
 public class InternalCatalogController {
 
     private final CatalogApplicationService catalogApplicationService;

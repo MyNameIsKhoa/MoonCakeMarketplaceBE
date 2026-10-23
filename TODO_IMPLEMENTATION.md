@@ -36,7 +36,7 @@
 
 - [ ] Auth MVP dùng Identity-issued HS256 JWT: Gateway và bốn service kiểm tra chữ ký/issuer/audience/expiration; API nghiệp vụ yêu cầu Bearer token. `ADMIN_USER_IDS` chỉ cấp `ROLE_ADMIN` cho user ID đã tồn tại trước khi Identity khởi động; ID không tồn tại làm service fail-fast. Admin review supplier qua Identity. Internal API xác thực `X-Service-Name` + secret riêng theo từng cặp service; sáu biến `*_TO_*_TOKEN` được cấu hình bắt buộc (tối thiểu 32 ký tự), không chia sẻ secret. `JWT_SECRET` tách riêng. Cần demo token hợp lệ/không hợp lệ/hết hạn, admin allowlist và internal token trước khi đánh dấu hoàn thành.
 - [X] Gateway route và CORS đã cấu hình phía backend: `CORS_ALLOWED_ORIGINS` (mặc định `http://localhost:5173`); `/api/supplier-profile/**` đi riêng về Identity. Chưa có FE trong repo nên chưa cấu hình Vite proxy; `/internal/**` không được expose qua Gateway.
-- [ ] Người giữ môi trường tạo 4 database trước Flyway, health/readiness cho DB và service, volume lưu SQL Server, mật khẩu local qua env. Compose hiện chỉ chạy container, chưa tự tạo named database.
+- [ ] Người giữ môi trường tạo 4 database trước Flyway, health/readiness cho DB và service, volume lưu SQL Server, mật khẩu local qua env. **Đã làm (23/10, TV2):** `docker-compose.yml` có `*-db-init` tự tạo database, healthcheck SQL Server, service đợi DB sẵn sàng, volume `*-db-data`, `MSSQL_SA_PASSWORD` từ `.env` (xem README mục Docker). **Còn thiếu:** health/readiness cho chính các service (chưa có Actuator).
 - [ ] Bật health/metrics/log có request ID cho cả 5 app; chốt timeout Feign và cách báo lỗi upstream. Cloudflare chỉ kiểm tra public endpoint, không thay thế log/metrics nội bộ.
 - [ ] Chốt ai review thay đổi `pom.xml`, Gateway, `docker-compose.yml`, contract dùng chung và migration trước khi sáu người cùng sửa.
 
@@ -140,6 +140,12 @@
 
 **Backend:** Commerce. **FE:** `features/cart-order/`.
 
+**Quyết định đã chốt (21/10/2026):** thêm cùng biến thể thì cộng quantity; checkout lấy toàn bộ cart active; stock được **reserve** ở Catalog khi checkout, chưa trừ bán chính thức cho đến mốc thanh toán do TV2/TV5 phối hợp; nhiều promotion được cộng dồn, giảm số tiền trước rồi giảm phần trăm, làm tròn **lên 1 đồng tại tổng cuối từng seller order**; V1 chưa thu phí vận chuyển (0); `orderNo = MSS-yyyyMMdd-orderId`, `sellerOrderNo = MSS-yyyyMMdd-orderId-sellerOrderId`; checkout idempotency key lưu 30 phút; mỗi accepted quotation tạo một customer order riêng; buyer chọn địa chỉ khi accept; RFQ timeout phải tra cứu và retry cùng key, không tạo yêu cầu mới mù. **30 phút idempotency không phải TTL giữ kho.**
+
+**Khuyến mãi đã chốt:** trên mỗi reward line chỉ chọn một `BUY_X_GET_Y` có lợi nhất, áp trước fixed; fixed discount toàn store chia xuống các `ORDER_ITEM` theo tỷ lệ subtotal, phần lẻ vào dòng cuối; các tỷ lệ % cộng lại, tính một lần trên phần còn lại sau fixed và giới hạn giảm không vượt giá line. IN08 Catalog đã có engine/controller và Feign mirror Commerce. Chỉ tổng seller order làm tròn lên VND; line/discount giữ decimal chính xác. Khi lưu `ORDER_ITEM DECIMAL(18,2)` cần quy tắc phân bổ phần lẻ của percent để không lệch số với `totalAmount`.
+
+**Đã chốt TTL giữ kho: 15 phút** (khác idempotency key 30 phút). **Chưa chốt với TV5:** mốc confirm/release khi thanh toán thành công/thất bại/hủy, xử lý timeout và bù trừ giữa Catalog–Commerce. Catalog đã có IN12 reserve/get/confirm/release, migration V2 và Feign mirror ở Commerce; **chưa được checkout/payment gọi hay kiểm thử xuyên service**, nên không đưa `POST /api/checkout` vào sử dụng. TV2 còn phải bảo đảm mọi thao tác sửa stock_quantity tính đến hold đang hiệu lực. IN07/IN08 đã có backend; FE hiện ở repo riêng và còn dùng mock.
+
 | Entity / DB owner | Cột, quan hệ cần code đúng physical V1 | Việc làm |
 |---|---|---|
 | `CART` | `cart_id`, `customer_id_ref` Identity logical ref, status/timestamps | Giỏ theo customer; kiểm tra chủ giỏ từ principal. |
@@ -151,16 +157,19 @@
 
 | API | Trạng thái | Đầu ra / kiểm tra chính |
 |---|---|---|
-| `GET /api/cart`, `POST /api/cart/items`, `PATCH/DELETE /api/cart/items/{id}` | Đề xuất | Chỉ cart của principal; response item có display data/giá theo contract. |
+| `GET /api/cart`, `POST /api/cart/items`, `PATCH/DELETE /api/cart/items/{id}` | Đã có backend cơ bản | Chỉ cart của principal; response hiện chỉ có IDs/quantity, display/giá chờ TV2 snapshot. |
 | `POST /api/checkout` | Đề xuất | Cart + address/nhận hàng; response order; idempotency **CHỐT**. |
-| `GET /api/orders`, `GET /api/orders/{id}` | Đề xuất | Order history/detail từ snapshots, phân quyền buyer/supplier tương ứng. |
-| `POST /internal/v1/orders/from-accepted-quotation` | Đã có skeleton, service chưa implement | RFQ → Commerce, idempotent; request hiện thiếu terms/items snapshot nên phải chốt và mở rộng DTO trước khi code. |
+| `GET /api/orders`, `GET /api/orders/{id}`, `GET /api/seller-orders`, `GET /api/seller-orders/{id}` | Đã có backend đọc | Đọc snapshot Commerce, buyer theo customerId, supplier theo Identity supplier summary; chưa có order được tạo bởi checkout/RFQ. |
+| `POST /internal/v1/orders/from-accepted-quotation` | Đã có DTO snapshot hai phía, service 501 | RFQ → Commerce; chưa có persist/dedup/IN10; không nhận public accept body làm snapshot. |
 
-- [ ] Backend: cart CRUD; checkout đọc Identity/Catalog bằng Feign, xác thực owner/giá/khuyến mãi; trong một Commerce transaction lưu master, address snapshot, seller orders và items; triển khai RFQ conversion theo **accepted snapshot**, không recalculate Catalog.
+- [x] Backend: cart CRUD xác thực bằng JWT/customerId; `POST /api/cart/pricing` lấy giá/khuyến mãi IN08 theo từng store; order history/detail đọc snapshot và supplier scope; IN07/IN08/IN12 contract đã có test riêng.
+- [ ] Backend: checkout đọc Identity/Catalog bằng Feign, xác thực owner/giá/khuyến mãi; trong một Commerce transaction lưu master, address snapshot, seller orders và items; triển khai RFQ conversion theo **accepted snapshot**, không recalculate Catalog. IN08/IN12 và DTO accepted snapshot đã có, nhưng chưa bật API tạo đơn vì chưa có obligation TV5, stock transition/recovery, persist/dedup RFQ và phân bổ tiền theo DECIMAL(18,2).
 - [ ] DB: V1 đã có bảng và local FK; trước migration mới, chốt cách lưu idempotency key và uniqueness của `quotation_id_ref` cho retry.
 - [ ] FE: cart, checkout nhiều store, order history/detail đọc snapshot; không để FE gọi trực tiếp nhiều service để tự ghép một quyết định checkout.
 - [ ] Test: hai store → một customer order + đúng seller orders; thay product sau mua không thay order detail; order khác owner bị `403/404`; retry RFQ không tạo đơn trùng; migration SQL Server.
 - [ ] Handoff: nhận summary TV1 và snapshot/promotion TV2; cung cấp order response cho TV4, seller-order state/context qua Java service cho TV5/TV6.
+- [ ] TV4/TV1: RFQ lấy address summary tin cậy khi accept để dựng IN09; Identity hiện chỉ cho `ROLE_INTERNAL_COMMERCE` gọi `/internal/v1/addresses/**`, nên cần thống nhất mở đúng quyền RFQ hoặc để Commerce tự fetch/verify snapshot. Không copy address/customer/store từ body FE.
+- [ ] TV5/TV3: chốt và triển khai Java service tạo `FULL`/`DEPOSIT` obligation cùng transaction lưu đơn; payment callback đã xác minh mới confirm IN12, failure/cancel/15 phút timeout thì release và cập nhật state bền vững; retry các bước mạng. Xác nhận xử lý tổng 0 đồng/deposit 0% trước khi bật checkout.
 - [ ] **CHỐT:** mã order, inventory reservation/oversell, transaction & lỗi Feign, idempotency retail checkout, payload accepted quotation từ TV4.
 
 ## 6. TV4 — Public RFQ, Quotation, Chat
@@ -236,11 +245,11 @@
 | `POST /api/orders/{orderId}/seller-orders/{sellerOrderId}/accept` | Đề xuất | Buyer nghiệm thu seller order thuộc order này; xử lý lặp an toàn. |
 | `POST /api/reviews`, `GET /api/reviews?orderItemId=...` | Đề xuất | Chỉ buyer hợp lệ, rating 1..5, một review/item. |
 
-- [ ] Backend: shipment lifecycle/tracking, delivered/accepted, review; cho TV5 đọc eligibility bằng Java service nội bộ.
-- [ ] DB: dùng V1 Commerce, local FK và `UQ_review_order_item`; không tạo migration của service mới.
-- [ ] FE: supplier fulfillment, buyer tracking/acceptance/review, trạng thái theo seller order.
-- [ ] Test: shipment sai owner bị chặn; expected/actual dates; delivered/accept lặp; chưa đủ điều kiện không review; review trùng bị chặn; dispute blocking tới TV5.
-- [ ] Handoff: TV3 chốt seller-order status; TV5 chốt tín hiệu nào cho phép settlement. Không Feign giữa TV3/TV5/TV6.
+- [X] Backend: shipment lifecycle/tracking, delivered/accepted, review; cho TV5 đọc eligibility bằng Java service nội bộ.
+- [X] DB: dùng V1 Commerce, local FK và `UQ_review_order_item`; không tạo migration của service mới.
+- [X] FE: supplier fulfillment, buyer tracking/acceptance/review, trạng thái theo seller order.
+- [X] Test: shipment sai owner bị chặn; expected/actual dates; delivered/accept lặp; chưa đủ điều kiện không review; review trùng bị chặn; dispute blocking tới TV5.
+- [X] Handoff: TV3 chốt seller-order status; TV5 chốt tín hiệu nào cho phép settlement. Không Feign giữa TV3/TV5/TV6.
 - [ ] **CHỐT:** tự giao hay provider, nguồn xác nhận delivered, acceptance timeout, thời điểm review và status transitions.
 
 ## 9. Contract và thứ tự phối hợp

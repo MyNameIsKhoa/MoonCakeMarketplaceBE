@@ -48,6 +48,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/categories", "/api/categories/**").hasAuthority("ROLE_ADMIN")
                         // Swagger
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+                        .requestMatchers("/internal/v1/inventory/**").hasAuthority("ROLE_INTERNAL_COMMERCE")
+                        .requestMatchers("/internal/v1/promotions/calculate").hasAuthority("ROLE_INTERNAL_COMMERCE")
                         .requestMatchers("/internal/**").hasAnyAuthority("ROLE_INTERNAL_COMMERCE", "ROLE_INTERNAL_RFQ")
                         // Mọi request còn lại cần JWT
                         .anyRequest().hasAnyAuthority("ROLE_CUSTOMER", "ROLE_SUPPLIER", "ROLE_ADMIN"))

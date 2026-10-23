@@ -56,7 +56,7 @@ TV2 **không sửa** file `Store*` của TV1. Quyền chủ store đi qua `Store
 - [x] Promotion CA16–CA20 (chi tiết ở Bước 6)
 - [x] Promotion engine IN08 (chi tiết ở Bước 7)
 
-**Chưa có:** API trừ tồn kho (chờ TV3), FE, chạy thử với SQL Server + Gateway.
+**Đã bổ sung khi tích hợp TV3:** IN12 reserve/get/confirm/release và migration V4 (`V4__stock_reservation.sql`, đổi từ V2 vì trùng version); chưa được checkout/payment gọi. FE chưa nối API thật.
 
 ### 3.1. Danh sách API TV2 đã làm (20 endpoint)
 
@@ -90,7 +90,7 @@ TV2 **không sửa** file `Store*` của TV1. Quyền chủ store đi qua `Store
 |---|---|---|---|---|
 | IN06 | `GET /internal/v1/products/{productId}/variants/{variantId}/snapshot` | Service (`commerce`, `rfq`) | 200 `ProductSnapshotResponse` | `InternalCatalogController` |
 | IN07 | `POST /internal/v1/variants/snapshots` | Service (`commerce`, `rfq`) | 200 `List<VariantSnapshotResponse>` | `InternalCatalogController` |
-| IN08 | `POST /internal/v1/promotions/calculate` | Service (`commerce`, `rfq`) | 200 `PromotionCalculationResult` | `InternalCatalogController` |
+| IN08 | `POST /internal/v1/promotions/calculate` | Service (`commerce`) | 200 `PromotionCalculationResult` | `InternalCatalogController` |
 
 **API trong spec nhưng chưa làm** (đều đánh dấu cần CHỐT trong spec hoặc chờ nhóm khác)
 
@@ -155,7 +155,7 @@ Thứ tự theo phụ thuộc dữ liệu: `product.category_id` bắt buộc �
   - [x] CA09 `PATCH /api/products/{productId}`: owner; transition `DRAFT → ACTIVE/INACTIVE`, `ACTIVE ↔ INACTIVE`; không quay lại `DRAFT`; không đặt tay `OUT_OF_STOCK`; lên `ACTIVE` cần variant `ACTIVE`
 - [x] `ProductController` mới cho `/api/products`; mapping entity → DTO là method private trong từng `*ServiceImpl`
 - [x] Test: `ProductServiceImplTest` (14), `ProductControllerTest` (9)
-- [ ] Bổ sung unit test cho `StoreAccessServiceImpl` (supplier chưa `VERIFIED` → 400, store `SUSPENDED` → 403, Identity 404 → không phải owner)
+- [x] Unit test `StoreAccessServiceImplTest` (10): supplier chưa `VERIFIED` → 400, store `SUSPENDED` → 403, không phải owner → 403, Identity 404 → không phải supplier, Identity 500 → lỗi hệ thống (2026-10-22)
 
 ### Bước 4 — Variant ✅ xong 2026-10-20
 
@@ -191,25 +191,22 @@ Thứ tự theo phụ thuộc dữ liệu: `product.category_id` bắt buộc �
 
 ### Bước 7 — Promotion engine IN08 ✅ xong 2026-10-20
 
-- [x] Phần tính thuần `PromotionCalculationServiceImpl.computeDiscounts` (static, không truy cập DB) để unit test trực tiếp
-- [x] `PromotionCalculationServiceImpl`: gộp line trùng variant, kiểm tra variant tồn tại (404) và cùng store (400), load giá + promotion hiệu lực (`findEffective` với `Clock`) + rules, gọi calculator
+- [x] Phần tính thuần `PromotionCalculationServiceImpl.computeDiscounts(...)` (static, không truy cập DB) để unit test trực tiếp — gộp từ `PromotionCalculator` ngày 22/10 theo quy ước package
+- [x] `PromotionCalculationServiceImpl`: load variant + promotion hiệu lực (`findEffective`) + rules, gọi calculator
 - [x] `POST /internal/v1/promotions/calculate` trong `InternalCatalogController`
-- [x] Quy tắc tính MVP:
-  - `PERCENT_DISCOUNT`: giảm `lineSubtotal × percent / 100` trên line target (target null = mọi line); cần quantity line ≥ `minQuantity`
-  - `FIXED_DISCOUNT` có target: giảm một lần cho cả line, không vượt line subtotal
-  - `FIXED_DISCOUNT` không target: giảm cả đơn khi tổng quantity ≥ `minQuantity`; **không cộng dồn** với rule theo line — chọn phương án giảm nhiều hơn, phân bổ theo tỷ lệ `lineSubtotal` (làm tròn xuống, phần dư vào line lớn nhất)
-  - `BUY_X_GET_Y`: lần áp dụng = `floor(qtyTarget / X)`; tặng `min(lần × Y, qtyReward)` unit, giảm trên line reward; reward phải có trong giỏ; target = reward thì tính theo nhóm `X + Y`
-  - Mỗi line tối đa 1 rule (giảm nhiều nhất, hòa thì ruleId nhỏ hơn); làm tròn VND `HALF_UP`; `discountTotal ≤ subtotal`
-- [x] Test: `service/impl/PromotionDiscountRulesTest` (20), `PromotionCalculationServiceImplTest` (4), contract IN08 trong `InternalCatalogContractTest` (2)
-- [x] Ghi contract IN08 vào `docs/contracts/README.md`
-- [ ] **Gửi TV3 review quy tắc tính** (mục 5, điểm #1–#3)
+- [x] Quy tắc nhóm đã chốt ngày 21/10/2026: một `BUY_X_GET_Y` có lợi nhất trên reward line, sau đó cộng dồn fixed theo tỷ lệ line subtotal (phần lẻ vào line cuối), cuối cùng cộng các tỷ lệ percent trên phần còn lại; tổng seller order làm tròn lên VND. Không dùng quy tắc TV2 cũ “1 rule tốt nhất/line” hoặc `HALF_UP` theo line.
+- [ ] Đối soát rule `minQuantity`, trường hợp trigger = reward và line decimal với TV2/TV3; chạy lại contract test sau merge.
+- [x] Ghi contract IN08 vào `docs/contracts/README.md`, có Feign mirror ở Commerce
 
 ### Bước 8 — Chờ TV3 (chưa code)
 
-- [ ] Đề xuất API internal trừ tồn kho: `UPDATE ... SET stock_quantity = stock_quantity - :qty WHERE variant_id = :id AND stock_quantity >= :qty`, có idempotency key. Chỉ ghi vào contract, code khi TV3 chốt flow checkout
+- [x] Đã có IN12 reserve/get/confirm/release, migration V4 trong Catalog và Feign mirror Commerce; stock_quantity là on-hand, hold còn hiệu lực được trừ khỏi availability. TTL đã chốt 15 phút; checkout/payment chưa dùng contract này, mốc confirm/release vẫn cần TV5 chốt.
+- [x] **TV2 (2026-10-22):** IN07 thêm `availableQuantity` (= tồn thực tế − hold `HELD` còn hạn, tính theo lô 1 query); CA14 khóa dòng variant rồi chặn đặt `stockQuantity` thấp hơn lượng đang giữ (409). Smoke test bước 8 kiểm tra trên SQL Server.
 
 ### Bước 9 — Frontend (`MoonCakeMarketplaceFE`)
 
+- [x] **Nền tảng (2026-10-22):** `src/services/api/http.ts` (axios → Gateway `VITE_API_BASE_URL`, mặc định `http://localhost:8080`; gắn `Bearer` token; `ApiError` với `status`/`fieldErrors`; `setAccessToken` cho màn đăng nhập của TV1), `catalogTypes.ts` (type khớp DTO backend), `catalogApi.ts` (CA01–CA04, CA06–CA09, CA11–CA14, CA16–CA20), export qua `services/api/index.ts`. `npm run lint` + `npm run build` pass; đã gọi thật qua Gateway (9/9)
+- [x] CORS: Gateway mặc định cho phép `http://localhost:3000` (FE `npm run dev`) và `:5173`
 - [ ] Thay `src/services/api/mockBackend.ts` bằng API thật cho `ProductList`, `ProductDetail`, `BrandStore`
 - [ ] `pages/seller/SellerCenter.tsx`: quản lý product/variant/promotion
 - [ ] Bỏ phần tự tính khuyến mãi ở FE; giá cuối do server tính
@@ -218,10 +215,10 @@ Thứ tự theo phụ thuộc dữ liệu: `product.category_id` bắt buộc �
 
 | # | Câu hỏi | Đề xuất hiện tại | Chốt với |
 |---|---|---|---|
-| 1 | Nhiều promotion cùng áp dụng | **Đã code:** mỗi line 1 rule có lợi nhất, không cộng dồn; giảm cả đơn so với tổng giảm theo line | TV3, nhóm |
-| 2 | Làm tròn tiền | **Đã code:** tiền giảm làm tròn VND `HALF_UP` theo line; giá gốc giữ nguyên `DECIMAL(18,2)` | TV3, TV5 |
-| 3 | `FIXED_DISCOUNT` khi `targetVariantId` null | **Đã code:** giảm cả đơn, phân bổ theo tỷ lệ line | TV3 |
-| 4 | Trừ tồn kho / chống bán quá | UPDATE có điều kiện + idempotency key | TV3 |
+| 1 | Nhiều promotion cùng áp dụng | Đã chốt cộng dồn; một BUY_X_GET_Y tốt nhất trước fixed, sau đó cộng tỷ lệ percent | TV3, nhóm |
+| 2 | Làm tròn tiền | Đã chốt lên 1 VND tại tổng cuối từng seller order; phân bổ chênh lệch xuống line còn TODO | TV3, TV5 |
+| 3 | `FIXED_DISCOUNT` khi `targetVariantId` null | Đã chốt giảm trên tổng store, phân bổ theo tỷ lệ line subtotal, phần lẻ vào line cuối | TV3 |
+| 4 | Trừ tồn kho / chống bán quá | IN12 giữ 15 phút; chốt payment transition và đảm bảo mọi stock update kiểm tra hold | TV3, TV5 |
 | 5 | Xóa product/variant/promotion (CA10, CA15, CA21) | Chưa làm; dùng `INACTIVE`/`DISABLED` thay vì xóa | Nhóm |
 | 6 | Search không dấu trên SQL Server | **Đã kiểm tra:** collation `Vietnamese_CI_AS` phân biệt dấu → "banh nuong" không ra "Bánh nướng". Lựa chọn: collation `_AI` cho cột `name` (migration V4) hoặc cột tên chuẩn hóa | Nhóm |
 | 7 | Tắt variant `ACTIVE` cuối cùng của product đang `ACTIVE` | **Đã chọn: chặn (400)**, đã code ở CA14 | Tự quyết, đã ghi lại |

@@ -152,6 +152,10 @@ $noAccentFound = Search 'banh nuong'
 Write-Host ("INFO  search khong dau 'banh nuong' -> {0} (phu thuoc collation cua DB)" -f $(if ($noAccentFound) { 'TIM THAY' } else { 'KHONG tim thay' }))
 $detail = Expect (Invoke-Api GET "$gateway/api/products/$($product.productId)") 200 'CA07 public xem product ACTIVE'
 Assert ($detail.variants.Count -eq 2) 'CA07 tra 2 variant ACTIVE'
+$variantPage = Expect (Invoke-Api GET "$gateway/api/products/$($product.productId)/variants") 200 'CA11 GET variants (public, sort mac dinh id)'
+Assert ($variantPage.items.Count -eq 2) 'CA11 tra 2 variant ACTIVE'
+[void](Expect (Invoke-Api GET "$gateway/api/products?storeId=$($store.storeId)&sort=id,desc") 200 'CA06 sort=id,desc (khong lap ORDER BY id)')
+[void](Expect (Invoke-Api GET "$gateway/api/categories?sort=id") 200 'CA01 sort=id')
 $summary = (Expect (Invoke-Api GET "$gateway/api/products?storeId=$($store.storeId)") 200 'CA06 listing theo store').items | Where-Object { $_.productId -eq $product.productId }
 Assert ([decimal]$summary.minPrice -eq 50000) "CA06 minPrice = gia variant ACTIVE thap nhat ($($summary.minPrice))"
 
@@ -188,6 +192,20 @@ Assert ([decimal]$calc.subtotal -eq 410000) "IN08 subtotal = 410000 ($($calc.sub
 Assert ([decimal]$calc.discountTotal -eq 86000) "IN08 discountTotal = 86000 ($($calc.discountTotal))"
 Assert ([decimal]$calc.totalAmount -eq 324000) "IN08 totalAmount = 324000 ($($calc.totalAmount))"
 [void](Expect (Invoke-Api POST "$catalog/internal/v1/promotions/calculate" @{ storeId = ($store.storeId + 999999); lines = @(@{ variantId = $variantA.variantId; quantity = 1 }) } -Headers $commerceHeaders) 400 'IN08 variant khac store -> 400')
+
+# ─── 8. Tồn kho: hold IN12 → availableQuantity (IN07) và chặn giảm tồn dưới hold (CA14) ─
+$holdKey = "smoke-$run"
+$hold = @{ reservationKey = $holdKey; expiresAt = [DateTimeOffset]::UtcNow.AddMinutes(15).ToString('o')
+           lines = @(@{ variantId = $variantA.variantId; quantity = 5 }) }
+[void](Expect (Invoke-Api POST "$catalog/internal/v1/inventory/reservations" $hold -Headers $commerceHeaders) 200 'IN12 giu 5 hop A (stock 50)')
+$afterHold = Expect (Invoke-Api POST "$catalog/internal/v1/variants/snapshots" @{ variantIds = @($variantA.variantId) } -Headers $commerceHeaders) 200 'IN07 sau khi giu hang'
+Assert ($afterHold[0].stockQuantity -eq 50 -and $afterHold[0].availableQuantity -eq 45) "IN07 stockQuantity=50, availableQuantity=45 ($($afterHold[0].stockQuantity)/$($afterHold[0].availableQuantity))"
+$variantUrl = "$gateway/api/products/$($product.productId)/variants/$($variantA.variantId)"
+[void](Expect (Invoke-Api PATCH $variantUrl @{ stockQuantity = 3 } $supplierToken) 409 'CA14 giam ton xuong 3 < 5 dang giu -> 409')
+[void](Expect (Invoke-Api PATCH $variantUrl @{ stockQuantity = 5 } $supplierToken) 200 'CA14 dat ton = 5 (bang luong dang giu) -> 200')
+[void](Expect (Invoke-Api PUT "$catalog/internal/v1/inventory/reservations/$holdKey/release" -Headers $commerceHeaders) 200 'IN12 release hold')
+$afterRelease = Expect (Invoke-Api POST "$catalog/internal/v1/variants/snapshots" @{ variantIds = @($variantA.variantId) } -Headers $commerceHeaders) 200 'IN07 sau khi release'
+Assert ($afterRelease[0].availableQuantity -eq 5) "IN07 availableQuantity tro lai 5 ($($afterRelease[0].availableQuantity))"
 
 Write-Host ''
 Write-Host "PASS ALL: $script:passed kiem tra. Du lieu test: store $($store.storeId), product $($product.productId) ($($product.productCode))."

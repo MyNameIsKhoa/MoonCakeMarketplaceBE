@@ -73,7 +73,7 @@ Checklist chi tiết những việc còn lại của TV2: [`CatalogStoreService/
 2. **Quyền supplier xác minh qua Identity**, không qua role: JWT do Identity phát chỉ có `ROLE_CUSTOMER` (+ `ROLE_ADMIN` nếu nằm trong allowlist), không có `ROLE_SUPPLIER`.
 3. **Product, variant, promotion mới đều ở trạng thái `DRAFT`.** Product chỉ được chuyển sang `ACTIVE` khi có ít nhất 1 variant `ACTIVE`.
 4. **Search dùng Specification** (Spring Data JPA 4.1: `Specification.allOf(...)`, không dùng `where(null)` cũ). Ký tự `%`/`_` trong từ khóa được escape; danh sách store rỗng trả kết quả rỗng thay vì lỗi `IN ()`.
-5. **Giả định MVP của promotion engine** (ghi trong Javadoc, cần TV3 review): mỗi line chỉ áp dụng một rule có lợi nhất, tiền VND làm tròn `HALF_UP`, tổng giảm không vượt subtotal.
+5. **Quy tắc promotion sau khi tích hợp TV3 (21/10/2026):** một `BUY_X_GET_Y` tốt nhất trên reward line; cộng dồn fixed rồi percent, tổng giảm không vượt subtotal; làm tròn lên VND ở tổng seller order. Quy tắc cũ “một rule/line, `HALF_UP`” đã được thay thế.
 
 ### Việc cần trao đổi
 
@@ -229,3 +229,115 @@ Quy ước nhóm (`CODING_CONVENTION_AND_API_RULES.md` dòng 64) chỉ cho phép
 - Gửi TV3: contract IN07 + IN08 và quy tắc tính khuyến mãi để review.
 - Chạy service với SQL Server thật (kiểm tra migration V3, search tiếng Việt có dấu).
 - FE: nối `ProductList`, `ProductDetail`, `BrandStore`, `SellerCenter` với API thật.
+
+---
+
+## 2026-10-22
+
+### Rà soát thay đổi của TV3 trên phần Catalog
+
+Sau commit TV2 `50172c7`, TV3 push `e9e6498` (wip TV3 commerce + cross-service contracts) và `4ebc415` (merge). 27 file trong `CatalogStoreService` thay đổi:
+
+- **IN08 viết lại theo quy tắc nhóm chốt 21/10:** cộng dồn khuyến mãi — một `BUY_X_GET_Y` tốt nhất trên reward line → fixed discount → tổng các percent (tối đa 100%/line); chỉ làm tròn lên tại `totalAmount` của seller order. Response line có `appliedRules[]`. Quy tắc MVP ở Buổi 6 (không cộng dồn, HALF_UP từng line) **không còn áp dụng**. Test Catalog giảm 155 → 145.
+- **IN12 giữ tồn kho** (reserve/get/confirm/release, TTL 15 phút) được TV3 thêm vào Catalog, kèm bảng `stock_reservation`, `stock_reservation_line`.
+- IN08 chỉ cho `commerce` gọi; `PromotionCalculator.java` xuất hiện lại trong `service/impl`.
+
+### Sửa lỗi chặn: trùng version migration
+
+`V2__stock_reservation.sql` trùng version với `V2__catalog_store_status_constraint.sql` → Catalog **không khởi động được** trên SQL Server (`FlywayException: Found more than one migration with version 2`). Test H2 tắt Flyway nên không phát hiện.
+
+| Loại | File | Nội dung |
+|---|---|---|
+| Đổi tên | `db/migration/V2__stock_reservation.sql` → `V4__stock_reservation.sql` | Version trống tiếp theo sau V3 seed category. An toàn vì Flyway chặn trùng version trước khi chạy bất kỳ migration nào, nên chưa DB nào áp dụng file cũ |
+| Sửa | `CatalogStoreService/docs/TV2_TODO.md`, `docs/CODING_CONVENTION_AND_API_RULES.md` | Đổi "migration V2" của IN12 thành V4 |
+
+**Kết quả:** `mvnw.cmd -pl CatalogStoreService clean package` — 145/145 pass; SQL Server local áp dụng V1–V4 thành công; `scripts/catalog-smoke.ps1` — **53/53 pass** với engine IN08 mới (2 A + 1 B: subtotal 410.000, giảm 86.000, tổng 324.000).
+
+**Ghi nhận:** IN08 mới trả `discountTotal` dạng `86000.000000` (scale 6) — đúng giá trị, consumer nên so sánh số, không so chuỗi.
+
+### Việc tiếp theo
+
+- Báo TV3: đã đổi migration sang V4; DB local của ai đã tạo tay bảng stock thì cần kiểm tra lại.
+- TV2: CA14 (PATCH `stockQuantity`) và `stockQuantity` của IN07 chưa trừ lượng đang giữ (hold còn hiệu lực) theo contract IN12.
+- Bàn với TV3: đưa `PromotionCalculator` về đúng quy ước package; đối soát `minQuantity`, trigger = reward, giá có số lẻ.
+
+### Buổi 2 (22/10) — Tồn kho theo hold IN12 + test StoreAccessService
+
+**Kết quả:** `mvnw.cmd -pl CatalogStoreService test` — **158/158 pass** (thêm 13 test); `scripts/catalog-smoke.ps1` — **61/61 pass** trên SQL Server (thêm 8 bước tồn kho).
+
+| Loại | File | Nội dung |
+|---|---|---|
+| Sửa | `repository/StockReservationLineRepository.java` | Thêm `heldQuantities(variantIds, now)` — tổng hold `HELD` chưa hết hạn theo lô (group by), projection `HeldQuantity` |
+| Sửa | `dto/response/VariantSnapshotResponse.java` | Thêm `availableQuantity` sau `stockQuantity`; `stockQuantity` vẫn là tồn thực tế (on-hand) theo contract IN12 |
+| Sửa | `service/impl/CatalogApplicationServiceImpl.java` | IN07 tính `availableQuantity = max(0, stockQuantity − held)` bằng 1 query cho cả batch; inject `Clock` |
+| Sửa | `service/impl/ProductVariantServiceImpl.java` | CA14: khi đổi `stockQuantity` thì khóa dòng variant (cùng cách IN12 reserve) rồi đếm hold; thấp hơn hold → **409** |
+| Sửa | `docs/contracts/README.md` | IN07 mô tả `availableQuantity`; Commerce nên dùng field này để kiểm tra còn bán được |
+| Thêm | `src/test/.../service/StoreAccessServiceImplTest.java` | 10 test: VERIFIED owner, 404 store, supplier chưa VERIFIED, Identity 404/500, không phải owner, store SUSPENDED, findOwnedStoreIds, isOwner, isPublic |
+| Sửa | `ProductVariantServiceImplTest`, `InternalCatalogContractTest`, 3 test promotion | +2 test CA14 hold; +1 contract test hold → IN07 → release; constructor DTO thêm `availableQuantity` |
+| Sửa | `scripts/catalog-smoke.ps1` | Bước 8: giữ 5 hộp → IN07 45/50 → CA14 đặt 3 bị 409, đặt 5 được → release → available 5 |
+
+**Lưu ý cho TV3:** Commerce mirror `VariantSnapshotResponse` chưa có `availableQuantity` (field thừa trong JSON được bỏ qua nên không lỗi); khi kiểm tra tồn ở giỏ/checkout nên thêm field này vào DTO mirror và dùng nó thay `stockQuantity`.
+
+### Buổi 3 (22/10) — Giai đoạn 1 FE: lớp gọi API catalog + sửa lỗi phân trang trên SQL Server
+
+**Frontend (`MoonCakeMarketplaceFE`):**
+
+| Loại | File | Nội dung |
+|---|---|---|
+| Thêm | `src/services/api/http.ts` | axios trỏ Gateway (`VITE_API_BASE_URL`, mặc định `http://localhost:8080`), gắn `Authorization: Bearer` từ `getAccessToken()`; `setAccessToken()` để màn đăng nhập (TV1) lưu token; lỗi chuẩn hóa thành `ApiError(status, message, fieldErrors)` với thông báo tiếng Việt |
+| Thêm | `src/services/api/catalogTypes.ts` | Type khớp DTO backend: `PageResponse`, category/product/variant/promotion request/response, status enum |
+| Thêm | `src/services/api/catalogApi.ts` | `catalogApi.categories/products/variants/promotions` cho 17 public endpoint của TV2 |
+| Sửa | `src/services/api/index.ts` | Export `catalogApi`, `ApiError`, `setAccessToken`, type catalog; ghi rõ `USE_MOCK_API` chỉ còn áp dụng cho address/checkout/order |
+| Sửa | `.env.example` | Thêm `VITE_API_BASE_URL` |
+
+`npm run lint` (tsc) và `npm run build` pass. Script gọi thật `catalogApi` qua Gateway: **9/9 pass** (list/search/get/variants/promotions + lỗi 400/401/403/404).
+
+**Backend:**
+
+| Loại | File | Nội dung |
+|---|---|---|
+| Sửa | `API-Gateway/src/main/resources/application.yml` | CORS mặc định thêm `http://localhost:3000` (FE chạy Express + Vite ở cổng 3000; trước đó preflight bị 403) |
+| Sửa | `docs/contracts/README.md` | Ghi cổng FE 3000 được phép CORS |
+| **Sửa lỗi** | `CatalogStoreService/.../dto/request/PageQuery.java` | `GET /api/products/{id}/variants` trả **500 trên SQL Server**: sort mặc định `id` + tie-breaker `id` → `ORDER BY variant_id, variant_id` (SQL Server từ chối, H2 chấp nhận). Mọi API gửi `?sort=id` cũng bị. Nay chỉ thêm tie-breaker khi sort chưa có `id` |
+| Thêm | `CatalogStoreService/src/test/.../dto/request/PageQueryTest.java` | 3 test: mặc định, không lặp `id`, giới hạn size/page/sort |
+| Sửa | `scripts/catalog-smoke.ps1` | Thêm CA11 GET variants, `sort=id,desc`, `sort=id` |
+
+**Kết quả:** Catalog **161/161 test pass**; smoke test **65/65 pass** trên SQL Server.
+
+**Ghi nhận:** Gateway trả **403** (không phải 401) cho request ghi khi chưa đăng nhập — FE nên coi "403 mà chưa có token" là cần đăng nhập. Lỗi CA11 chỉ lộ ra khi FE gọi thật: smoke test trước đó chưa gọi endpoint này.
+
+### Buổi 4 (22/10) — Đưa `PromotionCalculator` về đúng quy ước package (lần 2)
+
+Commit TV3 (`e9e6498`) tạo lại `service/impl/PromotionCalculator.java` với engine IN08 mới, trong khi `service/impl` theo quy ước chỉ chứa `*ServiceImpl` (đã dọn ở Buổi 9 ngày 20/10).
+
+| Trước | Sau |
+|---|---|
+| `service/impl/PromotionCalculator.java` (instance `calculate(...)`, class phụ `Line`, `RewardCandidate`, `Applied`) | Gộp vào `PromotionCalculationServiceImpl`: phần tính thuần là `static computeDiscounts(request, snapshots, promotions, rules, now)` package-private; class phụ thành nested `private static` |
+| `test/.../service/impl/PromotionCalculatorTest.java` | Đổi tên `PromotionComputeDiscountsTest.java`; cùng `PromotionDiscountRulesTest` gọi `PromotionCalculationServiceImpl.computeDiscounts(...)` |
+
+**Logic tính của TV3 giữ nguyên từng dòng** (chỉ đổi method instance → static). `mvnw.cmd -pl CatalogStoreService test` — **161/161 pass**.
+
+**Báo TV3:** engine IN08 nay nằm trong `PromotionCalculationServiceImpl.computeDiscounts`; khi sửa quy tắc tính thì sửa ở đây, không tạo lại class riêng trong `service/impl`.
+
+---
+
+## 2026-10-23
+
+### Buổi 1 (23/10) — Sửa `docker-compose.yml` để chạy backend trong Docker
+
+Giữ thiết kế **mỗi service một SQL Server riêng**; bật một service sẽ tự bật DB của nó.
+
+| Vấn đề trước | Đã sửa |
+|---|---|
+| Không ai tạo database (`mss_identity`, `mss_catalog_store`, …) → Flyway lỗi | Thêm `<svc>-db-init` chạy `IF DB_ID(...) IS NULL CREATE DATABASE ...` rồi thoát |
+| Service bật khi SQL Server chưa sẵn sàng | Healthcheck `sqlcmd SELECT 1`; chuỗi `db (healthy) → db-init (completed) → service`, `restart: on-failure` |
+| Catalog không có `IDENTITY_SERVICE_URL` → gọi Identity qua `localhost` trong container | Thêm `http://identity-service:8081` + `depends_on` identity |
+| CORS mặc định thiếu cổng FE 3000 | `http://localhost:3000,http://localhost:5173` |
+| Dữ liệu mất khi xóa container | Named volume cho 4 DB |
+| Gateway chờ cả 4 service | Gateway chỉ phụ thuộc Identity + Catalog |
+
+Mật khẩu SA lấy từ `MSSQL_SA_PASSWORD` trong `.env`. README thêm mục "Docker: toàn bộ backend"; `TODO_IMPLEMENTATION.md` ghi phần đã làm.
+
+**Kiểm tra:** `docker compose config -q` OK. Bản nhỏ (`api-gateway catalog-store-service` → kéo theo Identity + 2 DB): Flyway Identity V1–V3, Catalog V1–V4; smoke test **65/65 pass** qua Gateway trong Docker.
+
+**Chưa kiểm được bản đầy đủ (4 SQL Server + 5 JVM):** máy 7,7 GB RAM, WSL giới hạn 3,2 GB (`.wslconfig`, swap=0). Lúc build Commerce/RFQ, `catalog-db` bị kill (exit 137). Mỗi SQL Server cần ~700 MB nên bản đầy đủ cần khoảng 5–6 GB cho WSL. Commerce/RFQ chưa xác nhận chạy trong Docker.

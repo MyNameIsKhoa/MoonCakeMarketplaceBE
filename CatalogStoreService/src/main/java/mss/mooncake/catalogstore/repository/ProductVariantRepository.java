@@ -3,12 +3,14 @@ package mss.mooncake.catalogstore.repository;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import jakarta.persistence.LockModeType;
 import mss.mooncake.catalogstore.entity.ProductVariantEntity;
 import mss.mooncake.catalogstore.enums.ProductStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.repository.query.Param;
 
 public interface ProductVariantRepository extends JpaRepository<ProductVariantEntity, Long> {
@@ -27,6 +29,10 @@ public interface ProductVariantRepository extends JpaRepository<ProductVariantEn
     Optional<ProductVariantEntity> findByIdAndProductId(Long id, Long productId);
 
     List<ProductVariantEntity> findByIdIn(Collection<Long> ids);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select v from ProductVariantEntity v where v.id in :ids order by v.id")
+    List<ProductVariantEntity> lockByIds(@Param("ids") Collection<Long> ids);
 
     boolean existsBySku(String sku);
 

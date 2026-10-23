@@ -1,6 +1,8 @@
 package mss.mooncake.commerce.client;
 
 import mss.mooncake.commerce.client.dto.identity.UserSummaryResponse;
+import mss.mooncake.commerce.client.dto.identity.SupplierSummaryResponse;
+import mss.mooncake.commerce.client.dto.identity.AddressSummaryResponse;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -9,4 +11,10 @@ import org.springframework.web.bind.annotation.PathVariable;
 public interface IdentityServiceClient {
     @GetMapping("/internal/v1/users/{userId}/summary")
     UserSummaryResponse getUserSummary(@PathVariable Long userId);
+
+    @GetMapping("/internal/v1/suppliers/by-user/{userId}/summary")
+    SupplierSummaryResponse getSupplierSummaryByUser(@PathVariable Long userId);
+
+    @GetMapping("/internal/v1/addresses/{addressId}/summary")
+    AddressSummaryResponse getAddressSummary(@PathVariable Long addressId);
 }

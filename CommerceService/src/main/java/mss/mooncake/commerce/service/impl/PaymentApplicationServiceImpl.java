@@ -4,6 +4,7 @@ import mss.mooncake.commerce.service.PaymentApplicationService;
 import mss.mooncake.commerce.dto.internal.SellerOrderPaymentContext;
 import mss.mooncake.commerce.repository.FinanceRepository;
 import mss.mooncake.commerce.service.FinanceIntegrationService;
+import mss.mooncake.commerce.service.OrderApplicationService;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
@@ -13,10 +14,13 @@ import org.springframework.stereotype.Service;
 @Service
 public class PaymentApplicationServiceImpl implements PaymentApplicationService {
     private final FinanceRepository repository;
+    private final OrderApplicationService orders;
 
-    public PaymentApplicationServiceImpl(FinanceRepository repository) {
+    public PaymentApplicationServiceImpl(FinanceRepository repository, OrderApplicationService orders) {
         this.repository = repository;
+        this.orders = orders;
     }
+
     @Override
     public SellerOrderPaymentContext getPaymentContext(Long sellerOrderId) {
         var context = repository.context(sellerOrderId);

@@ -27,13 +27,23 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             Claims claims = tokenProvider.parseClaims(authorization.substring(7));
             if (claims != null && claims.get("userId") != null) {
                 Object roleClaim = claims.get("roles");
-                var authorities = roleClaim instanceof List<?> roles
-                        ? roles.stream().filter(String.class::isInstance).map(String.class::cast)
-                                .map(SimpleGrantedAuthority::new).toList()
-                        : List.<SimpleGrantedAuthority>of();
-                var authentication = new UsernamePasswordAuthenticationToken(claims.getSubject(), null, authorities);
-                authentication.setDetails(claims.get("userId"));
-                SecurityContextHolder.getContext().setAuthentication(authentication);
+                @SuppressWarnings("unchecked")
+                List<String> roleList = roleClaim instanceof List<?> roles
+                        ? roles.stream().filter(String.class::isInstance).map(String.class::cast).toList()
+                        : List.of();
+                var authorities = roleList.stream().map(SimpleGrantedAuthority::new).toList();
+                Number userId = claims.get("userId", Number.class);
+                Number customerId = claims.get("customerId", Number.class);
+                if (userId != null) {
+                    CommercePrincipal principal = new CommercePrincipal(
+                            userId.longValue(),
+                            customerId == null ? null : customerId.longValue(),
+                            claims.getSubject(),
+                            authorities
+                    );
+                    SecurityContextHolder.getContext().setAuthentication(
+                            new UsernamePasswordAuthenticationToken(principal, null, authorities));
+                }
             }
         }
         chain.doFilter(request, response);
