@@ -243,6 +243,8 @@ Thời điểm dự kiến và thực tế được lưu riêng. Một phần đ
 
 ## 6. RFQ & Negotiation Service
 
+**Cập nhật backend TV4 (14/10/2026):** RFQ create/list/detail/PATCH/close/cancel, quotation create/list/detail/revision/accept/reject/cancel/order lookup và conversation/chat đã có implementation. Contract và các quyết định áp dụng nằm trong [TV4_BACKEND_GUIDE.md](TV4_BACKEND_GUIDE.md). Create là publish/submit ngay; không triển khai endpoint draft/publish/submit thừa. Accept nhận `{quotationVersion,addressId}`, yêu cầu `Idempotency-Key`, trả 200 COMPLETED hoặc 202 PENDING có tra cứu/recovery bền vững. Frontend tiếp tục triển khai sau backend.
+
 ### 6.1. Yêu cầu báo giá
 
 | Mã | Phương thức và endpoint | Chức năng | Quyền |
@@ -275,6 +277,8 @@ RQ05 áp dụng khi nhóm lựa chọn quy trình bản nháp trước công b�
 | RQ18 | `GET /api/quotations/{quotationId}/order` | Tra cứu kết quả chuyển báo giá thành đơn | Chủ RFQ hoặc nhà cung cấp báo giá |
 
 Một RFQ có thể có nhiều báo giá được chấp nhận. Báo giá đã chấp nhận không được sửa nội dung giao dịch. Mỗi báo giá chỉ được chuyển thành tối đa một phần đơn; gửi lại yêu cầu không tạo đơn trùng.
+
+Contract TV4 hiện tại: create/revision có 1–50 mục hàng, yêu cầu `Idempotency-Key` và trả `version` do server cấp. Revision thêm `expectedVersion`, không nhận `storeId`, chỉ áp dụng bản mới nhất `SUBMITTED` chưa có conversion khi RFQ còn mở/còn hạn. Accept nhận `quotationVersion` như mục 8; reject/cancel dùng reason tùy chọn và gửi lại cùng quyết định/reason là an toàn. Chi tiết bắt buộc/nullable xem [TV4_BACKEND_GUIDE.md](TV4_BACKEND_GUIDE.md).
 
 ### 6.3. Hội thoại và tin nhắn
 
@@ -340,7 +344,7 @@ Các field liệt kê là dữ liệu nghiệp vụ chính, không thay thế kh
 | Checkout | `addressId`, lựa chọn vận chuyển nếu có | Đơn tổng, các phần đơn và tổng tiền do server tính |
 | RFQ | `title`, `quantity`, `description`, `budgetAmount`, `requestedDeliveryDate`, `deliveryLocation`, `customizationRequirements`, `expiresAt` | RFQ và trạng thái |
 | Báo giá | `storeId`, `depositPercent`, `validUntil`, `leadTimeDays`, `proposedDeliveryDate`, `shippingMethod`, `shippingFee`, `paymentTerms`, `items` | Phiên bản báo giá, các mục hàng và tổng tiền |
-| Mục báo giá | `variantId` có thể rỗng, `itemNameSnapshot`, `skuSnapshot`, `quantity`, `unitPrice`, `discountAmount`, `customizationNote` | Tên, số lượng, giá và thành tiền đã thống nhất |
+| Mục báo giá | `productId` + `variantId` nếu dùng Catalog; cả hai rỗng nếu tùy chỉnh, `itemNameSnapshot`, `skuSnapshot`, `quantity`, `unitPrice`, `discountAmount`, `customizationNote` | Tên/SKU từ Catalog cho biến thể; tên tùy chỉnh từ request; giá thương lượng và subtotal do server kiểm tra/tính |
 | Chấp nhận báo giá | `quotationVersion`, `addressId`; quotationId từ URL | Trạng thái chuyển đổi và định danh đơn khi hoàn tất |
 | Thanh toán | `paymentId` từ URL; lựa chọn đối tác theo cấu hình | Trạng thái và thông tin thực hiện thanh toán |
 | Hủy đơn | `sellerOrderId`, `reason` | Kết quả hủy và mức hoàn theo chính sách |

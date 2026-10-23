@@ -11,10 +11,12 @@
 
 x-mssql: &mssql
   image: mcr.microsoft.com/mssql/server:2022-latest
+  restart: unless-stopped
   environment:
     ACCEPT_EULA: "Y"
-    MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
-    SQLCMDPASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
+    MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
+    SQLCMDPASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
+    MSSQL_MEMORY_LIMIT_MB: ${MSSQL_MEMORY_LIMIT_MB:-1024}
   healthcheck:
     test: ["CMD", "/opt/mssql-tools18/bin/sqlcmd", "-C", "-S", "localhost", "-U", "sa", "-Q", "SELECT 1", "-b"]
     interval: 10s
@@ -26,7 +28,7 @@ x-mssql-init: &mssql-init
   image: mcr.microsoft.com/mssql/server:2022-latest
   entrypoint: ["/opt/mssql-tools18/bin/sqlcmd"]
   environment:
-    SQLCMDPASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
+    SQLCMDPASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
   restart: "no"
 
 x-jwt-env: &jwt-env
@@ -87,7 +89,7 @@ services:
       ADMIN_USER_IDS: ${ADMIN_USER_IDS:-}
       IDENTITY_DB_URL: jdbc:sqlserver://identity-db:1433;databaseName=mss_identity;encrypt=false;trustServerCertificate=true
       IDENTITY_DB_USERNAME: sa
-      IDENTITY_DB_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
+      IDENTITY_DB_PASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
     ports: ["8081:8081"]
     restart: on-failure
     depends_on:
@@ -104,7 +106,7 @@ services:
       RFQ_TO_CATALOG_TOKEN: ${RFQ_TO_CATALOG_TOKEN:?Set a unique 32+ character token}
       CATALOG_DB_URL: jdbc:sqlserver://catalog-db:1433;databaseName=mss_catalog_store;encrypt=false;trustServerCertificate=true
       CATALOG_DB_USERNAME: sa
-      CATALOG_DB_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
+      CATALOG_DB_PASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
       # Catalog gọi Identity (Feign) để xác minh supplier / chủ store.
       IDENTITY_SERVICE_URL: http://identity-service:8081
     ports: ["8082:8082"]
@@ -132,7 +134,7 @@ services:
       RFQ_TO_COMMERCE_TOKEN: ${RFQ_TO_COMMERCE_TOKEN:?Set a unique 32+ character token}
       COMMERCE_DB_URL: jdbc:sqlserver://commerce-db:1433;databaseName=mss_commerce;encrypt=false;trustServerCertificate=true
       COMMERCE_DB_USERNAME: sa
-      COMMERCE_DB_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
+      COMMERCE_DB_PASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
       IDENTITY_SERVICE_URL: http://identity-service:8081
       CATALOG_SERVICE_URL: http://catalog-store-service:8082
     ports: ["8083:8083"]
@@ -153,7 +155,7 @@ services:
       RFQ_TO_COMMERCE_TOKEN: ${RFQ_TO_COMMERCE_TOKEN:?Set a unique 32+ character token}
       RFQ_DB_URL: jdbc:sqlserver://rfq-db:1433;databaseName=mss_rfq_negotiation;encrypt=false;trustServerCertificate=true
       RFQ_DB_USERNAME: sa
-      RFQ_DB_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
+      RFQ_DB_PASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
       IDENTITY_SERVICE_URL: http://identity-service:8081
       CATALOG_SERVICE_URL: http://catalog-store-service:8082
       COMMERCE_SERVICE_URL: http://commerce-service:8083

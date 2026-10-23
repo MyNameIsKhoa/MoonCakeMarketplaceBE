@@ -8,6 +8,8 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
+@lombok.Getter
+@lombok.Setter
 @Table(name = "customer_order")
 @AttributeOverride(name = "id", column = @Column(name = "order_id"))
 public class CustomerOrderEntity extends BaseCommerceEntity {
