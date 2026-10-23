@@ -7,6 +7,8 @@ import jakarta.persistence.Table;
 import java.math.BigDecimal;
 
 @Entity
+@lombok.Getter
+@lombok.Setter
 @Table(name = "order_item")
 @AttributeOverride(name = "id", column = @Column(name = "order_item_id"))
 public class OrderItemEntity extends BaseCommerceEntity {

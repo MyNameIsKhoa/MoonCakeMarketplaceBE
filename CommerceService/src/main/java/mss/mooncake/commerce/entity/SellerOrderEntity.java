@@ -9,6 +9,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
+@lombok.Getter
+@lombok.Setter
 @Table(name = "seller_order")
 @AttributeOverride(name = "id", column = @Column(name = "seller_order_id"))
 public class SellerOrderEntity extends BaseCommerceEntity {
