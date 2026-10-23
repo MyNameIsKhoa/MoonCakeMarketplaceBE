@@ -3,6 +3,7 @@ package mss.mooncake.catalogstore.service.impl;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import mss.mooncake.catalogstore.dto.response.ProductSnapshotResponse;
@@ -10,6 +11,8 @@ import mss.mooncake.catalogstore.dto.response.VariantSnapshotResponse;
 import mss.mooncake.catalogstore.entity.ProductEntity;
 import mss.mooncake.catalogstore.entity.ProductVariantEntity;
 import mss.mooncake.catalogstore.entity.StoreEntity;
+import mss.mooncake.catalogstore.enums.ProductStatus;
+import mss.mooncake.catalogstore.enums.StoreStatus;
 import mss.mooncake.catalogstore.exception.ResourceNotFoundException;
 import mss.mooncake.catalogstore.repository.ProductRepository;
 import mss.mooncake.catalogstore.repository.ProductVariantRepository;
@@ -40,14 +43,31 @@ public class CatalogApplicationServiceImpl implements CatalogApplicationService 
 
     @Override
     public ProductSnapshotResponse getProductSnapshot(Long productId, Long variantId) {
-        ProductVariantEntity variant = variantRepository.findByIdAndProductId(variantId, productId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Không tìm thấy biến thể " + variantId + " của sản phẩm " + productId));
         ProductEntity product = productRepository.findById(productId)
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy sản phẩm với id: " + productId));
+        ProductVariantEntity variant = variantRepository.findById(variantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy biến thể với id: " + variantId));
+        if (!Objects.equals(variant.getProductId(), product.getId())) {
+            throw new ResourceNotFoundException(
+                    "Không tìm thấy biến thể " + variantId + " của sản phẩm " + productId);
+        }
+        StoreEntity store = storeRepository.findById(product.getStoreId())
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy cửa hàng của sản phẩm"));
+        String status = availability(store, product, variant);
         // agreedUnitPrice giữ tên field cũ vì Commerce/RFQ đã mirror DTO; giá trị là basePrice hiện tại.
         return new ProductSnapshotResponse(product.getId(), variant.getId(), product.getName(),
-                variant.getVariantName(), variant.getSku(), variant.getBasePrice());
+                variant.getVariantName(), variant.getSku(), variant.getBasePrice(), store.getId(),
+                store.getSupplierIdRef(), product.getProductCode(), variant.getImageUrl(), status);
+    }
+
+    private String availability(StoreEntity store, ProductEntity product, ProductVariantEntity variant) {
+        if (store.getStatus() != StoreStatus.ACTIVE) {
+            return store.getStatus() == null ? "INACTIVE" : store.getStatus().name();
+        }
+        if (product.getStatus() != ProductStatus.ACTIVE) {
+            return product.getStatus() == null ? "INACTIVE" : product.getStatus().name();
+        }
+        return variant.getStatus() == null ? "INACTIVE" : variant.getStatus().name();
     }
 
     @Override

@@ -30,8 +30,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         ? roles.stream().filter(String.class::isInstance).map(String.class::cast)
                                 .map(SimpleGrantedAuthority::new).toList()
                         : List.<SimpleGrantedAuthority>of();
-                SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
-                        claims.getSubject(), null, authorities));
+                try {
+                    Long userId = Long.valueOf(claims.get("userId").toString());
+                    if (userId > 0) SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                            new UserPrincipal(userId, claims.getSubject(), authorities), null, authorities));
+                } catch (NumberFormatException invalidUserId) {
+                    SecurityContextHolder.clearContext();
+                }
             }
         }
         chain.doFilter(request, response);
