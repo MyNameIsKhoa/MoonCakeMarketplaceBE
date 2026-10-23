@@ -24,7 +24,7 @@ RFQ → lưu intent PENDING → Commerce tạo đơn và khoản thanh toán
 | Nhiều báo giá | Có thể accept nhiều báo giá của một RFQ. Mỗi báo giá tạo một customer order và seller order riêng; chưa có gộp đơn/phân bổ tổng quantity. |
 | Snapshot | Item tùy chỉnh có thể không có variant. Item dùng Catalog phải thuộc đúng product/store/supplier, dùng tên/SKU từ Catalog và giá thương lượng từ request. |
 | Tổng tiền | Item subtotal = quantity × unitPrice − discountAmount; subtotal nội bộ khi tạo đơn = tổng item subtotal; totalAmount = subtotal + shippingFee. Response báo giá trả `totalAmount` và subtotal từng item. |
-| Làm tròn | Tiền/percent tối đa 2 chữ số thập phân. Đặt cọc = total × percent / 100, `HALF_UP` đến 2 chữ số. |
+| Làm tròn | Chốt theo TV5: tiền báo giá (đơn giá, giảm giá, phí vận chuyển) là **VND nguyên** — gửi `"90000"` hoặc `"90000.00"`, phần lẻ đồng bị từ chối `400 AMOUNT_NOT_WHOLE_VND`; percent tối đa 2 chữ số thập phân. Đặt cọc = total × percent / 100, `HALF_UP` về **đồng** (vd 30% của 1.005 = 302). Commerce cũng từ chối snapshot có phần lẻ đồng, vì mọi dòng `payment` phải là số nguyên (`CK_payment_integer_vnd`). Ngân sách RFQ chỉ để tham khảo nên vẫn nhận tối đa 2 chữ số thập phân. |
 | Thanh toán | Chỉ sau conversion tạo `DEPOSIT` và `REMAINING` ở Commerce. Khoản bằng 0 được bỏ qua; tổng đơn phải lớn hơn 0. Phần còn lại đến hạn 00:00 UTC trước ngày giao 3 ngày. |
 | Địa chỉ | Buyer chọn addressId; RFQ xác minh customer owner qua Identity và lưu snapshot bất biến trong intent. |
 | Hết hiệu lực | Báo giá `SUBMITTED` quá `validUntil` được trả về với `status=EXPIRED` (tính khi đọc, không ghi DB); `GET /api/quotations?status=EXPIRED|SUBMITTED` lọc theo đúng trạng thái hiển thị này. Supplier vẫn revise được bản mới nhất để gia hạn. |
