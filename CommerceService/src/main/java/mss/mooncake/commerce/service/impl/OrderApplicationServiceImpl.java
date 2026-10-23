@@ -4,15 +4,18 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.HexFormat;
 import java.util.Objects;
 import java.util.UUID;
 import mss.mooncake.commerce.dto.request.CreateOrderFromQuotationRequest;
 import mss.mooncake.commerce.dto.response.OrderResponse;
+import mss.mooncake.commerce.dto.internal.FinanceOrderContext;
 import mss.mooncake.commerce.dto.internal.SellerOrderPaymentContext;
 import mss.mooncake.commerce.entity.*;
-import mss.mooncake.commerce.enums.*;
 import mss.mooncake.commerce.repository.*;
+import mss.mooncake.commerce.service.FinanceIntegrationService;
 import mss.mooncake.commerce.service.OrderApplicationService;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -30,15 +33,15 @@ public class OrderApplicationServiceImpl implements OrderApplicationService {
     private final SellerOrderRepository sellers;
     private final DeliveryAddressRepository addresses;
     private final OrderItemRepository items;
-    private final PaymentRepository payments;
+    private final FinanceIntegrationService finance;
     private final TransactionTemplate tx;
     private final ObjectMapper json;
 
     public OrderApplicationServiceImpl(QuotationOrderConversionRepository conversions, CustomerOrderRepository orders,
             SellerOrderRepository sellers, DeliveryAddressRepository addresses, OrderItemRepository items,
-            PaymentRepository payments, PlatformTransactionManager manager, ObjectMapper json) {
+            FinanceIntegrationService finance, PlatformTransactionManager manager, ObjectMapper json) {
         this.conversions=conversions; this.orders=orders; this.sellers=sellers; this.addresses=addresses;
-        this.items=items; this.payments=payments; this.tx=new TransactionTemplate(manager); this.json=json;
+        this.items=items; this.finance=finance; this.tx=new TransactionTemplate(manager); this.json=json;
     }
     @Override public OrderResponse createOrderFromAcceptedQuotation(CreateOrderFromQuotationRequest request) {
         validateAmounts(request);
@@ -59,26 +62,31 @@ public class OrderApplicationServiceImpl implements OrderApplicationService {
             address.setOrderId(order.getId()); address.setSourceAddressIdRef(a.sourceAddressId()); address.setRecipientName(a.recipientName());
             address.setRecipientPhone(a.recipientPhone()); address.setAddressLine(a.addressLine()); address.setWard(a.ward());
             address.setDistrict(a.district()); address.setCity(a.city()); addresses.save(address);
-            // Whole VND like every TV5 payment amount: HALF_UP to the dong.
-            BigDecimal deposit=request.totalAmount().multiply(request.terms().depositPercent()).divide(new BigDecimal("100"),0,RoundingMode.HALF_UP);
-            BigDecimal remaining=request.totalAmount().subtract(deposit);
+            // null = no deposit split: one FULL payment, like retail orders (deposit/remaining stay empty).
+            Long deposit=agreedDeposit(request.totalAmount(),request.terms().depositPercent());
             var seller=new SellerOrderEntity(); seller.setOrderId(order.getId()); seller.setSellerOrderNo("RFQS-"+UUID.randomUUID());
             seller.setStoreIdRef(request.storeId()); seller.setSupplierIdRef(request.supplierId()); seller.setQuotationIdRef(request.quotationId());
             seller.setStoreNameSnapshot(request.storeSnapshot().storeName()); seller.setSupplierNameSnapshot(request.storeSnapshot().supplierName());
             seller.setSubtotal(request.subtotal()); seller.setShippingFee(request.terms().shippingFee()); seller.setTotalAmount(request.totalAmount());
-            seller.setDepositPercent(request.terms().depositPercent()); seller.setDepositAmount(deposit); seller.setRemainingAmount(remaining);
-            seller.setDeliveryDateSnapshot(request.terms().deliveryDate()); seller.setRemainingDueAt(request.terms().deliveryDate().minusDays(3).atStartOfDay());
+            seller.setDepositPercent(request.terms().depositPercent());
+            if (deposit!=null) {
+                // Same due instant TV5 puts on the REMAINING obligation (00:00 Asia/Ho_Chi_Minh), stored as UTC.
+                seller.setDepositAmount(BigDecimal.valueOf(deposit)); seller.setRemainingAmount(request.totalAmount().subtract(BigDecimal.valueOf(deposit)));
+                seller.setRemainingDueAt(LocalDateTime.ofInstant(FinanceIntegrationService.remainingDue(request.terms().deliveryDate()),ZoneOffset.UTC));
+            }
+            seller.setDeliveryDateSnapshot(request.terms().deliveryDate());
             seller.setShippingMethodSnapshot(request.terms().shippingMethod()); seller.setPaymentTermsSnapshot(request.terms().paymentTerms());
-            seller.setStatus(deposit.signum()>0?"AWAITING_DEPOSIT":"AWAITING_PAYMENT"); order.setStatus(seller.getStatus()); sellers.saveAndFlush(seller);
+            seller.setStatus(deposit!=null?"AWAITING_DEPOSIT":"AWAITING_PAYMENT"); order.setStatus(seller.getStatus()); sellers.saveAndFlush(seller);
             for (var line:request.items()) {
                 var item=new OrderItemEntity(); item.setSellerOrderId(seller.getId()); item.setVariantIdRef(line.variantId());
                 item.setProductCodeSnapshot(line.productCodeSnapshot()); item.setProductNameSnapshot(line.productNameSnapshot());
                 item.setVariantNameSnapshot(line.variantNameSnapshot()); item.setSkuSnapshot(line.skuSnapshot()); item.setImageUrlSnapshot(line.imageUrlSnapshot());
                 item.setQuantity(line.quantity()); item.setUnitPrice(line.unitPrice()); item.setDiscountAmount(line.discountAmount()); item.setSubtotal(line.subtotal()); items.save(item);
             }
-            // Zero obligations are omitted because SQL Server payment.amount must be >0.
-            if (deposit.signum()>0) obligation(seller.getId(),PaymentType.DEPOSIT,deposit,request.acceptedAt());
-            if (remaining.signum()>0) obligation(seller.getId(),PaymentType.REMAINING,remaining,seller.getRemainingDueAt());
+            // TV5 owns payment obligations: register the accepted order like retail checkout, in this transaction,
+            // so finance_context and DEPOSIT/REMAINING (or FULL) commit or roll back with the order.
+            finance.syncOrder(new FinanceOrderContext(seller.getId(),request.customerId(),request.supplierId(),
+                request.totalAmount().longValueExact(),deposit,request.terms().deliveryDate(),true,1));
             claim.setOrderId(order.getId()); claim.setSellerOrderId(seller.getId()); conversions.save(claim);
             return response(claim,seller.getStatus());
         }); } catch (DataIntegrityViolationException concurrentClaim) {
@@ -104,8 +112,10 @@ public class OrderApplicationServiceImpl implements OrderApplicationService {
         return response(c,sellers.findById(c.getSellerOrderId()).orElseThrow().getStatus());
     }
     private OrderResponse response(QuotationOrderConversionEntity c,String status) { return new OrderResponse(c.getOrderId(),status,c.getSellerOrderId(),c.getQuotationIdRef(),c.getQuotationVersion()); }
-    private void obligation(Long sellerId,PaymentType type,BigDecimal amount,java.time.LocalDateTime due) {
-        var p=new PaymentEntity(); p.setSellerOrderId(sellerId); p.setPaymentType(type); p.setAmount(amount); p.setDueAt(due); p.setStatus(PaymentStatus.PENDING); payments.save(p);
+    /** Deposit HALF_UP to the whole dong; TV5 takes it only strictly between 0 and the total, else null (FULL). */
+    static Long agreedDeposit(BigDecimal total,BigDecimal percent) {
+        BigDecimal deposit=total.multiply(percent).divide(new BigDecimal("100"),0,RoundingMode.HALF_UP);
+        return deposit.signum()>0 && deposit.compareTo(total)<0 ? deposit.longValueExact() : null;
     }
     private void validateAmounts(CreateOrderFromQuotationRequest r) {
         // Payment rows must be whole VND (CK_payment_integer_vnd); reject before anything is persisted.
