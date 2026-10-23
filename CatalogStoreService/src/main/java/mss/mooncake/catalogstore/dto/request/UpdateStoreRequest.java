@@ -1,6 +1,9 @@
 package mss.mooncake.catalogstore.dto.request;
 
 import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
+import java.math.BigDecimal;
 
 public record UpdateStoreRequest(
     @Size(max = 255, message = "Tên store tối đa 255 ký tự")
@@ -18,5 +21,11 @@ public record UpdateStoreRequest(
     String status,
 
     @Size(max = 2000, message = "Mô tả store tối đa 2000 ký tự")
-    String description
-) { }
+    String description,
+    @DecimalMin("0.00") @Digits(integer = 16, fraction = 2) BigDecimal shippingFee
+) {
+    public UpdateStoreRequest(String name, String logoUrl, String bannerUrl, String themeKey,
+                              String status, String description) {
+        this(name, logoUrl, bannerUrl, themeKey, status, description, null);
+    }
+}

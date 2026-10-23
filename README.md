@@ -116,6 +116,12 @@ Admin: DB mới chưa có user nào. Đăng ký tài khoản admin, lấy `userI
 
 CORS mặc định cho phép FE ở `http://localhost:3000` và `http://localhost:5173`.
 
+## Checkout mua lẻ (TV3)
+
+Chạy Identity, Catalog, Commerce và Gateway cùng lúc (`docker compose up -d --build api-gateway commerce-service`). Flyway của Catalog áp dụng V6 (`store.shipping_fee`); store chưa có phí sẽ không thể checkout. Supplier đã `VERIFIED`, store `ACTIVE`, địa chỉ thuộc buyer và tồn kho đủ là các điều kiện bắt buộc. FE lấy giỏ/giá qua `/api/cart`, `/api/cart/pricing`, rồi gửi toàn bộ giỏ bằng `POST /api/checkout` với `addressId` và `Idempotency-Key` ổn định khi retry. Commerce giữ kho qua Catalog tối đa 15 phút, tạo order ở trạng thái chờ xác nhận kho, sau đó đăng ký khoản thanh toán PayOS FULL theo từng seller order trong cùng Commerce DB. Response thành công là **đã tạo đơn, chưa thanh toán**. Nếu timeout/503, retry cùng key; không tự gửi một đơn mới. Key được giữ 30 phút sau khi hoàn tất/thất bại.
+
+`scripts/seed-demo-catalog.mjs` đặt phí cố định demo 30.000đ/store cho dữ liệu mẫu; đây không phải mặc định áp dụng cho mọi store. Migration không tự điền phí cho store thật. Chưa có integration test SQL Server/Docker cho toàn luồng giữ kho–thanh toán; unit/context tests không thay thế được bước đó.
+
 ## Demo Docker: Gateway + Identity + JWT
 
 [`compose.auth-demo.yml`](compose.auth-demo.yml) chỉ khởi động SQL Server cho Identity, một bước tạo database `mss_identity`, Identity Service và API Gateway. Demo dùng project/volume riêng, không thay đổi Compose đầy đủ. Dockerfiles hiện có build hai Spring Boot JAR thành image. Chỉ Gateway mở `http://localhost:8080`; Identity nghe `8081` và SQL Server nghe `1433` **bên trong** Docker, không publish hai port đó ra host.

@@ -110,7 +110,8 @@ public class StoreServiceImpl implements StoreService {
                 e.getBannerUrl(),
                 e.getThemeKey(),
                 e.getStatus().name(),
-                e.getDescription());
+                e.getDescription(),
+                e.getShippingFee());
     }
 
     // ─── Public API
@@ -250,6 +251,9 @@ public class StoreServiceImpl implements StoreService {
         if (request.description() != null) {
             store.setDescription(request.description());
         }
+        if (request.shippingFee() != null) {
+            store.setShippingFee(request.shippingFee());
+        }
         if (StringUtils.hasText(request.status())) {
             try {
                 StoreStatus next = StoreStatus.valueOf(request.status().trim().toUpperCase());
@@ -298,6 +302,7 @@ public class StoreServiceImpl implements StoreService {
                 store.getName(),
                 store.getSlug(),
                 store.getLogoUrl(),
-                store.getStatus().name());
+                store.getStatus().name(),
+                store.getShippingFee());
     }
 }
