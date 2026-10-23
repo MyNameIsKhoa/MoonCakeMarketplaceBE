@@ -142,6 +142,20 @@ class StoreControllerTest {
     }
 
     @Test
+    @DisplayName("POST /api/stores trả 403 khi JWT chỉ có ROLE_CUSTOMER (chưa là supplier VERIFIED)")
+    void createStore_403_customerRoleOnly() throws Exception {
+        CreateStoreRequest req = new CreateStoreRequest("Store A", null, null, null, null);
+        UserPrincipal customer = UserPrincipal.create(USER_ID, "buyer@test.com", List.of("ROLE_CUSTOMER"));
+
+        mockMvc.perform(post("/api/stores")
+                        .with(SecurityMockMvcRequestPostProcessors.user(customer))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isForbidden());
+        org.mockito.Mockito.verifyNoInteractions(storeService);
+    }
+
+    @Test
     @DisplayName("POST /api/stores trả 400 khi thiếu name")
     void createStore_400_missingName() throws Exception {
         // name = blank

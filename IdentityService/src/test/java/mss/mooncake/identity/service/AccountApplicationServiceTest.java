@@ -9,6 +9,7 @@ import mss.mooncake.identity.dto.response.AuthResponse;
 import mss.mooncake.identity.dto.response.UserProfileResponse;
 import mss.mooncake.identity.dto.response.UserSummaryResponse;
 import mss.mooncake.identity.entity.CustomerProfileEntity;
+import mss.mooncake.identity.entity.SupplierProfileEntity;
 import mss.mooncake.identity.entity.UserEntity;
 import mss.mooncake.identity.enums.UserStatus;
 import mss.mooncake.identity.exception.DuplicateResourceException;
@@ -16,6 +17,7 @@ import mss.mooncake.identity.exception.ForbiddenException;
 import mss.mooncake.identity.exception.ResourceNotFoundException;
 import mss.mooncake.identity.exception.UnauthorizedException;
 import mss.mooncake.identity.repository.CustomerProfileRepository;
+import mss.mooncake.identity.repository.SupplierProfileRepository;
 import mss.mooncake.identity.repository.UserRepository;
 import mss.mooncake.identity.security.JwtTokenProvider;
 import mss.mooncake.identity.service.impl.AccountApplicationServiceImpl;
@@ -43,6 +45,9 @@ class AccountApplicationServiceTest {
     private CustomerProfileRepository customerProfileRepository;
 
     @Mock
+    private SupplierProfileRepository supplierProfileRepository;
+
+    @Mock
     private PasswordEncoder passwordEncoder;
 
     @Mock
@@ -55,9 +60,59 @@ class AccountApplicationServiceTest {
         accountService = new AccountApplicationServiceImpl(
                 userRepository,
                 customerProfileRepository,
+                supplierProfileRepository,
                 passwordEncoder,
                 jwtTokenProvider
         );
+    }
+
+    private UserEntity activeUser(long id, String email) {
+        UserEntity user = new UserEntity(email, "hash", UserStatus.ACTIVE, LocalDateTime.now(), LocalDateTime.now());
+        ReflectionTestUtils.setField(user, "id", id);
+        when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("password123", "hash")).thenReturn(true);
+        when(customerProfileRepository.findByUserId(id)).thenReturn(Optional.empty());
+        return user;
+    }
+
+    private SupplierProfileEntity supplierProfile(long userId, String status) {
+        return new SupplierProfileEntity(userId, "Banh Trung Thu", "TAX-" + userId, status,
+                LocalDateTime.now(), LocalDateTime.now());
+    }
+
+    @Test
+    void verifiedSupplierReceivesSupplierRole() {
+        activeUser(5L, "supplier@example.com");
+        when(supplierProfileRepository.findByUserId(5L)).thenReturn(Optional.of(supplierProfile(5L, "VERIFIED")));
+
+        accountService.login(new LoginRequest("supplier@example.com", "password123"));
+
+        verify(jwtTokenProvider).generateToken(eq(5L), isNull(), eq("supplier@example.com"),
+                eq(java.util.List.of("ROLE_CUSTOMER", "ROLE_SUPPLIER")));
+    }
+
+    @Test
+    void unverifiedSupplierDoesNotReceiveSupplierRole() {
+        for (String status : java.util.List.of("PENDING", "REJECTED", "SUSPENDED")) {
+            reset(jwtTokenProvider);
+            activeUser(6L, "pending@example.com");
+            when(supplierProfileRepository.findByUserId(6L)).thenReturn(Optional.of(supplierProfile(6L, status)));
+
+            accountService.login(new LoginRequest("pending@example.com", "password123"));
+
+            verify(jwtTokenProvider).generateToken(eq(6L), isNull(), eq("pending@example.com"),
+                    eq(java.util.List.of("ROLE_CUSTOMER")));
+        }
+    }
+
+    @Test
+    void customerWithoutSupplierProfileOnlyGetsCustomerRole() {
+        activeUser(7L, "buyer@example.com");
+
+        accountService.login(new LoginRequest("buyer@example.com", "password123"));
+
+        verify(jwtTokenProvider).generateToken(eq(7L), isNull(), eq("buyer@example.com"),
+                eq(java.util.List.of("ROLE_CUSTOMER")));
     }
 
     @Test

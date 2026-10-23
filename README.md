@@ -64,7 +64,7 @@ Upstream URL override: `IDENTITY_SERVICE_URL`, `CATALOG_SERVICE_URL`, `COMMERCE_
 
 Identity phát access token JWT ký HS256. Gateway và cả bốn business service xác minh chữ ký, `iss`, `aud` và `exp`; API nghiệp vụ yêu cầu Bearer token. Token dùng chung cấu hình `JWT_SECRET` (tối thiểu 32 byte), `JWT_ISSUER` (mặc định `mooncake-identity`) và `JWT_AUDIENCE` (mặc định `mooncake-api`). Không có secret mặc định trong runtime; đặt các biến này trong môi trường chạy hoặc `.env` không commit trước khi chạy Docker Compose.
 
-Token hiện có thời hạn 24 giờ và chứa `userId`, `customerId`, `roles`; Identity phát `ROLE_CUSTOMER` sau khi đăng nhập thành công. HS256 cần cùng secret tại các app để kiểm tra token; đây là lựa chọn MVP, cần giữ secret ngoài source control và thay secret khi bị lộ.
+Token hiện có thời hạn 24 giờ và chứa `userId`, `customerId`, `roles`; Identity phát `ROLE_CUSTOMER` sau khi đăng nhập thành công, thêm `ROLE_SUPPLIER` nếu supplier profile đang `VERIFIED` và `ROLE_ADMIN` nếu userId nằm trong `ADMIN_USER_IDS`. Role chốt lúc phát token: supplier vừa được duyệt phải đăng nhập lại; service vẫn kiểm tra trạng thái `VERIFIED` thật khi thao tác dữ liệu supplier. HS256 cần cùng secret tại các app để kiểm tra token; đây là lựa chọn MVP, cần giữ secret ngoài source control và thay secret khi bị lộ.
 
 PowerShell local có thể tạo secret ngẫu nhiên cho phiên hiện tại bằng:
 
