@@ -31,4 +31,40 @@ public class QuotationEntity extends BaseRfqEntity {
     @Enumerated(EnumType.STRING) @Column(name = "status", nullable = false, length = 30) private QuotationStatus status;
     @Column(name = "submitted_at") private LocalDateTime submittedAt;
     @Column(name = "accepted_at") private LocalDateTime acceptedAt;
+    @Column(name = "decision_reason", length = 2000) private String decisionReason;
+
+    public Long getRfqId() { return rfqId; }
+    public void setRfqId(Long rfqId) { this.rfqId = rfqId; }
+    public Long getSupplierIdRef() { return supplierIdRef; }
+    public void setSupplierIdRef(Long supplierIdRef) { this.supplierIdRef = supplierIdRef; }
+    public Long getStoreIdRef() { return storeIdRef; }
+    public void setStoreIdRef(Long storeIdRef) { this.storeIdRef = storeIdRef; }
+    public Long getPreviousQuotationId() { return previousQuotationId; }
+    public void setPreviousQuotationId(Long previousQuotationId) { this.previousQuotationId = previousQuotationId; }
+    public Integer getVersionNo() { return versionNo; }
+    public void setVersionNo(Integer versionNo) { this.versionNo = versionNo; }
+    public BigDecimal getTotalAmount() { return totalAmount; }
+    public void setTotalAmount(BigDecimal totalAmount) { this.totalAmount = totalAmount; }
+    public BigDecimal getDepositPercent() { return depositPercent; }
+    public void setDepositPercent(BigDecimal depositPercent) { this.depositPercent = depositPercent; }
+    public LocalDateTime getValidUntil() { return validUntil; }
+    public void setValidUntil(LocalDateTime validUntil) { this.validUntil = validUntil; }
+    public Integer getLeadTimeDays() { return leadTimeDays; }
+    public void setLeadTimeDays(Integer leadTimeDays) { this.leadTimeDays = leadTimeDays; }
+    public LocalDate getProposedDeliveryDate() { return proposedDeliveryDate; }
+    public void setProposedDeliveryDate(LocalDate proposedDeliveryDate) { this.proposedDeliveryDate = proposedDeliveryDate; }
+    public String getShippingMethod() { return shippingMethod; }
+    public void setShippingMethod(String shippingMethod) { this.shippingMethod = shippingMethod; }
+    public BigDecimal getShippingFee() { return shippingFee; }
+    public void setShippingFee(BigDecimal shippingFee) { this.shippingFee = shippingFee; }
+    public String getPaymentTerms() { return paymentTerms; }
+    public void setPaymentTerms(String paymentTerms) { this.paymentTerms = paymentTerms; }
+    public QuotationStatus getStatus() { return status; }
+    public void setStatus(QuotationStatus status) { this.status = status; }
+    public LocalDateTime getSubmittedAt() { return submittedAt; }
+    public void setSubmittedAt(LocalDateTime submittedAt) { this.submittedAt = submittedAt; }
+    public LocalDateTime getAcceptedAt() { return acceptedAt; }
+    public void setAcceptedAt(LocalDateTime acceptedAt) { this.acceptedAt = acceptedAt; }
+    public String getDecisionReason() { return decisionReason; }
+    public void setDecisionReason(String decisionReason) { this.decisionReason = decisionReason; }
 }

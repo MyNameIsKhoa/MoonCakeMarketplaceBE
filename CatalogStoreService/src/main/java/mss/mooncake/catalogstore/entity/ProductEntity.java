@@ -10,6 +10,7 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import mss.mooncake.catalogstore.enums.ProductStatus;
 
 @Entity
@@ -28,13 +29,13 @@ public class ProductEntity extends BaseCatalogEntity {
 
     @PrePersist
     private void onCreate() {
-        createdAt = LocalDateTime.now(ZoneOffset.UTC);
+        createdAt = LocalDateTime.now(ZoneOffset.UTC).truncatedTo(ChronoUnit.SECONDS);
         updatedAt = createdAt;
     }
 
     @PreUpdate
     private void onUpdate() {
-        updatedAt = LocalDateTime.now(ZoneOffset.UTC);
+        updatedAt = LocalDateTime.now(ZoneOffset.UTC).truncatedTo(ChronoUnit.SECONDS);
     }
 
     // ─── Getters ────────────────────────────────────────────────────────────────

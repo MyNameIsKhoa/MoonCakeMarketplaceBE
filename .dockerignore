@@ -1,9 +1,13 @@
 .git
 .idea
+.vscode
 **/target
 **/node_modules
 .env
 .env.*
 **/.env
 **/.env.*
+!.env.example
 *.iml
+**/*.log
+**/*.tmp

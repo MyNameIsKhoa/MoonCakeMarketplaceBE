@@ -6,6 +6,8 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
 
 @Entity
+@lombok.Getter
+@lombok.Setter
 @Table(name = "delivery_address")
 @AttributeOverride(name = "id", column = @Column(name = "delivery_address_id"))
 public class DeliveryAddressEntity extends BaseCommerceEntity {
