@@ -29,6 +29,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
+import org.springframework.dao.DataIntegrityViolationException;
 
 @Service
 public class CartApplicationServiceImpl implements CartApplicationService {
@@ -146,8 +147,10 @@ public class CartApplicationServiceImpl implements CartApplicationService {
                 || !"ACTIVE".equals(snapshot.storeStatus())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Variant is not currently for sale");
         }
-        CartEntity cart = carts.findFirstByCustomerIdRefAndStatusOrderByIdDesc(customerId, ACTIVE)
+        CartEntity current = carts.findFirstByCustomerIdRefAndStatusOrderByIdDesc(customerId, ACTIVE)
                 .orElseGet(() -> createCart(customerId));
+        CartEntity cart = carts.lockActive(current.getId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "Cart is checking out"));
         var existing = items.findByCartIdAndVariantIdRef(cart.getId(), request.variantId());
         CartItemEntity item = existing
                 .orElseGet(() -> {
@@ -193,22 +196,30 @@ public class CartApplicationServiceImpl implements CartApplicationService {
     @Transactional
     public void clear(Long customerId) {
         carts.findFirstByCustomerIdRefAndStatusOrderByIdDesc(customerId, ACTIVE).ifPresent(cart -> {
+            carts.lockActive(cart.getId()).orElseThrow(() ->
+                    new ResponseStatusException(HttpStatus.CONFLICT, "Cart is checking out"));
             items.deleteByCartId(cart.getId());
             cart.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
         });
     }
 
     private CartEntity createCart(Long customerId) {
+        if (carts.existsByCustomerIdRefAndStatus(customerId, "CHECKOUT_PENDING"))
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Cart is checking out");
         CartEntity cart = new CartEntity();
         cart.setCustomerIdRef(customerId);
         cart.setStatus(ACTIVE);
         cart.setCreatedAt(LocalDateTime.now(ZoneOffset.UTC));
         cart.setUpdatedAt(cart.getCreatedAt());
-        return carts.save(cart);
+        try { return carts.saveAndFlush(cart); }
+        catch (DataIntegrityViolationException conflict) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "An active cart or checkout already exists", conflict);
+        }
     }
 
     private CartEntity requireCart(Long customerId) {
         return carts.findFirstByCustomerIdRefAndStatusOrderByIdDesc(customerId, ACTIVE)
+                .flatMap(cart -> carts.lockActive(cart.getId()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Cart not found"));
     }
 

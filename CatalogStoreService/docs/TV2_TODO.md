@@ -24,7 +24,7 @@ TV2 **không sửa** file `Store*` của TV1. Quyền chủ store đi qua `Store
 
 | Chủ đề | Quy tắc |
 |---|---|
-| Quyền supplier | JWT không có `ROLE_SUPPLIER`; luôn xác minh `userId` → Identity supplier summary → so `store.supplierIdRef`. Supplier phải `VERIFIED` |
+| Quyền supplier | API ghi yêu cầu `ROLE_SUPPLIER`/`ROLE_ADMIN` (SecurityConfig). Role chốt lúc đăng nhập nên service vẫn xác minh `userId` → Identity supplier summary → so `store.supplierIdRef`; supplier phải `VERIFIED` tại thời điểm ghi |
 | Store bị khóa | Store `SUSPENDED` thì không sửa catalog/promotion được |
 | Hiển thị public | Chỉ product `ACTIVE` thuộc store `ACTIVE`; variant `ACTIVE`; promotion `ACTIVE`. Dữ liệu chưa công bố trả 404 cho người ngoài, owner đăng nhập vẫn xem được |
 | Trạng thái ban đầu | Product, variant, promotion mới đều là `DRAFT`; category mới là `ACTIVE` |

@@ -5,8 +5,8 @@ import mss.mooncake.catalogstore.entity.StoreEntity;
 
 /**
  * Kiểm tra quyền sở hữu store cho các use case catalog/promotion (TV2).
- * JWT không mang ROLE_SUPPLIER nên quyền supplier luôn xác minh qua Identity
- * theo userId.
+ * ROLE_SUPPLIER trong JWT chỉ phản ánh trạng thái lúc đăng nhập (supplier có thể bị
+ * SUSPENDED sau đó), nên quyền supplier luôn xác minh lại qua Identity theo userId.
  * Chỉ dùng nội bộ Catalog service; không trả StoreEntity ra REST.
  */
 public interface StoreAccessService {
