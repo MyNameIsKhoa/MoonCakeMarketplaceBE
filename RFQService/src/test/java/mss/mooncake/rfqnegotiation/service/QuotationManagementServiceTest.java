@@ -117,15 +117,25 @@ class QuotationManagementServiceTest {
 
     @Test
     void rejectsDiscountAboveLineGross() {
-        assertCode(() -> service.create(1L, "create-1", request(customItem("100.00", "200.01"))),
+        assertCode(() -> service.create(1L, "create-1", request(customItem("100.00", "201"))),
                 "DISCOUNT_EXCEEDS_LINE_AMOUNT");
         verify(quotations, never()).saveAndFlush(any());
     }
 
     @Test
     void rejectsMonetaryOverflowAndImplicitRounding() {
-        assertCode(() -> service.create(1L, "overflow", request(customItem("9999999999999999.99", "0"))), "INVALID_AMOUNT");
+        assertCode(() -> service.create(1L, "overflow", request(customItem("9999999999999999", "0"))), "INVALID_AMOUNT");
         assertCode(() -> service.create(1L, "precision", request(customItem("100.001", "0"))), "INVALID_AMOUNT_SCALE");
+    }
+
+    @Test
+    void rejectsFractionalDongBecausePaymentsAreWholeVnd() {
+        assertCode(() -> service.create(1L, "price", request(customItem("100.50", "0"))), "AMOUNT_NOT_WHOLE_VND");
+        assertCode(() -> service.create(1L, "discount", request(customItem("100.00", "0.50"))), "AMOUNT_NOT_WHOLE_VND");
+        assertCode(() -> service.create(1L, "shipping", new CreateQuotationRequest(30L, new BigDecimal("30.00"), validity, 3,
+                deliveryDate, "EXPRESS", new BigDecimal("10000.50"), "Chuyển khoản", List.of(customItem("100.00", "0")))),
+                "AMOUNT_NOT_WHOLE_VND");
+        verify(quotations, never()).saveAndFlush(any());
     }
 
     @Test
