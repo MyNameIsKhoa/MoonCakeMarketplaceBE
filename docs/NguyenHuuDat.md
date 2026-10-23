@@ -70,7 +70,7 @@ Checklist chi tiết những việc còn lại của TV2: [`CatalogStoreService/
 ### Quyết định kỹ thuật
 
 1. **Không đổi `ProductSnapshotResponse` (IN06)**, giữ field `agreedUnitPrice`, vì Commerce và RFQ đã mirror DTO này và convention cấm đổi nghĩa field khi consumer chưa migrate. Dùng DTO mới `VariantSnapshotResponse` cho IN07.
-2. **Quyền supplier xác minh qua Identity**, không qua role: JWT do Identity phát chỉ có `ROLE_CUSTOMER` (+ `ROLE_ADMIN` nếu nằm trong allowlist), không có `ROLE_SUPPLIER`.
+2. **Quyền supplier: role + xác minh qua Identity.** JWT có `ROLE_CUSTOMER`, thêm `ROLE_SUPPLIER` khi supplier profile `VERIFIED` lúc đăng nhập (+ `ROLE_ADMIN` nếu nằm trong allowlist). Catalog chặn API ghi khi thiếu `ROLE_SUPPLIER`/`ROLE_ADMIN`, nhưng vẫn kiểm tra `VERIFIED` + ownership qua Identity mỗi lần ghi vì role chỉ cập nhật ở lần đăng nhập sau.
 3. **Product, variant, promotion mới đều ở trạng thái `DRAFT`.** Product chỉ được chuyển sang `ACTIVE` khi có ít nhất 1 variant `ACTIVE`.
 4. **Search dùng Specification** (Spring Data JPA 4.1: `Specification.allOf(...)`, không dùng `where(null)` cũ). Ký tự `%`/`_` trong từ khóa được escape; danh sách store rỗng trả kết quả rỗng thay vì lỗi `IN ()`.
 5. **Quy tắc promotion sau khi tích hợp TV3 (21/10/2026):** một `BUY_X_GET_Y` tốt nhất trên reward line; cộng dồn fixed rồi percent, tổng giảm không vượt subtotal; làm tròn lên VND ở tổng seller order. Quy tắc cũ “một rule/line, `HALF_UP`” đã được thay thế.
@@ -378,3 +378,37 @@ Mật khẩu SA lấy từ `MSSQL_SA_PASSWORD` trong `.env`. README thêm mục 
 - Store/chi nhánh là phần của TV1 — cần báo TV1 về migration V5, field `description` và API chi nhánh.
 - Migration V5 chưa kiểm tra lại trên SQL Server trong buổi này (test H2 tắt Flyway).
 - Reviews/rating của product từ API chưa có (thuộc Commerce), FE hiển thị "chưa có đánh giá".
+
+---
+
+## 2026-10-24
+
+### Buổi 1 (24/10) — FE: đăng nhập/đăng ký, phân quyền theo vai trò, onboarding nhà cung cấp, admin duyệt
+
+Chỉ thay đổi ở `MoonCakeMarketplaceFE`; backend không đổi (dùng API Identity sẵn có của TV1 qua Gateway).
+
+| Loại | File | Nội dung |
+|---|---|---|
+| Thêm | `src/services/api/identityTypes.ts`, `identityApi.ts` | Type + client Identity: `authApi` (register/login), `userApi` (`GET/PATCH /api/users/me`), `supplierProfileApi` (`GET/POST/PATCH /api/supplier-profile`), `adminSupplierApi` (`GET /api/suppliers`, `POST /api/suppliers/{id}/verification`, lịch sử duyệt) |
+| Sửa | `src/services/api/http.ts` | `readTokenPayload` / `isTokenExpired` (đọc JWT phía FE, không verify); đọc lỗi validate `validationErrors` của Identity; 401 — hoặc 403 khi token hết hạn (Gateway trả 403 thay vì 401) — xóa token và phát `UNAUTHORIZED_EVENT` để app tự đăng xuất. 403 với token còn hạn là lỗi quyền thật, không đăng xuất |
+| Thêm | `src/context/AuthContext.tsx` | `AuthProvider` + `useAuth()`: khôi phục phiên từ token đã lưu, lấy roles từ JWT, profile từ `/api/users/me`, trạng thái supplier từ `/api/supplier-profile` (404 = chưa là supplier); `isAdmin` = `ROLE_ADMIN`, `isSupplier` = profile `VERIFIED`; login, register (tạo xong tự đăng nhập), logout, nộp/nộp lại hồ sơ supplier |
+| Thêm | `src/utils/permissions.ts` | Bảng quyền theo tab: `customer` (checkout, orders, profile, wishlist, b2b, payment-settlement), `supplier` (seller-center), `admin` (admin); còn lại public. Chỉ điều khiển UI, backend vẫn kiểm tra |
+| Thêm | `src/pages/auth/AuthLayout.tsx`, `Login.tsx`, `Register.tsx` | Màn đăng nhập/đăng ký; đăng ký chọn khách hàng hoặc nhà cung cấp (thêm tên công ty, mã số thuế → nộp hồ sơ ngay sau khi tạo tài khoản); validate phía FE; thông báo lỗi tiếng Việt theo status (401, 403, 409, 400, 5xx) |
+| Thêm | `src/pages/seller/SupplierOnboarding.tsx` | Hiện thay Kênh Người Bán khi chưa `VERIFIED`: chưa có hồ sơ → đăng ký; `PENDING` → chờ duyệt; `REJECTED` → sửa và gửi lại; `SUSPENDED` → liên hệ sàn |
+| Thêm | `src/pages/admin/AdminSupplierReview.tsx` | Admin duyệt nhà cung cấp: lọc theo trạng thái, phân trang; PENDING → Duyệt/Từ chối, VERIFIED → Tạm khóa, SUSPENDED → Mở khóa; bắt buộc lý do; 409 → báo trạng thái đã đổi |
+| Thêm | `src/components/UserMenu.tsx` | Nút đăng nhập/đăng ký khi là khách; menu tài khoản theo vai trò khi đã đăng nhập |
+| Sửa | `src/App.tsx` | Tab được bảo vệ hiển thị "cổng": đang kiểm tra phiên → Login (kèm thông báo theo tab) → SupplierOnboarding (tab supplier) → 403 (tab admin). Đăng nhập xong quay lại tab đang mở; đăng ký supplier xong vào Kênh Người Bán; thêm tab `login`, `register`, `admin` |
+| Sửa | `src/main.tsx` | Bọc `AuthProvider` ngoài `CatalogProvider` |
+| Sửa | `src/components/Navbar.tsx` | Thay nút tài khoản bằng `UserMenu`; menu mobile thêm "Duyệt nhà cung cấp" (admin), Đăng xuất / Đăng ký |
+| Sửa | `src/pages/UserProfile.tsx` | Bỏ thông tin cứng; hiển thị user thật + vai trò; lưu họ tên/SĐT qua `PATCH /api/users/me` |
+| Sửa | `src/utils/status.ts` | Thêm `SUPPLIER_VERIFICATION` (nhãn + màu cho PENDING/VERIFIED/REJECTED/SUSPENDED) |
+| Sửa | `src/services/api/index.ts` | Export API/type Identity và helper token |
+| Xóa | `src/features/payment-settlement/LocalFinanceLogin.tsx` (+ dùng trong `PaymentSettlement.tsx`) | Form đăng nhập tạm chỉ dùng khi dev của TV5; nay đã có đăng nhập chung |
+
+**Kết quả:** `npm run lint` (tsc) và `npm run build` pass (chỉ cảnh báo chunk > 500 kB).
+
+**Lưu ý:**
+
+- Màn đăng nhập/đăng ký và Identity là phần của TV1 — cần báo TV1 review. Xóa `LocalFinanceLogin` cần báo TV5.
+- Đăng ký nhà cung cấp gồm 2 bước (tạo tài khoản → nộp hồ sơ); nếu bước 2 lỗi thì tài khoản vẫn được tạo và người dùng nộp lại trong Kênh Người Bán.
+- Chưa chạy thử luồng trên trình duyệt với backend thật trong buổi này.
