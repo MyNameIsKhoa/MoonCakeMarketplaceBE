@@ -59,7 +59,8 @@ public class OrderApplicationServiceImpl implements OrderApplicationService {
             address.setOrderId(order.getId()); address.setSourceAddressIdRef(a.sourceAddressId()); address.setRecipientName(a.recipientName());
             address.setRecipientPhone(a.recipientPhone()); address.setAddressLine(a.addressLine()); address.setWard(a.ward());
             address.setDistrict(a.district()); address.setCity(a.city()); addresses.save(address);
-            BigDecimal deposit=request.totalAmount().multiply(request.terms().depositPercent()).divide(new BigDecimal("100"),2,RoundingMode.HALF_UP);
+            // Whole VND like every TV5 payment amount: HALF_UP to the dong.
+            BigDecimal deposit=request.totalAmount().multiply(request.terms().depositPercent()).divide(new BigDecimal("100"),0,RoundingMode.HALF_UP);
             BigDecimal remaining=request.totalAmount().subtract(deposit);
             var seller=new SellerOrderEntity(); seller.setOrderId(order.getId()); seller.setSellerOrderNo("RFQS-"+UUID.randomUUID());
             seller.setStoreIdRef(request.storeId()); seller.setSupplierIdRef(request.supplierId()); seller.setQuotationIdRef(request.quotationId());
@@ -107,6 +108,8 @@ public class OrderApplicationServiceImpl implements OrderApplicationService {
         var p=new PaymentEntity(); p.setSellerOrderId(sellerId); p.setPaymentType(type); p.setAmount(amount); p.setDueAt(due); p.setStatus(PaymentStatus.PENDING); payments.save(p);
     }
     private void validateAmounts(CreateOrderFromQuotationRequest r) {
+        // Payment rows must be whole VND (CK_payment_integer_vnd); reject before anything is persisted.
+        if (!wholeVnd(r.terms().shippingFee()) || r.items().stream().anyMatch(i->!wholeVnd(i.unitPrice()) || !wholeVnd(i.discountAmount()))) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Quotation amounts must be whole VND");
         BigDecimal sum=BigDecimal.ZERO;
         for (var i:r.items()) {
             BigDecimal gross=i.unitPrice().multiply(BigDecimal.valueOf(i.quantity()));
@@ -115,6 +118,7 @@ public class OrderApplicationServiceImpl implements OrderApplicationService {
         }
         if (r.items().isEmpty() || r.totalAmount().signum()<=0 || r.terms().shippingFee().signum()<0 || r.terms().depositPercent().signum()<0 || r.terms().depositPercent().compareTo(new BigDecimal("100"))>0 || sum.compareTo(r.subtotal())!=0 || sum.add(r.terms().shippingFee()).compareTo(r.totalAmount())!=0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid quotation totals");
     }
+    private static boolean wholeVnd(BigDecimal amount) { return amount.remainder(BigDecimal.ONE).signum()==0; }
     private ResponseStatusException conflict() { return new ResponseStatusException(HttpStatus.CONFLICT,"Quotation/key already has a different snapshot"); }
     private static String hash(String text) {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8))); }
