@@ -203,6 +203,6 @@ Các nhóm kiểm tra bao gồm ownership/privacy, schema JSON, giá/phiên bả
 
 - Tab **Doanh Nghiệp / B2B** (`src/pages/B2BPortal.tsx`) mở `src/features/rfq/RfqPortal.tsx`: sàn RFQ, RFQ của tôi, so sánh/chấp nhận/từ chối báo giá, soạn báo giá và phiên bản mới, báo giá của tôi, tin nhắn. Chat ở `src/features/chat/` (STOMP tối giản trên WebSocket gốc, không thêm dependency).
 - Gọi API qua `src/services/api/http.ts`; base URL `VITE_API_BASE_URL` (mặc định `http://localhost:8080`). FE dev chạy cổng **3000** (`npm run dev`), nên Gateway cần `CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000` (cũng dùng cho origin WebSocket).
-- Đăng nhập tạm trong `src/services/api/session.ts` (sessionStorage theo tab) cho tới khi TV1 có màn đăng nhập chung.
+- Đăng nhập dùng chung `src/context/AuthContext.tsx` của TV1: tab B2B ở mức `customer` (`src/utils/permissions.ts`) nên khách được chuyển tới màn Login chung; `RfqPortal` lấy user/hồ sơ nhà cung cấp từ `useAuth()`, REST và chat dùng cùng token trong `http.ts` (401/token hết hạn sẽ đăng xuất toàn app).
 - Các mock RFQ còn lại trong `SellerCenter` (tab RFQ) và `UserProfile` (tab RFQ) thuộc trang của thành viên khác, chưa nối API; có thể chuyển hướng sang tab B2B.
 
