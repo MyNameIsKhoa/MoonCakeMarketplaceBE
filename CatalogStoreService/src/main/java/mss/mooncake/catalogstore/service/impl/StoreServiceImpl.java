@@ -109,7 +109,8 @@ public class StoreServiceImpl implements StoreService {
                 e.getLogoUrl(),
                 e.getBannerUrl(),
                 e.getThemeKey(),
-                e.getStatus().name());
+                e.getStatus().name(),
+                e.getDescription());
     }
 
     // ─── Public API
@@ -135,6 +136,7 @@ public class StoreServiceImpl implements StoreService {
         store.setLogoUrl(request.logoUrl());
         store.setBannerUrl(request.bannerUrl());
         store.setThemeKey(request.themeKey());
+        store.setDescription(request.description());
         store.setStatus(StoreStatus.DRAFT); // Trạng thái ban đầu là DRAFT
 
         store = storeRepository.save(store);
@@ -244,6 +246,9 @@ public class StoreServiceImpl implements StoreService {
         }
         if (request.themeKey() != null) {
             store.setThemeKey(request.themeKey());
+        }
+        if (request.description() != null) {
+            store.setDescription(request.description());
         }
         if (StringUtils.hasText(request.status())) {
             try {

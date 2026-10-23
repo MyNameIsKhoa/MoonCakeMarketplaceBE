@@ -341,3 +341,40 @@ Mật khẩu SA lấy từ `MSSQL_SA_PASSWORD` trong `.env`. README thêm mục 
 **Kiểm tra:** `docker compose config -q` OK. Bản nhỏ (`api-gateway catalog-store-service` → kéo theo Identity + 2 DB): Flyway Identity V1–V3, Catalog V1–V4; smoke test **65/65 pass** qua Gateway trong Docker.
 
 **Chưa kiểm được bản đầy đủ (4 SQL Server + 5 JVM):** máy 7,7 GB RAM, WSL giới hạn 3,2 GB (`.wslconfig`, swap=0). Lúc build Commerce/RFQ, `catalog-db` bị kill (exit 137). Mỗi SQL Server cần ~700 MB nên bản đầy đủ cần khoảng 5–6 GB cho WSL. Commerce/RFQ chưa xác nhận chạy trong Docker.
+
+### Buổi 2 (23/10) — Mô tả + chi nhánh store; FE storefront đọc catalog thật
+
+**Backend (`CatalogStoreService`):**
+
+| Loại | File | Nội dung |
+|---|---|---|
+| Thêm | `db/migration/V5__store_description_and_branch.sql` | Cột `store.description NVARCHAR(2000)`; bảng `store_branch` (địa chỉ, SĐT, giờ mở cửa, `is_primary`, status `ACTIVE/INACTIVE`); unique index lọc `WHERE is_primary = 1` → mỗi store tối đa 1 chi nhánh chính |
+| Sửa | `entity/StoreEntity.java`, `dto/request/CreateStoreRequest.java`, `UpdateStoreRequest.java`, `dto/response/StoreResponse.java`, `service/impl/StoreServiceImpl.java` | Thêm field `description` (tối đa 2000 ký tự, PATCH chỉ đổi khi gửi lên) |
+| Thêm | `entity/StoreBranchEntity.java`, `enums/StoreBranchStatus.java`, `repository/StoreBranchRepository.java` | Chi nhánh; `clearPrimary(storeId)` bỏ cờ chính của các chi nhánh khác |
+| Thêm | `dto/request/CreateStoreBranchRequest.java`, `UpdateStoreBranchRequest.java`, `dto/response/StoreBranchResponse.java` | DTO chi nhánh |
+| Thêm | `service/StoreBranchService.java`, `service/impl/StoreBranchServiceImpl.java` | GET: owner thấy mọi trạng thái, khách chỉ thấy `ACTIVE` của store public, store chưa công bố → 404; ghi chỉ supplier owner (qua `StoreAccessService`); chi nhánh đầu tiên tự là chi nhánh chính |
+| Thêm | `controller/StoreBranchController.java` | `GET/POST /api/stores/{storeId}/branches`, `PATCH/DELETE /api/stores/{storeId}/branches/{branchId}`; POST 201 + `Location`, DELETE 204 |
+| Thêm | `src/test/.../service/StoreBranchServiceImplTest.java` | 11 test: hiển thị theo quyền, store chưa công khai 404, chi nhánh chính đầu tiên/đổi chính, không phải owner, patch, status sai 400, chi nhánh của store khác 404, xóa |
+| Sửa | `StoreControllerTest`, `StoreServiceImplTest` | Cập nhật constructor DTO thêm `description` |
+| Thêm | `scripts/seed-demo-catalog.mjs` | Seed demo qua Gateway: 7 gian hàng (Kinh Đô, Givral, Đồng Khánh, Hỷ Lâm Môn, Đức Phát, ABC Bakery, Khiết Minh) — mỗi gian hàng đăng ký supplier → admin duyệt → store + mô tả + chi nhánh → 3 product + variant → 1 promotion. Chạy lại được (bỏ qua supplier đã có store). Dữ liệu chi nhánh/mô tả là minh họa |
+
+**Frontend (`MoonCakeMarketplaceFE`):**
+
+| Loại | File | Nội dung |
+|---|---|---|
+| Đổi tên | `types.ts`: `Brand` → `Store` | Field theo `StoreResponse` (`storeId`, `slug`, `supplierIdRef`, `logoUrl`, `bannerUrl`); `Product.brandId/brandName` → `storeId/storeName`; `StoreBranch.id` → `branchId`; `Product.category` thành `string` (slug từ API) |
+| Thêm | `context/CatalogContext.tsx` | `CatalogProvider` + `useCatalog()`: tải store, product, category một lần qua Gateway, dùng chung cho Home/Navbar/ProductList/danh sách gian hàng. Gateway lỗi hoặc chưa có store → fallback `mockData`; `VITE_USE_MOCK_CATALOG=true` luôn dùng mock. Product chưa có variant `ACTIVE` (không có giá) bị ẩn |
+| Thêm | `services/api/catalogMappers.ts` | DTO → view model: `toStore`, `toStoreBranch`, `toProduct`, `withProductDetail`, `toPromotion`, `toCategoryOption`; `isApiId` phân biệt ID số của API với slug mock |
+| Thêm / Xóa | `pages/StoreDetail.tsx` thay `pages/BrandStore.tsx` | Trang gian hàng: store từ API tải product, promotion, chi nhánh, category theo `storeId` (promotion/chi nhánh lỗi không làm mất menu); store mock vẫn đọc `mockData` |
+| Sửa | `pages/ProductDetail.tsx` | Product từ API gọi `GET /api/products/{id}`: chọn variant (giá, ảnh, hết hàng), giỏ hàng nhận giá/tên variant; ẩn rating/thành phần khi backend chưa có dữ liệu; nút mua disable khi hết hàng |
+| Sửa | `App.tsx`, `main.tsx`, `Navbar.tsx`, `CartDrawer.tsx`, `home/StoreCard.tsx`, `home/StoreSection.tsx`, `pages/Home.tsx`, `pages/ProductList.tsx`, `pages/UserProfile.tsx`, `data/mockData.ts`, `services/api/mockBackend.ts` | Đổi `brand` → `store` (tab `brands`/`brand-store` → `stores`/`store-detail`), đọc dữ liệu từ `useCatalog()`; skeleton khi đang tải store; icon lucide `Store` đổi alias `StoreIcon` tránh trùng type |
+| Sửa | `services/api/index.ts`, `.env.example` | Export mapper; thêm `VITE_USE_MOCK_CATALOG` |
+| Thêm | `public/images/demo/stores/<store>/logo.*` | Logo 7 gian hàng cho script seed |
+
+**Kết quả:** `mvnw.cmd -pl CatalogStoreService test` — **169/169 pass**; FE `npm run lint` (tsc) pass.
+
+**Lưu ý:**
+
+- Store/chi nhánh là phần của TV1 — cần báo TV1 về migration V5, field `description` và API chi nhánh.
+- Migration V5 chưa kiểm tra lại trên SQL Server trong buổi này (test H2 tắt Flyway).
+- Reviews/rating của product từ API chưa có (thuộc Commerce), FE hiển thị "chưa có đánh giá".

@@ -9,5 +9,6 @@ public record StoreResponse(
     String logoUrl,
     String bannerUrl,
     String themeKey,
-    String status
+    String status,
+    String description
 ) { }
