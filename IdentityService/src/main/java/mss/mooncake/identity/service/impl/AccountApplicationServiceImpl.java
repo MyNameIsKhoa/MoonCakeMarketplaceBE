@@ -2,6 +2,7 @@ package mss.mooncake.identity.service.impl;
 
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
@@ -15,12 +16,14 @@ import mss.mooncake.identity.dto.response.UserProfileResponse;
 import mss.mooncake.identity.dto.response.UserSummaryResponse;
 import mss.mooncake.identity.entity.CustomerProfileEntity;
 import mss.mooncake.identity.entity.UserEntity;
+import mss.mooncake.identity.enums.SupplierVerificationStatus;
 import mss.mooncake.identity.enums.UserStatus;
 import mss.mooncake.identity.exception.DuplicateResourceException;
 import mss.mooncake.identity.exception.ForbiddenException;
 import mss.mooncake.identity.exception.ResourceNotFoundException;
 import mss.mooncake.identity.exception.UnauthorizedException;
 import mss.mooncake.identity.repository.CustomerProfileRepository;
+import mss.mooncake.identity.repository.SupplierProfileRepository;
 import mss.mooncake.identity.repository.UserRepository;
 import mss.mooncake.identity.security.JwtTokenProvider;
 import mss.mooncake.identity.service.AccountApplicationService;
@@ -34,6 +37,7 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
 
     private final UserRepository userRepository;
     private final CustomerProfileRepository customerProfileRepository;
+    private final SupplierProfileRepository supplierProfileRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     @Value("${security.admin.user-ids:}")
@@ -42,10 +46,12 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
 
     public AccountApplicationServiceImpl(UserRepository userRepository,
                                           CustomerProfileRepository customerProfileRepository,
+                                          SupplierProfileRepository supplierProfileRepository,
                                           PasswordEncoder passwordEncoder,
                                           JwtTokenProvider jwtTokenProvider) {
         this.userRepository = userRepository;
         this.customerProfileRepository = customerProfileRepository;
+        this.supplierProfileRepository = supplierProfileRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
     }
@@ -128,9 +134,7 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
         String fullName = profile != null ? profile.getFullName() : null;
         String phone = profile != null ? profile.getPhone() : null;
 
-        List<String> roles = adminUserIds.contains(user.getId())
-                ? List.of("ROLE_CUSTOMER", "ROLE_ADMIN")
-                : List.of("ROLE_CUSTOMER");
+        List<String> roles = resolveRoles(user.getId());
         String token = jwtTokenProvider.generateToken(user.getId(), customerId, user.getEmail(), roles);
 
         UserSummaryResponse userSummary = new UserSummaryResponse(
@@ -147,6 +151,26 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
                 jwtTokenProvider.getExpirationSeconds(),
                 userSummary
         );
+    }
+
+    /**
+     * Roles are fixed when the token is issued: every account is a customer, a VERIFIED supplier profile adds
+     * ROLE_SUPPLIER and ADMIN_USER_IDS adds ROLE_ADMIN. A status change (verify/suspend) applies at the next login,
+     * so services that act on supplier data must still check the live VERIFIED status.
+     */
+    private List<String> resolveRoles(Long userId) {
+        List<String> roles = new ArrayList<>();
+        roles.add("ROLE_CUSTOMER");
+        boolean verifiedSupplier = supplierProfileRepository.findByUserId(userId)
+                .map(supplier -> SupplierVerificationStatus.VERIFIED.name().equals(supplier.getVerificationStatus()))
+                .orElse(false);
+        if (verifiedSupplier) {
+            roles.add("ROLE_SUPPLIER");
+        }
+        if (adminUserIds.contains(userId)) {
+            roles.add("ROLE_ADMIN");
+        }
+        return List.copyOf(roles);
     }
 
     @Override

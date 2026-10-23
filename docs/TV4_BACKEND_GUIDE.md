@@ -167,7 +167,7 @@ Broker hiện là in-memory: chạy một RFQ instance. Chưa có attachment/rea
 ## 6. Migration và kiểm tra
 
 - RFQ V2: quotation decision/command idempotency; V3: durable conversion; V4: chat dedup; V5: acceptance key collation; V6: trạng thái conversion `FAILED`.
-- Commerce V4: unique quotation conversion; V5: opaque key collation (V2/V3 thuộc cart uniqueness và TV5 finance). Order/address/items/payment tạo trong một transaction.
+- Commerce V5: unique quotation conversion; V6: opaque key collation (V2/V3/V4 thuộc cart uniqueness, TV5 finance và retail checkout). Order/address/items/payment tạo trong một transaction.
 - Các business service dùng Spring Boot 4 `spring-boot-starter-flyway` để migration thực sự chạy khi khởi động.
 - Catalog mapping được đối chiếu SQL Server V1: audit chỉ có ở PRODUCT; STORE/VARIANT không được truy vấn các cột audit chưa tồn tại.
 

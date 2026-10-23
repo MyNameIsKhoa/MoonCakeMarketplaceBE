@@ -6,9 +6,8 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import mss.mooncake.commerce.dto.response.FinanceResponse;
-import mss.mooncake.commerce.exception.FinanceException;
 import mss.mooncake.commerce.service.FinanceService;
-import org.springframework.http.HttpStatus;
+import mss.mooncake.commerce.service.FinanceActorResolver;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -33,15 +32,15 @@ public class FinanceController {
             @NotBlank @Size(max = 1000) @Pattern(regexp = "https://[^\\s]+") String evidenceUrl) { }
     public record Evidence(@NotBlank @Size(max = 1000) @Pattern(regexp = "https://[^\\s]+") String evidenceUrl) { }
     private final FinanceService service;
+    private final FinanceActorResolver actors;
 
-    public FinanceController(FinanceService service) { this.service = service; }
+    public FinanceController(FinanceService service, FinanceActorResolver actors) {
+        this.service = service;
+        this.actors = actors;
+    }
 
     private FinanceService.Actor actor(Authentication authentication) {
-        if (authentication == null || !(authentication.getDetails() instanceof Number id)) {
-            throw new FinanceException(HttpStatus.UNAUTHORIZED, "AUTHENTICATED_USER_ID_REQUIRED");
-        }
-        var roles = authentication.getAuthorities().stream().map(a -> a.getAuthority()).toList();
-        return new FinanceService.Actor(id.longValue(), roles.contains("ROLE_ADMIN"), roles.contains("ROLE_SUPPLIER"));
+        return actors.resolve(authentication);
     }
 
     @GetMapping("/orders/{orderId}")

@@ -51,6 +51,17 @@ public class SecurityConfig {
                         .requestMatchers("/internal/v1/inventory/**").hasAuthority("ROLE_INTERNAL_COMMERCE")
                         .requestMatchers("/internal/v1/promotions/calculate").hasAuthority("ROLE_INTERNAL_COMMERCE")
                         .requestMatchers("/internal/**").hasAnyAuthority("ROLE_INTERNAL_COMMERCE", "ROLE_INTERNAL_RFQ")
+                        // Ghi store/branch/product/variant/promotion: chỉ supplier đã VERIFIED (ROLE_SUPPLIER) hoặc admin.
+                        // Role chốt lúc đăng nhập nên service vẫn kiểm tra VERIFIED + ownership qua Identity mỗi lần ghi.
+                        .requestMatchers(HttpMethod.POST, "/api/stores", "/api/stores/**",
+                                "/api/products", "/api/products/**", "/api/promotions", "/api/promotions/**")
+                        .hasAnyAuthority("ROLE_SUPPLIER", "ROLE_ADMIN")
+                        .requestMatchers(HttpMethod.PATCH, "/api/stores/**", "/api/products/**", "/api/promotions/**")
+                        .hasAnyAuthority("ROLE_SUPPLIER", "ROLE_ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/stores/**", "/api/products/**", "/api/promotions/**")
+                        .hasAnyAuthority("ROLE_SUPPLIER", "ROLE_ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/stores/**", "/api/products/**", "/api/promotions/**")
+                        .hasAnyAuthority("ROLE_SUPPLIER", "ROLE_ADMIN")
                         // Mọi request còn lại cần JWT
                         .anyRequest().hasAnyAuthority("ROLE_CUSTOMER", "ROLE_SUPPLIER", "ROLE_ADMIN"))
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)

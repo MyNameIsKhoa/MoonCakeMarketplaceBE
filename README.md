@@ -64,7 +64,7 @@ Upstream URL override: `IDENTITY_SERVICE_URL`, `CATALOG_SERVICE_URL`, `COMMERCE_
 
 Identity phát access token JWT ký HS256. Gateway và cả bốn business service xác minh chữ ký, `iss`, `aud` và `exp`; API nghiệp vụ yêu cầu Bearer token. Token dùng chung cấu hình `JWT_SECRET` (tối thiểu 32 byte), `JWT_ISSUER` (mặc định `mooncake-identity`) và `JWT_AUDIENCE` (mặc định `mooncake-api`). Không có secret mặc định trong runtime; đặt các biến này trong môi trường chạy hoặc `.env` không commit trước khi chạy Docker Compose.
 
-Token hiện có thời hạn 24 giờ và chứa `userId`, `customerId`, `roles`; Identity phát `ROLE_CUSTOMER` sau khi đăng nhập thành công. HS256 cần cùng secret tại các app để kiểm tra token; đây là lựa chọn MVP, cần giữ secret ngoài source control và thay secret khi bị lộ.
+Token hiện có thời hạn 24 giờ và chứa `userId`, `customerId`, `roles`; Identity phát `ROLE_CUSTOMER` sau khi đăng nhập thành công, thêm `ROLE_SUPPLIER` nếu supplier profile đang `VERIFIED` và `ROLE_ADMIN` nếu userId nằm trong `ADMIN_USER_IDS`. Role chốt lúc phát token: supplier vừa được duyệt phải đăng nhập lại; service vẫn kiểm tra trạng thái `VERIFIED` thật khi thao tác dữ liệu supplier. HS256 cần cùng secret tại các app để kiểm tra token; đây là lựa chọn MVP, cần giữ secret ngoài source control và thay secret khi bị lộ.
 
 PowerShell local có thể tạo secret ngẫu nhiên cho phiên hiện tại bằng:
 
@@ -115,6 +115,12 @@ Cổng trên máy: Gateway `8080`, Identity `8081`, Catalog `8082`, Commerce `80
 Admin: DB mới chưa có user nào. Đăng ký tài khoản admin, lấy `userId`, rồi tạo lại container Identity với biến này (PowerShell): `$env:ADMIN_USER_IDS="1"; docker compose up -d identity-service`. `scripts/catalog-smoke.ps1 -RegisterAdmin ...` làm bước đăng ký và in ra `userId`.
 
 CORS mặc định cho phép FE ở `http://localhost:3000` và `http://localhost:5173`.
+
+## Checkout mua lẻ (TV3)
+
+Chạy Identity, Catalog, Commerce và Gateway cùng lúc (`docker compose up -d --build api-gateway commerce-service`). Flyway của Catalog áp dụng V6 (`store.shipping_fee`); store chưa có phí sẽ không thể checkout. Supplier đã `VERIFIED`, store `ACTIVE`, địa chỉ thuộc buyer và tồn kho đủ là các điều kiện bắt buộc. FE lấy giỏ/giá qua `/api/cart`, `/api/cart/pricing`, rồi gửi toàn bộ giỏ bằng `POST /api/checkout` với `addressId` và `Idempotency-Key` ổn định khi retry. Commerce giữ kho qua Catalog tối đa 15 phút, tạo order ở trạng thái chờ xác nhận kho, sau đó đăng ký khoản thanh toán PayOS FULL theo từng seller order trong cùng Commerce DB. Response thành công là **đã tạo đơn, chưa thanh toán**. Nếu timeout/503, retry cùng key; không tự gửi một đơn mới. Key được giữ 30 phút sau khi hoàn tất/thất bại.
+
+`scripts/seed-demo-catalog.mjs` đặt phí cố định demo 30.000đ/store cho dữ liệu mẫu; đây không phải mặc định áp dụng cho mọi store. Migration không tự điền phí cho store thật. Chưa có integration test SQL Server/Docker cho toàn luồng giữ kho–thanh toán; unit/context tests không thay thế được bước đó.
 
 ## Demo Docker: Gateway + Identity + JWT
 
