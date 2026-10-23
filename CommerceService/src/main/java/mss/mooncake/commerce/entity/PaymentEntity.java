@@ -12,6 +12,8 @@ import mss.mooncake.commerce.enums.PaymentStatus;
 import mss.mooncake.commerce.enums.PaymentType;
 
 @Entity
+@lombok.Getter
+@lombok.Setter
 @Table(name = "payment")
 @AttributeOverride(name = "id", column = @Column(name = "payment_id"))
 public class PaymentEntity extends BaseCommerceEntity {

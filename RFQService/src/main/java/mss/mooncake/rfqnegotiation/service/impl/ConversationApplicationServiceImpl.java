@@ -1,0 +1,225 @@
+package mss.mooncake.rfqnegotiation.service.impl;
+
+import feign.FeignException;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Objects;
+import java.util.Set;
+import mss.mooncake.rfqnegotiation.client.IdentityServiceClient;
+import mss.mooncake.rfqnegotiation.client.dto.identity.SupplierSummaryResponse;
+import mss.mooncake.rfqnegotiation.dto.request.CreateConversationRequest;
+import mss.mooncake.rfqnegotiation.dto.request.SendMessageRequest;
+import mss.mooncake.rfqnegotiation.dto.response.ConversationCreatedResponse;
+import mss.mooncake.rfqnegotiation.dto.response.ConversationResponse;
+import mss.mooncake.rfqnegotiation.dto.response.MessagePageResponse;
+import mss.mooncake.rfqnegotiation.dto.response.MessageResponse;
+import mss.mooncake.rfqnegotiation.dto.response.PageResponse;
+import mss.mooncake.rfqnegotiation.entity.ConversationEntity;
+import mss.mooncake.rfqnegotiation.entity.MessageEntity;
+import mss.mooncake.rfqnegotiation.enums.ConversationStatus;
+import mss.mooncake.rfqnegotiation.enums.RfqStatus;
+import mss.mooncake.rfqnegotiation.exception.ApiException;
+import mss.mooncake.rfqnegotiation.repository.ConversationRepository;
+import mss.mooncake.rfqnegotiation.repository.MessageRepository;
+import mss.mooncake.rfqnegotiation.repository.RfqRepository;
+import mss.mooncake.rfqnegotiation.security.ActorContext;
+import mss.mooncake.rfqnegotiation.service.ConversationApplicationService;
+import mss.mooncake.rfqnegotiation.util.Paging;
+import mss.mooncake.rfqnegotiation.websocket.MessagePersistedEvent;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@Transactional(readOnly = true)
+public class ConversationApplicationServiceImpl implements ConversationApplicationService {
+    private final ConversationRepository conversations;
+    private final MessageRepository messages;
+    private final RfqRepository rfqs;
+    private final ActorContext actor;
+    private final IdentityServiceClient identity;
+    private final ApplicationEventPublisher events;
+
+    public ConversationApplicationServiceImpl(ConversationRepository conversations, MessageRepository messages,
+            RfqRepository rfqs, ActorContext actor, IdentityServiceClient identity, ApplicationEventPublisher events) {
+        this.conversations = conversations;
+        this.messages = messages;
+        this.rfqs = rfqs;
+        this.actor = actor;
+        this.identity = identity;
+        this.events = events;
+    }
+
+    @Override
+    @Transactional
+    public ConversationCreatedResponse create(Long rfqId, CreateConversationRequest request) {
+        actor.userId();
+        // Lock the parent, including when no conversation row exists yet, to serialize creation.
+        var rfq = rfqs.findByIdForUpdate(rfqId)
+                .orElseThrow(() -> ApiException.notFound("RFQ_NOT_FOUND", "Không tìm thấy RFQ"));
+        Long customerId = actor.optionalCustomerId();
+        Long supplierId;
+        if (Objects.equals(customerId, rfq.getCustomerIdRef())) {
+            if (request == null || request.supplierId() == null || request.supplierId() <= 0) {
+                throw ApiException.badRequest("SUPPLIER_ID_REQUIRED", "Chủ RFQ cần chọn nhà cung cấp để trao đổi");
+            }
+            supplierId = request.supplierId();
+        } else {
+            supplierId = actor.supplierId();
+            if (request != null && request.supplierId() != null && !supplierId.equals(request.supplierId())) {
+                throw ApiException.forbidden("NOT_SUPPLIER_OWNER", "Chỉ được mở hội thoại bằng hồ sơ nhà cung cấp của mình");
+            }
+        }
+        var supplier = requireSupplier(supplierId);
+        var existing = conversations.findByRfqIdAndSupplierIdRef(rfqId, supplierId);
+        if (existing.isPresent()) return new ConversationCreatedResponse(toResponse(existing.get()), false);
+        if (!"VERIFIED".equals(supplier.verificationStatus())) {
+            throw ApiException.conflict("SUPPLIER_NOT_VERIFIED", "Nhà cung cấp chưa được xác minh nên chưa thể mở hội thoại");
+        }
+        if (rfq.getStatus() != RfqStatus.OPEN || (rfq.getExpiresAt() != null
+                && !rfq.getExpiresAt().isAfter(LocalDateTime.now(ZoneOffset.UTC)))) {
+            throw ApiException.conflict("RFQ_NOT_OPEN", "Chỉ mở hội thoại mới khi RFQ đang nhận trao đổi");
+        }
+        var conversation = new ConversationEntity();
+        conversation.setRfqId(rfqId);
+        conversation.setCustomerIdRef(rfq.getCustomerIdRef());
+        conversation.setSupplierIdRef(supplierId);
+        conversation.setStatus(ConversationStatus.OPEN);
+        conversation.setCreatedAt(LocalDateTime.now(ZoneOffset.UTC).withNano(0));
+        return new ConversationCreatedResponse(toResponse(conversations.saveAndFlush(conversation)), true);
+    }
+
+    @Override
+    public PageResponse<ConversationResponse> list(Long rfqId, int page, int size, String sort) {
+        actor.userId();
+        var pageable = Paging.page(page, size, sort, Set.of("id", "createdAt", "status"), "createdAt");
+        return PageResponse.from(conversations.findForParticipant(actor.optionalCustomerId(),
+                actor.optionalSupplierId(), rfqId, pageable).map(this::toResponse));
+    }
+
+    @Override
+    public ConversationResponse get(Long conversationId) {
+        var conversation = requireConversation(conversationId);
+        requireParticipant(conversation, actor.userId());
+        return toResponse(conversation);
+    }
+
+    @Override
+    public void assertParticipant(Long conversationId, Long userId) {
+        requireParticipant(requireConversation(conversationId), userId);
+    }
+
+    @Override
+    public MessagePageResponse history(Long conversationId, Long beforeMessageId, Long afterMessageId, int limit) {
+        requireParticipant(requireConversation(conversationId), actor.userId());
+        if (limit < 1 || limit > 100 || (beforeMessageId != null && afterMessageId != null)) {
+            throw ApiException.badRequest("INVALID_MESSAGE_PAGINATION", "limit phải từ 1 đến 100; chỉ chọn một chiều cursor");
+        }
+        Long cursor = beforeMessageId != null ? beforeMessageId : afterMessageId;
+        if (cursor != null && (cursor <= 0 || !messages.existsByIdAndConversationId(cursor, conversationId))) {
+            throw ApiException.badRequest("INVALID_MESSAGE_CURSOR", "Cursor không thuộc hội thoại này");
+        }
+        var batch = afterMessageId != null
+                ? messages.findAfter(conversationId, afterMessageId, PageRequest.of(0, limit + 1))
+                : messages.findBefore(conversationId, beforeMessageId, PageRequest.of(0, limit + 1));
+        boolean hasMore = batch.size() > limit;
+        var selected = new ArrayList<>(batch.subList(0, Math.min(limit, batch.size())));
+        if (afterMessageId == null) Collections.reverse(selected);
+        var items = selected.stream().map(this::toResponse).toList();
+        String nextCursor = !hasMore || items.isEmpty() ? null : (afterMessageId == null
+                ? items.getFirst().messageId() : items.getLast().messageId());
+        return new MessagePageResponse(items, nextCursor, hasMore);
+    }
+
+    @Override
+    @Transactional
+    public MessageResponse send(Long conversationId, Long userId, SendMessageRequest request) {
+        validateMessage(request);
+        // One conversation lock protects dedup across concurrent sessions; the DB unique is the final guard.
+        var conversation = conversations.findByIdForUpdate(conversationId)
+                .orElseThrow(() -> ApiException.notFound("CONVERSATION_NOT_FOUND", "Không tìm thấy hội thoại"));
+        requireParticipant(conversation, userId);
+        var existing = messages.findByConversationIdAndSenderUserIdRefAndClientMessageId(
+                conversationId, userId, request.clientMessageId());
+        if (existing.isPresent()) {
+            var stored = existing.get();
+            if (!stored.getMessageType().equals(request.messageType()) || !stored.getContent().equals(request.content())) {
+                throw ApiException.conflict("CLIENT_MESSAGE_ID_REUSED", "clientMessageId đã dùng cho một nội dung khác");
+            }
+            var response = toResponse(stored);
+            // Echo the durable message again when its earlier delivery/ack was lost; clients dedup messageId.
+            events.publishEvent(new MessagePersistedEvent(response));
+            return response;
+        }
+        if (conversation.getStatus() != ConversationStatus.OPEN) {
+            throw ApiException.conflict("CONVERSATION_NOT_OPEN", "Hội thoại đã đóng hoặc bị khóa");
+        }
+        var message = new MessageEntity();
+        message.setConversationId(conversationId);
+        message.setSenderUserIdRef(userId);
+        message.setClientMessageId(request.clientMessageId());
+        message.setMessageType(request.messageType());
+        message.setContent(request.content());
+        message.setSentAt(LocalDateTime.now(ZoneOffset.UTC).withNano(0));
+        var response = toResponse(messages.saveAndFlush(message));
+        events.publishEvent(new MessagePersistedEvent(response));
+        return response;
+    }
+
+    private void validateMessage(SendMessageRequest request) {
+        if (request == null || request.clientMessageId() == null || request.clientMessageId().length() > 100
+                || !request.clientMessageId().matches("[A-Za-z0-9_-]+") || !"TEXT".equals(request.messageType())
+                || request.content() == null || request.content().isBlank() || request.content().length() > 10000) {
+            throw ApiException.badRequest("INVALID_MESSAGE", "Tin nhắn TEXT cần clientMessageId hợp lệ và nội dung từ 1 đến 10000 ký tự");
+        }
+    }
+
+    private ConversationEntity requireConversation(Long id) {
+        return conversations.findById(id)
+                .orElseThrow(() -> ApiException.notFound("CONVERSATION_NOT_FOUND", "Không tìm thấy hội thoại"));
+    }
+
+    private void requireParticipant(ConversationEntity conversation, Long userId) {
+        if (userId == null) throw ApiException.forbidden("NOT_CONVERSATION_PARTICIPANT", "Bạn không thuộc hội thoại này");
+        try {
+            var user = identity.getUserSummary(userId);
+            if (user == null || !Objects.equals(user.userId(), userId)) {
+                throw ApiException.unavailable("IDENTITY_UNAVAILABLE", "Không xác minh được tài khoản");
+            }
+            if (Objects.equals(user.customerId(), conversation.getCustomerIdRef())) return;
+            if (Objects.equals(requireSupplier(conversation.getSupplierIdRef()).userId(), userId)) return;
+        } catch (FeignException ex) {
+            throw ApiException.unavailable("IDENTITY_UNAVAILABLE", "Không xác minh được quyền hội thoại");
+        }
+        throw ApiException.forbidden("NOT_CONVERSATION_PARTICIPANT", "Bạn không thuộc hội thoại này");
+    }
+
+    private SupplierSummaryResponse requireSupplier(Long supplierId) {
+        try {
+            var supplier = identity.getSupplierSummary(supplierId);
+            if (supplier == null || supplier.userId() == null || !Objects.equals(supplier.supplierId(), supplierId)) {
+                throw ApiException.unavailable("IDENTITY_UNAVAILABLE", "Không xác minh được nhà cung cấp");
+            }
+            return supplier;
+        } catch (FeignException.NotFound ex) {
+            throw ApiException.notFound("SUPPLIER_NOT_FOUND", "Không tìm thấy nhà cung cấp");
+        } catch (FeignException ex) {
+            throw ApiException.unavailable("IDENTITY_UNAVAILABLE", "Không xác minh được nhà cung cấp");
+        }
+    }
+
+    private ConversationResponse toResponse(ConversationEntity entity) {
+        return new ConversationResponse(entity.getId().toString(), entity.getRfqId().toString(),
+                entity.getCustomerIdRef().toString(), entity.getSupplierIdRef().toString(),
+                entity.getStatus(), entity.getCreatedAt().toInstant(ZoneOffset.UTC));
+    }
+
+    private MessageResponse toResponse(MessageEntity entity) {
+        return new MessageResponse(entity.getId().toString(), entity.getConversationId().toString(),
+                entity.getSenderUserIdRef().toString(), entity.getMessageType(), entity.getContent(),
+                entity.getSentAt().toInstant(ZoneOffset.UTC), entity.getClientMessageId());
+    }
+}
