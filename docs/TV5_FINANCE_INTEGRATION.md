@@ -9,6 +9,16 @@ webhook inbox and event outbox. Controllers call `FinanceService`, which calls
 No other service database is read. Existing Identity JWTs authorize all customer and
 operator commands. The only anonymous finance route is the SDK-verified payOS callback.
 
+Finance reads the authenticated `CommercePrincipal` from `Authentication.getPrincipal()`,
+not `getDetails()`. `Actor` keeps separate `userId`, `customerId`, `supplierId` fields:
+customer ownership uses the signed principal's customer profile ID; supplier ownership
+uses Identity's existing `getSupplierSummaryByUser(userId)` contract and verifies the
+returned user binding before accepting its supplier profile ID. That lookup happens
+before finance transactions. Missing supplier profiles grant no supplier access;
+Identity failures fail closed with `IDENTITY_CONTEXT_UNAVAILABLE`. Administrative
+actors do not need supplier lookup. Audit, dispute opener and idempotency identity
+remain tied to `userId`; profile IDs must never be inferred from matching numeric IDs.
+
 TV3, TV5 and TV6 are modules of the **same Commerce microservice**. Their integration
 uses Java service calls and local transactions; they do not make HTTP calls to themselves.
 The following ports are implemented now, but calls from TV3/TV6 must be connected when
