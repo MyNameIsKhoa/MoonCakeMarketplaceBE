@@ -13,6 +13,8 @@ import mss.mooncake.catalogstore.dto.response.VariantSnapshotResponse;
 import mss.mooncake.catalogstore.entity.ProductEntity;
 import mss.mooncake.catalogstore.entity.ProductVariantEntity;
 import mss.mooncake.catalogstore.entity.StoreEntity;
+import mss.mooncake.catalogstore.enums.ProductStatus;
+import mss.mooncake.catalogstore.enums.StoreStatus;
 import mss.mooncake.catalogstore.exception.ResourceNotFoundException;
 import mss.mooncake.catalogstore.repository.ProductRepository;
 import mss.mooncake.catalogstore.repository.ProductVariantRepository;
@@ -46,8 +48,23 @@ public class CatalogApplicationServiceImpl implements CatalogApplicationService 
                 .orElseThrow(() -> new ResourceNotFoundException("Variant does not belong to product"));
         ProductEntity product = products.findById(productId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found"));
-        return new ProductSnapshotResponse(productId, variantId, product.getName(),
-                variant.getVariantName(), variant.getSku(), variant.getBasePrice());
+        StoreEntity store = stores.findById(product.getStoreId())
+                .orElseThrow(() -> new ResourceNotFoundException("Store not found for product " + productId));
+        String status = availability(store, product, variant);
+        // agreedUnitPrice giữ tên field cũ vì Commerce/RFQ đã mirror DTO; giá trị là basePrice hiện tại.
+        return new ProductSnapshotResponse(product.getId(), variant.getId(), product.getName(),
+                variant.getVariantName(), variant.getSku(), variant.getBasePrice(), store.getId(),
+                store.getSupplierIdRef(), product.getProductCode(), variant.getImageUrl(), status);
+    }
+
+    private String availability(StoreEntity store, ProductEntity product, ProductVariantEntity variant) {
+        if (store.getStatus() != StoreStatus.ACTIVE) {
+            return store.getStatus() == null ? "INACTIVE" : store.getStatus().name();
+        }
+        if (product.getStatus() != ProductStatus.ACTIVE) {
+            return product.getStatus() == null ? "INACTIVE" : product.getStatus().name();
+        }
+        return variant.getStatus() == null ? "INACTIVE" : variant.getStatus().name();
     }
 
     @Override

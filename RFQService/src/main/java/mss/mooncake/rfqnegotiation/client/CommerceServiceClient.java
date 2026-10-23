@@ -3,9 +3,13 @@ import mss.mooncake.rfqnegotiation.dto.request.CreateOrderFromAcceptedQuotationR
 import mss.mooncake.rfqnegotiation.client.dto.commerce.OrderResponse;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 @FeignClient(name = "commerce-service", url = "${services.commerce.base-url:http://localhost:8083}", configuration = CommerceFeignConfig.class)
 public interface CommerceServiceClient {
     @PostMapping("/internal/v1/orders/from-accepted-quotation")
     OrderResponse createOrderFromAcceptedQuotation(@RequestBody CreateOrderFromAcceptedQuotationRequest request);
+    @GetMapping("/internal/v1/orders/by-quotation/{quotationId}")
+    OrderResponse getOrderByQuotation(@PathVariable Long quotationId);
 }
