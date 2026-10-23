@@ -52,7 +52,7 @@ class FinanceServiceTest {
         datasource.setMaximumPoolSize(5);
         var jdbc = new JdbcTemplate(datasource);
         // Execute the real migrations, adapting only SQL Server syntax unsupported by H2.
-        for (String file : new String[]{"V1__commerce_physical_schema.sql", "V2__tv5_finance.sql"}) {
+        for (String file : new String[]{"V1__commerce_physical_schema.sql", "V3__tv5_finance.sql"}) {
             var resource = new ClassPathResource("db/migration/" + file);
             String sql = resource.getContentAsString(StandardCharsets.UTF_8)
                     .replace("dbo.", "").replace("SYSUTCDATETIME()", "CURRENT_TIMESTAMP")
