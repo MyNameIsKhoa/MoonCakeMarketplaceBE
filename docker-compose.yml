@@ -1,33 +1,61 @@
+x-sqlserver: &sqlserver
+  image: mcr.microsoft.com/mssql/server:2022-latest
+  restart: unless-stopped
+  environment:
+    ACCEPT_EULA: "Y"
+    MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
+    SQLCMDPASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
+    MSSQL_MEMORY_LIMIT_MB: ${MSSQL_MEMORY_LIMIT_MB:-1024}
+  healthcheck:
+    test: ["CMD", "/opt/mssql-tools18/bin/sqlcmd", "-C", "-S", "localhost", "-U", "sa", "-b", "-Q", "SELECT 1"]
+    interval: 10s
+    timeout: 5s
+    start_period: 30s
+    retries: 20
+
+x-db-init: &db-init
+  image: mcr.microsoft.com/mssql/server:2022-latest
+  restart: "no"
+  environment:
+    SQLCMDPASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
+  volumes:
+    - ./docs/sqlserver:/scripts:ro
+  entrypoint: ["/opt/mssql-tools18/bin/sqlcmd"]
+
 services:
   identity-db:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    environment:
-      ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
+    <<: *sqlserver
     ports: ["14331:1433"]
-    healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$${MSSQL_SA_PASSWORD}\" -Q \"SELECT 1\" || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
+    volumes: ["identity-db-data:/var/opt/mssql"]
   catalog-db:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    environment:
-      ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
+    <<: *sqlserver
     ports: ["14332:1433"]
+    volumes: ["catalog-db-data:/var/opt/mssql"]
   commerce-db:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    environment:
-      ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
+    <<: *sqlserver
     ports: ["14333:1433"]
+    volumes: ["commerce-db-data:/var/opt/mssql"]
   rfq-db:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    environment:
-      ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
+    <<: *sqlserver
     ports: ["14334:1433"]
+    volumes: ["rfq-db-data:/var/opt/mssql"]
+
+  identity-db-init:
+    <<: *db-init
+    command: ["-C", "-S", "identity-db", "-U", "sa", "-b", "-i", "/scripts/01_create_mss_identity.sql"]
+    depends_on: { identity-db: { condition: service_healthy } }
+  catalog-db-init:
+    <<: *db-init
+    command: ["-C", "-S", "catalog-db", "-U", "sa", "-b", "-i", "/scripts/02_create_mss_catalog_store.sql"]
+    depends_on: { catalog-db: { condition: service_healthy } }
+  commerce-db-init:
+    <<: *db-init
+    command: ["-C", "-S", "commerce-db", "-U", "sa", "-b", "-i", "/scripts/03_create_mss_commerce.sql"]
+    depends_on: { commerce-db: { condition: service_healthy } }
+  rfq-db-init:
+    <<: *db-init
+    command: ["-C", "-S", "rfq-db", "-U", "sa", "-b", "-i", "/scripts/04_create_mss_rfq_negotiation.sql"]
+    depends_on: { rfq-db: { condition: service_healthy } }
 
   identity-service:
     build:
@@ -43,9 +71,9 @@ services:
       ADMIN_USER_IDS: ${ADMIN_USER_IDS:-}
       IDENTITY_DB_URL: jdbc:sqlserver://identity-db:1433;databaseName=mss_identity;encrypt=false;trustServerCertificate=true
       IDENTITY_DB_USERNAME: sa
-      IDENTITY_DB_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
+      IDENTITY_DB_PASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
     ports: ["8081:8081"]
-    depends_on: { identity-db: { condition: service_started } }
+    depends_on: { identity-db-init: { condition: service_completed_successfully } }
   catalog-store-service:
     build:
       context: .
@@ -59,9 +87,10 @@ services:
       RFQ_TO_CATALOG_TOKEN: ${RFQ_TO_CATALOG_TOKEN:?Set a unique 32+ character token}
       CATALOG_DB_URL: jdbc:sqlserver://catalog-db:1433;databaseName=mss_catalog_store;encrypt=false;trustServerCertificate=true
       CATALOG_DB_USERNAME: sa
-      CATALOG_DB_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
+      CATALOG_DB_PASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
+      IDENTITY_SERVICE_URL: http://identity-service:8081
     ports: ["8082:8082"]
-    depends_on: { catalog-db: { condition: service_started } }
+    depends_on: { catalog-db-init: { condition: service_completed_successfully }, identity-service: { condition: service_started } }
   commerce-service:
     build:
       context: .
@@ -75,11 +104,11 @@ services:
       RFQ_TO_COMMERCE_TOKEN: ${RFQ_TO_COMMERCE_TOKEN:?Set a unique 32+ character token}
       COMMERCE_DB_URL: jdbc:sqlserver://commerce-db:1433;databaseName=mss_commerce;encrypt=false;trustServerCertificate=true
       COMMERCE_DB_USERNAME: sa
-      COMMERCE_DB_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
+      COMMERCE_DB_PASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
       IDENTITY_SERVICE_URL: http://identity-service:8081
       CATALOG_SERVICE_URL: http://catalog-store-service:8082
     ports: ["8083:8083"]
-    depends_on: { commerce-db: { condition: service_started }, identity-service: { condition: service_started }, catalog-store-service: { condition: service_started } }
+    depends_on: { commerce-db-init: { condition: service_completed_successfully }, identity-service: { condition: service_started }, catalog-store-service: { condition: service_started } }
   rfq-negotiation-service:
     build:
       context: .
@@ -93,12 +122,12 @@ services:
       RFQ_TO_COMMERCE_TOKEN: ${RFQ_TO_COMMERCE_TOKEN:?Set a unique 32+ character token}
       RFQ_DB_URL: jdbc:sqlserver://rfq-db:1433;databaseName=mss_rfq_negotiation;encrypt=false;trustServerCertificate=true
       RFQ_DB_USERNAME: sa
-      RFQ_DB_PASSWORD: ${MSSQL_SA_PASSWORD:-YourStrong(!)Password}
+      RFQ_DB_PASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
       IDENTITY_SERVICE_URL: http://identity-service:8081
       CATALOG_SERVICE_URL: http://catalog-store-service:8082
       COMMERCE_SERVICE_URL: http://commerce-service:8083
     ports: ["8084:8084"]
-    depends_on: { rfq-db: { condition: service_started }, commerce-service: { condition: service_started } }
+    depends_on: { rfq-db-init: { condition: service_completed_successfully }, commerce-service: { condition: service_started } }
   api-gateway:
     build:
       context: .
@@ -114,3 +143,9 @@ services:
       RFQ_SERVICE_URL: http://rfq-negotiation-service:8084
     ports: ["8080:8080"]
     depends_on: { identity-service: { condition: service_started }, catalog-store-service: { condition: service_started }, commerce-service: { condition: service_started }, rfq-negotiation-service: { condition: service_started } }
+
+volumes:
+  identity-db-data:
+  catalog-db-data:
+  commerce-db-data:
+  rfq-db-data:

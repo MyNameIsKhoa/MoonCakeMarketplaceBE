@@ -6,7 +6,7 @@ spring:
   datasource:
     url: ${RFQ_DB_URL:jdbc:sqlserver://localhost:14334;databaseName=mss_rfq_negotiation;encrypt=false;trustServerCertificate=true}
     username: ${RFQ_DB_USERNAME:sa}
-    password: ${RFQ_DB_PASSWORD:sa}
+    password: ${RFQ_DB_PASSWORD:12345}
     driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
   jpa:
     hibernate.ddl-auto: none
@@ -14,6 +14,13 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+  cloud:
+    openfeign:
+      client:
+        config:
+          default:
+            connectTimeout: 3000
+            readTimeout: 5000
 services:
   identity:
     base-url: ${IDENTITY_SERVICE_URL:http://localhost:8081}

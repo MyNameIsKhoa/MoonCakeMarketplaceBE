@@ -316,6 +316,8 @@ Không mở POST `/api/orders` để FE gửi một order với tổng tiền t�
 
 ## 9. API TV4 — Public RFQ, Quotation, Negotiation/Chat
 
+**Implementation TV4 ngày 14/10/2026:** xem [TV4_BACKEND_GUIDE.md](TV4_BACKEND_GUIDE.md) cho contract thực tế, state transitions đã chọn, migration và lệnh kiểm tra. Các nhãn hiện trạng trong bảng dưới đây ghi thời điểm đối chiếu cũ; RQ01–04/06–11/14–18 và CH01–04 nay đã được triển khai. RQ05/12/13 không dùng vì create công bố/gửi ngay và chỉnh quotation qua revision. Accept hỗ trợ durable PENDING/COMPLETED; mỗi báo giá tạo đơn riêng; quantity chưa phân bổ/gộp master order giữa các accept.
+
 Owner RFQ. Public RFQ không đồng nghĩa mọi quotation và chat trong RFQ là public.
 
 | Mã / hiện trạng | Method + path | Quyền | Request/query | Success | Điều kiện chính |
@@ -484,7 +486,7 @@ Các nhóm `Summary` chỉ chứa field cho list; `Response` detail bổ sung fi
 | `SellerOrderResponse` | sellerOrderId, orderId, sellerOrderNo, store/supplier display snapshots, quotationId?, status, subtotal, shippingFee, totalAmount, paymentTerms/deposit/remaining/delivery snapshots, items[]. |
 | Order item / delivery address | orderItemId, productCodeSnapshot?, productNameSnapshot, variantNameSnapshot?, skuSnapshot?, imageUrlSnapshot?, variantId?, quantity, unitPrice, discountAmount, subtotal; address gồm recipient/phone/full address snapshot. |
 | `RfqResponse` | rfqId, rfqCode, title, description?, quantity, budgetAmount?, requestedDeliveryDate?, deliveryLocation?, customizationRequirements?, status, expiresAt?, createdAt; customer identity projection tùy quyền. |
-| `QuotationResponse` | quotationId, rfqId, store/supplier refs, previousQuotationId?, versionNo, totalAmount, depositPercent, validUntil, leadTimeDays?, proposedDeliveryDate?, shippingMethod?, shippingFee, paymentTerms?, status, items[], submittedAt?, acceptedAt?. |
+| `QuotationResponse` (TV4 hiện tại) | quotationId, rfqId, storeId, supplierId, previousQuotationId?, **version**, totalAmount, depositPercent, validUntil, leadTimeDays?, proposedDeliveryDate, shippingMethod?, shippingFee, paymentTerms?, status, items[], submittedAt, acceptedAt?, decisionReason?. `versionNo` chỉ là tên thuộc tính entity; body accept dùng `quotationVersion`, revision dùng `expectedVersion`. |
 | `QuotationAcceptedResponse` / `QuotationOrderLinkResponse` | quotationId, quotationVersion, conversionStatus, orderId?, sellerOrderId?; chỉ báo completed khi Commerce đã xác nhận bền vững. |
 | `ConversationResponse` / message | conversationId, rfqId, participant refs/display cần thiết, status, createdAt; message schema ở mục 9. |
 | `PaymentResponse` | paymentId, sellerOrderId, paymentType, amount, dueAt?, provider?, status, paidAt?; hold representation CHỐT, transactionRef chỉ audience cần. |
@@ -511,7 +513,7 @@ Internal URL không nằm trong Gateway public route. Có controller không có 
 | IN03 C | `GET /internal/v1/suppliers/{supplierId}/summary` | Identity → Catalog/Commerce/RFQ | supplierId → SupplierSummaryResponse | Chỉ field cần thiết. |
 | IN04 C | `GET /internal/v1/suppliers/by-user/{userId}/summary` | Identity → Catalog | userId → SupplierSummaryResponse | Lookup supplier của principal để check store owner. |
 | IN05 C | `GET /internal/v1/stores/{storeId}/summary` | Catalog → Commerce/RFQ | storeId → StoreSummaryResponse | Snapshot display + supplier binding. |
-| IN06 S | `GET /internal/v1/products/{productId}/variants/{variantId}/snapshot` | Catalog → Commerce/RFQ | IDs → ProductSnapshotResponse | Kiểm tra đúng parent; DTO hiện có còn thiếu productCode/image/store/availability. |
+| IN06 C (TV4 14/10/2026) | `GET /internal/v1/products/{productId}/variants/{variantId}/snapshot` | Catalog → Commerce/RFQ | IDs → ProductSnapshotResponse | Đã kiểm tra đúng parent, trả productCode/imageUrl/storeId/supplierId/status; status chỉ ACTIVE khi store/product/variant đều ACTIVE. `agreedUnitPrice` giữ nghĩa giá gốc Catalog; RFQ dùng giá thương lượng từ request. |
 | IN07 N | `POST /internal/v1/variants/snapshots` | Catalog → Commerce | variantIds[] → VariantSnapshotResponse[] | Cart chỉ giữ variantId; batch này tránh bắt caller biết productId trước và tránh N+1. Limit kỹ thuật phải công bố; missing items fail rõ, không âm thầm bỏ. |
 | IN08 N | `POST /internal/v1/promotions/calculate` | Catalog → Commerce | storeId + lines(variantId,quantity) → PromotionCalculationResult | Catalog quyết price/rules/evaluation time; trả applied rules + line discounts/reward lines; caller không gửi arbitrary price để được tin. |
 | IN09 S,K | `POST /internal/v1/orders/from-accepted-quotation` | Commerce ← RFQ | AcceptedQuotationOrderRequest → OrderCreationResponse | Snapshot đầy đủ, authenticated RFQ caller, dedup quotation; controller hiện trả 200, target create 201/replay contract thống nhất. |
@@ -519,6 +521,8 @@ Internal URL không nằm trong Gateway public route. Có controller không có 
 | IN11 S, legacy | `GET /internal/v1/seller-orders/{sellerOrderId}/payment-context` | Commerce hiện có route | sellerOrderId → SellerOrderPaymentContext | TV3/TV5/TV6 dùng Java service; không bắt nội bộ Commerce phải gọi HTTP endpoint này. |
 
 `VariantSnapshotResponse` đích cần variantId, productId, storeId, supplierId, productCode, productName, variantName, sku, imageUrl?, basePrice, availability/status. Retail dùng giá Catalog; negotiated quotation dùng giá đã accept, không đổi trường `agreedUnitPrice` hiện có sang ý nghĩa mới mà chưa migrate consumer.
+
+IN06 đã triển khai additive trên `ProductSnapshotResponse`, giữ nguyên sáu field cũ và thêm các field nêu trong bảng. DTO provider và consumer RFQ/Commerce khớp nhau; internal ID/decimal giữ biểu diễn numeric hiện có. Batch IN07 vẫn là contract thiết kế, chưa triển khai trong đợt TV4.
 
 IN09 payload đích gồm:
 
@@ -591,7 +595,7 @@ Các quyết định còn mở: required verification để bán; draft/publish 
 | DTO wire | IDs numeric, timestamp LocalDateTime, store supplierIdRef | Lên PR chuyển contract có FE/Feign; không trộn string/numeric ID ngẫu nhiên giữa API mới. |
 | Error/PATCH/list | Legacy ErrorResponse, PATCH record, store array | Áp Problem Details, presence-aware PATCH, PageResponse với compatibility plan. |
 | Store mapping | StoreResponse không có audit timestamps theo STORE V1 | Kiểm tra mapping với SQL Server thật trước khi merge. |
-| Product snapshot | Endpoint tồn tại, implementation TODO | Thêm batch variant snapshot và field đủ cho checkout; cập nhật consumer. |
+| Product snapshot | IN06 đã triển khai lookup/parent ownership/status và additive fields cho TV4; provider/consumer khớp. IN07 batch đã có | Retail checkout vẫn theo phần triển khai riêng; cập nhật consumer khi chuyển sang IN07. |
 | Accept quotation | Route tồn tại nhưng chưa bind path ID; body là DTO ID nội bộ | Tách AcceptQuotationRequest public và AcceptedQuotationOrderRequest internal; validate path/principal. |
 | Finance/fulfillment | Phần lớn còn skeleton | Không đánh dấu Done chỉ vì tên endpoint đã có trong tài liệu. |
 | Legacy design paths | TODO đề xuất `/api/orders/{orderId}/seller-orders/{sellerOrderId}/accept` và settlement lookup bằng sellerOrderId ở path | Catalog này chọn FU08 `/api/seller-orders/{sellerOrderId}/accept`, FI18 theo settlementId và FI17 filter sellerOrderId; các route cũ đó chưa có controller, cập nhật consumer design trước code. |
