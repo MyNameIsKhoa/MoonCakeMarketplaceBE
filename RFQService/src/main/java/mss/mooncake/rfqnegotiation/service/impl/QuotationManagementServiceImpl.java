@@ -418,7 +418,12 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
     }
 
     private static BigDecimal money(BigDecimal value, String field) {
-        return decimal(value, field, MAX_MONEY);
+        BigDecimal amount = decimal(value, field, MAX_MONEY);
+        // Commerce payments (TV5, payOS) are whole VND, so a quotation cannot carry fractional dong.
+        if (amount.remainder(BigDecimal.ONE).signum() != 0) {
+            throw ApiException.badRequest("AMOUNT_NOT_WHOLE_VND", field + " phải là số tiền nguyên đồng (VND)");
+        }
+        return amount;
     }
 
     private static BigDecimal decimal(BigDecimal value, String field, BigDecimal max) {
