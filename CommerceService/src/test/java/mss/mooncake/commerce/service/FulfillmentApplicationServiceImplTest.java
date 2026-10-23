@@ -300,5 +300,17 @@ class FulfillmentApplicationServiceImplTest {
                     .isInstanceOf(BadRequestException.class)
                     .hasMessageContaining("between 1 and 5");
         }
+
+        @Test
+        @DisplayName("Should get reviews by store ID")
+        void shouldGetReviewsByStore() {
+            ReviewEntity reviewEntity = new ReviewEntity(ORDER_ITEM_ID, CUSTOMER_ID, 5, "Great store!", LocalDateTime.now());
+            when(reviewRepository.findByStoreId(10L)).thenReturn(List.of(reviewEntity));
+
+            List<ReviewResponse> result = fulfillmentService.getReviewsByStore(10L);
+
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).comment()).isEqualTo("Great store!");
+        }
     }
 }

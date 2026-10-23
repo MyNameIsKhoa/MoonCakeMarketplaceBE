@@ -31,6 +31,8 @@ public interface FulfillmentApplicationService {
 
     List<ReviewResponse> getReviewsByVariant(Long variantId);
 
+    List<ReviewResponse> getReviewsByStore(Long storeId);
+
     List<ReviewResponse> getMyReviews(Long customerId);
 
     ReviewResponse getReviewById(Long reviewId);

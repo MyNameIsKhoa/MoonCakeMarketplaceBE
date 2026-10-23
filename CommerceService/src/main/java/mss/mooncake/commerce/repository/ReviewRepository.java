@@ -19,4 +19,7 @@ public interface ReviewRepository extends JpaRepository<ReviewEntity, Long> {
 
     @Query("SELECT r FROM ReviewEntity r, OrderItemEntity oi WHERE r.orderItemId = oi.id AND oi.variantIdRef = :variantId")
     List<ReviewEntity> findByVariantId(@Param("variantId") Long variantId);
+
+    @Query("SELECT r FROM ReviewEntity r, OrderItemEntity oi, SellerOrderEntity so WHERE r.orderItemId = oi.id AND oi.sellerOrderId = so.id AND so.storeIdRef = :storeId")
+    List<ReviewEntity> findByStoreId(@Param("storeId") Long storeId);
 }

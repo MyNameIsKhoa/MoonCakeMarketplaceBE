@@ -266,6 +266,17 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
 
     @Override
     @Transactional(readOnly = true)
+    public List<ReviewResponse> getReviewsByStore(Long storeId) {
+        if (storeId == null) {
+            return reviewRepository.findAll().stream().map(this::mapToReviewResponse).toList();
+        }
+        return reviewRepository.findByStoreId(storeId).stream()
+                .map(this::mapToReviewResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<ReviewResponse> getMyReviews(Long customerId) {
         if (customerId == null) {
             return List.of();

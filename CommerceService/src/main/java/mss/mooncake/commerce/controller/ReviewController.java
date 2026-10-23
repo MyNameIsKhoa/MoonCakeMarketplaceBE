@@ -41,6 +41,7 @@ public class ReviewController {
     @GetMapping
     public ResponseEntity<List<ReviewResponse>> getReviews(
             @RequestParam(required = false) Long variantId,
+            @RequestParam(required = false) Long storeId,
             @RequestParam(required = false, defaultValue = "false") boolean mine,
             @AuthenticationPrincipal UserPrincipal principal) {
         if (mine) {
@@ -48,6 +49,9 @@ public class ReviewController {
                     ? principal.getCustomerId()
                     : (principal != null ? principal.getUserId() : null);
             return ResponseEntity.ok(fulfillmentService.getMyReviews(customerId));
+        }
+        if (storeId != null) {
+            return ResponseEntity.ok(fulfillmentService.getReviewsByStore(storeId));
         }
         return ResponseEntity.ok(fulfillmentService.getReviewsByVariant(variantId));
     }
