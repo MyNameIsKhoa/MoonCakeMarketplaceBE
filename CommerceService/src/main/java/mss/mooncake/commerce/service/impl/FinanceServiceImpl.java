@@ -15,6 +15,7 @@ import mss.mooncake.commerce.repository.FinanceRepository.Context;
 import mss.mooncake.commerce.repository.FinanceRepository.Payment;
 import mss.mooncake.commerce.service.FinanceService;
 import mss.mooncake.commerce.service.FinanceIntegrationService;
+import mss.mooncake.commerce.service.PaymentDescription;
 import mss.mooncake.commerce.service.CustomerPaymentService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -191,7 +192,9 @@ public class FinanceServiceImpl implements FinanceService {
         }));
         if (!claimed) { return repository.payment(reserved.id()).response(); }
         try {
-            var link = provider.create(reserved.orderCode(), reserved.amount(), reserved.expiresAt());
+            var link = provider.create(reserved.orderCode(), reserved.amount(), reserved.expiresAt(),
+                    PaymentDescription.seller(repository.sellerOrderNumber(reserved.orderId()),
+                            reserved.orderId(), reserved.type()));
             return transaction.execute(status -> {
                 repository.lock(reserved.orderId());
                 require(link.orderCode() == reserved.orderCode() && link.amount() == reserved.amount()
