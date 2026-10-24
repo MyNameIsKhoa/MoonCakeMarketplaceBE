@@ -37,9 +37,9 @@ public class PayOsPaymentProvider implements PaymentProvider {
     }
 
     @Override
-    public Link create(long orderCode, long amount, Instant expiresAt) {
+    public Link create(long orderCode, long amount, Instant expiresAt, String description) {
         var link = client().paymentRequests().create(CreatePaymentLinkRequest.builder()
-                .orderCode(orderCode).amount(amount).description("MSS " + orderCode)
+                .orderCode(orderCode).amount(amount).description(description)
                 .returnUrl(returnUrl).cancelUrl(cancelUrl).expiredAt(expiresAt.getEpochSecond()).build());
         return new Link(link.getOrderCode(), link.getAmount(), link.getPaymentLinkId(),
                 link.getCheckoutUrl(), link.getQrCode());
