@@ -146,6 +146,12 @@ public class FinanceRepository {
                 orderId).longValueExact();
     }
 
+    public String stockReservationKey(long orderId) {
+        var keys = jdbc.queryForList("SELECT reservation_key FROM checkout_attempt WHERE order_id=? AND status='COMPLETED'",
+                String.class, orderId);
+        return keys.isEmpty() ? null : keys.getFirst();
+    }
+
     public boolean retailOrder(long orderId) {
         return count("SELECT COUNT(*) FROM customer_order WHERE order_id=? AND source_type='RETAIL'", orderId) == 1;
     }

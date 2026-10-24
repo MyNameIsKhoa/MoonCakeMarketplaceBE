@@ -8,4 +8,5 @@ public interface StockReservationService {
     StockReservationResponse get(String reservationKey);
     StockReservationResponse confirm(String reservationKey);
     StockReservationResponse release(String reservationKey);
+    StockReservationResponse cancelConfirmed(String reservationKey);
 }
