@@ -17,7 +17,6 @@ const SUPPLIER_PASSWORD = process.env.SUPPLIER_PASSWORD ?? 'MoonCake@Supplier202
 const DEMO_SHIPPING_FEE = 30000;
 
 const IMG = '/images/demo';
-const BANNERS = ['nguyet-vien-banner.webp', 'trang-moc-banner.webp', 'sao-nho-banner.webp'];
 
 /** product image file → public/images/demo/products/<file> */
 const P = (file) => `${IMG}/products/${file}.webp`;
@@ -26,6 +25,7 @@ const BP = (file) => `${IMG}/brands/products/${file}.webp`;
 const STORES = [
   {
     key: 'kinh-do', name: 'Kinh Đô', logo: 'logo.png',
+    bannerUrl: `${IMG}/brands/stores/kinh-do-banner.webp`,
     description: 'Bánh trung thu truyền thống quốc dân, hộp quà sang trọng cho gia đình và doanh nghiệp.',
     branch: { name: 'Kinh Đô Quận 1', addressLine: '72 Nguyễn Huệ', ward: 'Bến Nghé', district: 'Quận 1', city: 'TP. Hồ Chí Minh', openingHours: '08:00–21:00' },
     promotion: { name: 'Ưu đãi đặt sớm Trung Thu', discountPercent: 10 },
@@ -43,6 +43,7 @@ const STORES = [
   },
   {
     key: 'givral', name: 'Givral', logo: 'logo.png',
+    bannerUrl: `${IMG}/brands/stores/givral-banner.webp`,
     description: 'Tiệm bánh lâu đời của Sài Gòn với hương vị bánh nướng đậm đà, nhân sên tay.',
     branch: { name: 'Givral Đồng Khởi', addressLine: '169 Đồng Khởi', ward: 'Bến Nghé', district: 'Quận 1', city: 'TP. Hồ Chí Minh', openingHours: '07:30–21:30' },
     promotion: { name: 'Giảm 8% cho đơn hộp quà', discountPercent: 8 },
@@ -60,6 +61,7 @@ const STORES = [
   },
   {
     key: 'dong-khanh', name: 'Đồng Khánh', logo: 'logo.png',
+    bannerUrl: P('banh-matcha-cao-cap'),
     description: 'Bánh trung thu Chợ Lớn, nổi tiếng với nhân thập cẩm và hương vị người Hoa.',
     branch: { name: 'Đồng Khánh Chợ Lớn', addressLine: '200 Trần Hưng Đạo', ward: 'Phường 11', district: 'Quận 5', city: 'TP. Hồ Chí Minh', openingHours: '08:00–21:00' },
     products: [
@@ -76,6 +78,7 @@ const STORES = [
   },
   {
     key: 'hy-lam-mon', name: 'Hỷ Lâm Môn', logo: 'logo.png',
+    bannerUrl: P('banh-mini-sua-dua'),
     description: 'Hỷ Lâm Môn Bakery từ 1984, bánh trung thu nướng thủ công theo công thức gia truyền.',
     branch: { name: 'Hỷ Lâm Môn Quận 10', addressLine: '412 Sư Vạn Hạnh', ward: 'Phường 9', district: 'Quận 10', city: 'TP. Hồ Chí Minh', openingHours: '07:00–21:00' },
     products: [
@@ -92,6 +95,7 @@ const STORES = [
   },
   {
     key: 'duc-phat', name: 'Đức Phát', logo: 'logo.png',
+    bannerUrl: P('banh-deo-hat-sen'),
     description: 'Đức Phát Bakery, thương hiệu bánh người Hoa với bánh nướng nhân jambon đặc trưng.',
     branch: { name: 'Đức Phát Quận 3', addressLine: '139 Hai Bà Trưng', ward: 'Võ Thị Sáu', district: 'Quận 3', city: 'TP. Hồ Chí Minh', openingHours: '07:00–21:00' },
     products: [
@@ -108,6 +112,7 @@ const STORES = [
   },
   {
     key: 'abc', name: 'ABC Bakery', logo: 'logo.png',
+    bannerUrl: P('banh-lava-trung-muoi'),
     description: 'Bánh trung thu ABC với vị bánh nướng hiện đại và giá thân thiện.',
     branch: { name: 'ABC Bakery Phú Nhuận', addressLine: '98 Phan Đăng Lưu', ward: 'Phường 5', district: 'Phú Nhuận', city: 'TP. Hồ Chí Minh', openingHours: '07:00–22:00' },
     promotion: { name: 'Mùa trăng ABC giảm 5%', discountPercent: 5 },
@@ -125,6 +130,7 @@ const STORES = [
   },
   {
     key: 'khiet-minh', name: 'Khiết Minh', logo: 'logo.jpg',
+    bannerUrl: P('banh-chay-dau-xanh'),
     description: 'Bánh trung thu chay thanh tịnh, nguyên liệu thực vật, ít đường.',
     branch: { name: 'Khiết Minh Tân Bình', addressLine: '55 Trường Chinh', ward: 'Phường 12', district: 'Tân Bình', city: 'TP. Hồ Chí Minh', openingHours: '08:00–20:30' },
     products: [
@@ -141,35 +147,35 @@ const STORES = [
   },
   // Named-brand listings below are illustrative, not authorized brand storefronts.
   {
-    key: 'nhu-lan', name: 'Như Lan (demo)', logoUrl: `${IMG}/brands/stores/demo-store-logo.svg`,
+    key: 'nhu-lan', name: 'Như Lan', logoUrl: `${IMG}/brands/stores/nhu-lan-logo.svg`,
     bannerUrl: `${IMG}/brands/stores/nhu-lan-banner.webp`,
     description: 'Gian hàng tham chiếu để thử giao diện; ảnh, giá và người bán chỉ là dữ liệu mẫu.',
     products: [{ key: 'TC', name: 'Bánh nướng thập cẩm (demo)', category: 'truyen-thong',
       image: BP('nhu-lan-thap-cam'), description: 'Sản phẩm và giá minh họa.', variants: [['Bánh 150g minh họa', 155000, 50]] }]
   },
   {
-    key: 'madame-huong', name: 'Madame Hương (demo)', logoUrl: `${IMG}/brands/stores/demo-store-logo.svg`,
+    key: 'madame-huong', name: 'Madame Hương', logoUrl: `${IMG}/brands/stores/madame-huong-logo.svg`,
     bannerUrl: `${IMG}/brands/stores/madame-huong-banner.webp`,
     description: 'Gian hàng tham chiếu, không đại diện nhà bán chính thức.',
     products: [{ key: 'CS', name: 'Bánh cốm sen (demo)', category: 'hien-dai',
       image: BP('madame-huong-com-sen'), description: 'Sản phẩm và giá minh họa.', variants: [['Bánh 150g minh họa', 165000, 45]] }]
   },
   {
-    key: 'brodard', name: 'Brodard (demo)', logoUrl: `${IMG}/brands/stores/demo-store-logo.svg`,
+    key: 'brodard', name: 'Brodard', logoUrl: `${IMG}/brands/stores/brodard-logo.svg`,
     bannerUrl: `${IMG}/brands/stores/brodard-banner.webp`,
     description: 'Gian hàng tham chiếu, không đại diện nhà bán chính thức.',
     products: [{ key: 'HS', name: 'Bánh hải sản (demo)', category: 'cao-cap',
       image: BP('brodard-hai-san'), description: 'Sản phẩm và giá minh họa.', variants: [['Bánh 200g minh họa', 240000, 35]] }]
   },
   {
-    key: 'kidos', name: "KIDO's Bakery (demo)", logoUrl: `${IMG}/brands/stores/demo-store-logo.svg`,
+    key: 'kidos', name: "KIDO's Bakery", logoUrl: `${IMG}/brands/stores/kidos-logo.svg`,
     bannerUrl: `${IMG}/brands/stores/kidos-banner.webp`,
     description: 'Gian hàng tham chiếu, không đại diện nhà bán chính thức.',
     products: [{ key: 'MTC', name: 'Bánh trà xanh phô mai (demo)', category: 'hien-dai',
       image: BP('kidos-tra-xanh-pho-mai'), description: 'Sản phẩm và giá minh họa.', variants: [['Bánh 150g minh họa', 160000, 50]] }]
   },
   {
-    key: 'maison', name: 'Maison (demo)', logoUrl: `${IMG}/brands/stores/demo-store-logo.svg`,
+    key: 'maison', name: 'Maison', logoUrl: `${IMG}/brands/stores/maison-logo.svg`,
     bannerUrl: `${IMG}/brands/stores/maison-banner.webp`,
     description: 'Gian hàng tham chiếu, không đại diện nhà bán chính thức.',
     products: [{ key: 'HQ', name: 'Hộp quà Trung thu (demo)', category: 'cao-cap',
@@ -206,7 +212,7 @@ async function login(email, password) {
 
 const isoLocal = (d) => d.toISOString().slice(0, 19);
 
-async function seedStore(def, index, adminToken, categoryIdBySlug) {
+async function seedStore(def, adminToken, categoryIdBySlug) {
   const email = `supplier.${def.key}@mooncake.local`;
 
   const registered = await api('POST', '/api/auth/register', { body: { fullName: `${def.name} Supplier`, email, password: SUPPLIER_PASSWORD } });
@@ -226,11 +232,14 @@ async function seedStore(def, index, adminToken, categoryIdBySlug) {
 
   const mine = await expect(api('GET', '/api/stores?mine=true', { token }), [200], `stores mine ${def.key}`);
   if (mine.length > 0) {
-    if (mine[0].shippingFee == null) {
-      await expect(api('PATCH', `/api/stores/${mine[0].storeId}`, {
-        token, body: { shippingFee: DEMO_SHIPPING_FEE }
-      }), [200], `shipping fee ${def.key}`);
-    }
+    await expect(api('PATCH', `/api/stores/${mine[0].storeId}`, {
+      token, body: {
+        name: def.name,
+        logoUrl: def.logoUrl ?? `${IMG}/stores/${def.key}/${def.logo}`,
+        bannerUrl: def.bannerUrl,
+        ...(mine[0].shippingFee == null ? { shippingFee: DEMO_SHIPPING_FEE } : {})
+      }
+    }), [200], `update store images ${def.key}`);
     console.log(`SKIP  ${def.name}: đã có gian hàng #${mine[0].storeId}`);
     return;
   }
@@ -241,7 +250,7 @@ async function seedStore(def, index, adminToken, categoryIdBySlug) {
       name: def.name,
       description: def.description,
       logoUrl: def.logoUrl ?? `${IMG}/stores/${def.key}/${def.logo}`,
-      bannerUrl: def.bannerUrl ?? `${IMG}/stores/${BANNERS[index % BANNERS.length]}`
+      bannerUrl: def.bannerUrl
     }
   }), [201], `tạo store ${def.key}`);
   await expect(api('PATCH', `/api/stores/${store.storeId}`, {
@@ -287,7 +296,7 @@ const adminToken = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
 const categories = await expect(api('GET', '/api/categories?size=100'), [200], 'categories');
 const categoryIdBySlug = new Map(categories.items.map((c) => [c.slug, c.categoryId]));
 
-for (const [index, def] of STORES.entries()) {
-  await seedStore(def, index, adminToken, categoryIdBySlug);
+for (const def of STORES) {
+  await seedStore(def, adminToken, categoryIdBySlug);
 }
 console.log(`\nXong. Supplier đăng nhập bằng supplier.<key>@mooncake.local / ${SUPPLIER_PASSWORD}`);
