@@ -38,4 +38,9 @@ public class InternalStockReservationController {
     public StockReservationResponse release(@PathVariable String reservationKey) {
         return service.release(reservationKey);
     }
+
+    @PutMapping("/{reservationKey}/cancel-confirmed")
+    public StockReservationResponse cancelConfirmed(@PathVariable String reservationKey) {
+        return service.cancelConfirmed(reservationKey);
+    }
 }

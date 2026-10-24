@@ -43,6 +43,10 @@ BEGIN TRY
     FROM @demo d JOIN dbo.app_user u ON u.email = d.email
     WHERE NOT EXISTS (SELECT 1 FROM dbo.supplier_profile s WHERE s.user_id = u.user_id);
 
+    UPDATE s SET company_name=d.company_name
+    FROM dbo.supplier_profile s JOIN dbo.app_user u ON u.user_id=s.user_id
+    JOIN @demo d ON d.email=u.email;
+
     COMMIT TRANSACTION;
 END TRY
 BEGIN CATCH
@@ -95,6 +99,9 @@ BEGIN TRY
     SELECT u.user_id, d.company_name, d.tax_code, N'VERIFIED'
     FROM @demo d JOIN dbo.app_user u ON u.email = d.email
     WHERE NOT EXISTS (SELECT 1 FROM dbo.supplier_profile s WHERE s.user_id = u.user_id);
+    UPDATE s SET company_name=d.company_name
+    FROM dbo.supplier_profile s JOIN dbo.app_user u ON u.user_id=s.user_id
+    JOIN @demo d ON d.email=u.email;
     COMMIT TRANSACTION;
 END TRY
 BEGIN CATCH

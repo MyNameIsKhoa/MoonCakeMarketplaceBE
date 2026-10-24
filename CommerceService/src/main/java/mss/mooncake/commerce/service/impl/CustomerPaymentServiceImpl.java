@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import mss.mooncake.commerce.client.PaymentProvider;
+import mss.mooncake.commerce.client.CatalogServiceClient;
 import mss.mooncake.commerce.dto.response.CustomerPaymentResponse;
 import mss.mooncake.commerce.exception.FinanceException;
 import mss.mooncake.commerce.repository.FinanceRepository;
@@ -12,6 +13,8 @@ import mss.mooncake.commerce.repository.FinanceRepository.CustomerPaymentItem;
 import mss.mooncake.commerce.service.CustomerPaymentService;
 import mss.mooncake.commerce.service.FinanceService;
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -22,11 +25,23 @@ public class CustomerPaymentServiceImpl implements CustomerPaymentService {
     private final FinanceRepository repository;
     private final PaymentProvider provider;
     private final TransactionTemplate transaction;
+    private final CatalogServiceClient catalog;
+    private final ObjectProvider<FinanceService> finance;
 
-    public CustomerPaymentServiceImpl(FinanceRepository repository, PaymentProvider provider, PlatformTransactionManager manager) {
+    @Autowired
+    public CustomerPaymentServiceImpl(FinanceRepository repository, PaymentProvider provider,
+            PlatformTransactionManager manager, CatalogServiceClient catalog,
+            ObjectProvider<FinanceService> finance) {
         this.repository = repository;
         this.provider = provider;
         this.transaction = new TransactionTemplate(manager);
+        this.catalog = catalog;
+        this.finance = finance;
+    }
+
+    public CustomerPaymentServiceImpl(FinanceRepository repository, PaymentProvider provider,
+            PlatformTransactionManager manager) {
+        this(repository, provider, manager, null, null);
     }
 
     private static void require(boolean value, String code) {
@@ -190,6 +205,81 @@ public class CustomerPaymentServiceImpl implements CustomerPaymentService {
             collect(current, receipt.linkId(), receipt.reference(), receipt.amount());
         });
         return true;
+    }
+
+    @Override
+    public void cancelUnpaidOrder(long orderId, String reason, FinanceService.Actor actor) {
+        if (reason == null || reason.isBlank() || reason.length() > 500) {
+            throw new FinanceException(HttpStatus.BAD_REQUEST, "CANCELLATION_REASON_REQUIRED");
+        }
+        boolean pending = Boolean.TRUE.equals(transaction.execute(status -> {
+            var ids = lockOrder(orderId);
+            buyer(orderId, actor);
+            require(repository.retailOrder(orderId), "CUSTOMER_PAYMENT_RETAIL_ONLY");
+            if (repository.count("SELECT COUNT(*) FROM customer_order WHERE order_id=? AND status='CANCELLED'",
+                    orderId) == 1) { return false; }
+            for (long id : ids) {
+                require(repository.paid(id) == 0, "ORDER_ALREADY_PAID");
+                require(repository.count("""
+                        SELECT COUNT(*) FROM seller_order WHERE seller_order_id=?
+                        AND status IN ('AWAITING_PAYMENT','PENDING_CONFIRMATION')
+                        """, id) == 1, "ORDER_CANNOT_BE_CANCELLED");
+                require(!repository.active(id), "ACTIVE_PAYMENT_EXISTS");
+                var cases = repository.cancellations(id);
+                require(cases.isEmpty() || cases.stream().allMatch(c -> "REQUESTED".equals(c.status())),
+                        "CANCELLATION_ALREADY_EXISTS");
+                if (cases.isEmpty()) {
+                    long cancellationId = repository.insert("""
+                            INSERT INTO cancellation(seller_order_id,actor_type,actor_id_ref,reason,status,requested_at)
+                            VALUES(?,'CUSTOMER',?,?,'REQUESTED',?)
+                            """, id, actor.userId(), reason, FinanceRepository.utc(Instant.now()));
+                    repository.event(id, "CANCELLATION_REQUESTED", cancellationId,
+                            Long.toString(actor.userId()), reason);
+                }
+            }
+            repository.update("UPDATE customer_order SET status='CANCEL_REQUESTED' WHERE order_id=?", orderId);
+            return true;
+        }));
+        if (!pending) { return; }
+
+        // Once requested, finance rejects new links while remote links and stock are reconciled.
+        for (long id : repository.sellerOrderIds(orderId)) {
+            for (var payment : repository.payments(id)) {
+                if (payment.orderCode() != null && List.of("CREATING", "RECONCILING", "PENDING", "CANCELLING")
+                        .contains(payment.status())) {
+                    require(finance != null, "PAYOS_RECONCILIATION_UNAVAILABLE");
+                    finance.getObject().reconcile(payment.id(), actor, true);
+                }
+            }
+        }
+        var group = repository.customerPayments(orderId).stream().findFirst().orElse(null);
+        if (group != null && List.of("CREATING", "RECONCILING", "PENDING", "CANCELLING")
+                .contains(group.status())) { reconcile(orderId, actor, true); }
+
+        String reservationKey = repository.stockReservationKey(orderId);
+        if (reservationKey != null) {
+            require(catalog != null && "CANCELLED".equals(
+                    catalog.cancelConfirmedStockReservation(reservationKey).status()), "STOCK_RESTORE_REQUIRED");
+        }
+        transaction.executeWithoutResult(status -> {
+            var ids = lockOrder(orderId);
+            buyer(orderId, actor);
+            for (long id : ids) {
+                require(repository.paid(id) == 0 && !repository.active(id)
+                        && !repository.activeCustomerPayment(id), "PAYMENT_RECONCILIATION_REQUIRED");
+                var cancellation = repository.cancellations(id).stream().filter(c -> "REQUESTED".equals(c.status()))
+                        .findFirst().orElseThrow(() -> new FinanceException(HttpStatus.CONFLICT,
+                                "CANCELLATION_NOT_PENDING"));
+                repository.update("""
+                        UPDATE cancellation SET status='APPROVED',decision_reason=?,cancelled_at=?
+                        WHERE cancellation_id=?
+                        """, "Hủy ngay vì đơn chưa thanh toán", FinanceRepository.utc(Instant.now()), cancellation.id());
+                repository.update("UPDATE seller_order SET status='CANCELLED' WHERE seller_order_id=?", id);
+                repository.event(id, "CANCELLATION_DECIDED", cancellation.id(),
+                        Long.toString(actor.userId()), "Unpaid retail order cancelled");
+            }
+            repository.update("UPDATE customer_order SET status='CANCELLED' WHERE order_id=?", orderId);
+        });
     }
 
     private void collect(CustomerPayment payment, String linkId, String reference, long amount) {

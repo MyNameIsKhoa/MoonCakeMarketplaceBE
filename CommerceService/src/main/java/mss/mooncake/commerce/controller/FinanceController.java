@@ -79,6 +79,13 @@ public class FinanceController {
         return customerPayments.reconcile(orderId, actor(authentication), true);
     }
 
+    @PostMapping("/customer-orders/{orderId}/cancel-unpaid")
+    public java.util.Map<String, String> cancelUnpaidCustomerOrder(@PathVariable long orderId,
+            @Valid @RequestBody Reason body, Authentication authentication) {
+        customerPayments.cancelUnpaidOrder(orderId, body.reason(), actor(authentication));
+        return java.util.Map.of("status", "CANCELLED");
+    }
+
     @PostMapping("/{paymentId}/initiate")
     public FinanceResponse.Payment initiate(@PathVariable long paymentId,
             @RequestHeader("Idempotency-Key") String key, Authentication authentication) {

@@ -142,6 +142,28 @@ public class StockReservationServiceImpl implements StockReservationService {
         return response(reservation);
     }
 
+    @Override
+    @Transactional
+    public StockReservationResponse cancelConfirmed(String reservationKey) {
+        StockReservationEntity reservation = reservations.lockByKey(reservationKey)
+                .orElseThrow(() -> new ResourceNotFoundException("Reservation not found"));
+        if ("CANCELLED".equals(reservation.getStatus())) return response(reservation);
+        if (!"CONFIRMED".equals(reservation.getStatus())) {
+            throw new ConflictException("Only confirmed stock can be restored for a cancelled order");
+        }
+        var reserved = lines.findByReservationKeyOrderByVariantId(reservationKey);
+        var locked = variants.lockByIds(reserved.stream().map(StockReservationLineEntity::getVariantId).toList());
+        Map<Long, ProductVariantEntity> byId = locked.stream()
+                .collect(Collectors.toMap(ProductVariantEntity::getId, variant -> variant));
+        for (var line : reserved) {
+            var variant = byId.get(line.getVariantId());
+            if (variant == null) throw new ResourceNotFoundException("Variant not found");
+            variant.setStockQuantity(Math.addExact(variant.getStockQuantity(), line.getQuantity()));
+        }
+        reservation.setStatus("CANCELLED");
+        return response(reservation);
+    }
+
     private StockReservationResponse response(StockReservationEntity reservation) {
         String effectiveStatus = "HELD".equals(reservation.getStatus())
                 && !reservation.getExpiresAt().isAfter(LocalDateTime.now(ZoneOffset.UTC))
