@@ -66,13 +66,18 @@ IF OBJECT_ID(N'dbo.app_user', N'U') IS NULL OR OBJECT_ID(N'dbo.supplier_profile'
 
 DECLARE @demo TABLE (email NVARCHAR(255) PRIMARY KEY, company_name NVARCHAR(255), tax_code NVARCHAR(100));
 INSERT INTO @demo VALUES
-    (N'kinh-do@demo.mss.invalid', N'Kinh Đô — tham chiếu demo', N'DEMO-BRAND-KINH-DO'),
-    (N'nhu-lan@demo.mss.invalid', N'Như Lan — tham chiếu demo', N'DEMO-BRAND-NHU-LAN'),
-    (N'madame-huong@demo.mss.invalid', N'Madame Hương — tham chiếu demo', N'DEMO-BRAND-MADAME-HUONG'),
-    (N'brodard@demo.mss.invalid', N'Brodard — tham chiếu demo', N'DEMO-BRAND-BRODARD'),
-    (N'givral@demo.mss.invalid', N'Givral — tham chiếu demo', N'DEMO-BRAND-GIVRAL'),
-    (N'kidos@demo.mss.invalid', N'KIDO''s Bakery — tham chiếu demo', N'DEMO-BRAND-KIDOS'),
-    (N'maison@demo.mss.invalid', N'Maison — tham chiếu demo', N'DEMO-BRAND-MAISON');
+    (N'kinh-do@demo.mss.invalid', N'Kinh Đô', N'DEMO-BRAND-KINH-DO'),
+    (N'nhu-lan@demo.mss.invalid', N'Như Lan', N'DEMO-BRAND-NHU-LAN'),
+    (N'madame-huong@demo.mss.invalid', N'Madame Hương', N'DEMO-BRAND-MADAME-HUONG'),
+    (N'brodard@demo.mss.invalid', N'Brodard', N'DEMO-BRAND-BRODARD'),
+    (N'givral@demo.mss.invalid', N'Givral', N'DEMO-BRAND-GIVRAL'),
+    (N'kidos@demo.mss.invalid', N'KIDO''s Bakery', N'DEMO-BRAND-KIDOS'),
+    (N'maison@demo.mss.invalid', N'Maison', N'DEMO-BRAND-MAISON'),
+    (N'dong-khanh@demo.mss.invalid', N'Đồng Khánh', N'DEMO-BRAND-DONG-KHANH'),
+    (N'hy-lam-mon@demo.mss.invalid', N'Hỷ Lâm Môn', N'DEMO-BRAND-HY-LAM-MON'),
+    (N'duc-phat@demo.mss.invalid', N'Đức Phát', N'DEMO-BRAND-DUC-PHAT'),
+    (N'abc@demo.mss.invalid', N'ABC Bakery', N'DEMO-BRAND-ABC'),
+    (N'khiet-minh@demo.mss.invalid', N'Khiết Minh', N'DEMO-BRAND-KHIET-MINH');
 
 BEGIN TRY
     BEGIN TRANSACTION;
@@ -95,6 +100,9 @@ BEGIN TRY
     SELECT u.user_id, d.company_name, d.tax_code, N'VERIFIED'
     FROM @demo d JOIN dbo.app_user u ON u.email = d.email
     WHERE NOT EXISTS (SELECT 1 FROM dbo.supplier_profile s WHERE s.user_id = u.user_id);
+    UPDATE s SET company_name = d.company_name
+    FROM dbo.supplier_profile s JOIN dbo.app_user u ON u.user_id = s.user_id
+    JOIN @demo d ON d.email = u.email WHERE s.tax_code = d.tax_code;
     COMMIT TRANSACTION;
 END TRY
 BEGIN CATCH
