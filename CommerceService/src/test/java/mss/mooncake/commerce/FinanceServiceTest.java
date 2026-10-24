@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -79,6 +81,7 @@ class FinanceServiceTest {
                 } else { jdbc.execute(clean); }
             }
         }
+        jdbc.execute("CREATE TABLE checkout_attempt (order_id BIGINT, status VARCHAR(30), reservation_key VARCHAR(100))");
         jdbc.update("""
                 INSERT INTO customer_order(order_no,customer_id_ref,source_type,subtotal,grand_total,status)
                 VALUES('TEST',10,'RETAIL',10001,10001,'ACCEPTED')
@@ -88,14 +91,14 @@ class FinanceServiceTest {
                 store_name_snapshot,supplier_name_snapshot,subtotal,total_amount,status)
                 VALUES(1,'SELLER-TEST',1,20,'Store','Supplier',10001,10001,'ACCEPTED')
                 """);
-        repository = new FinanceRepository(jdbc);
+        repository = new mss.mooncake.commerce.repository.impl.FinanceRepositoryImpl(jdbc);
         var manager = new DataSourceTransactionManager(datasource);
         transaction = new TransactionTemplate(manager);
         integration = new FinanceIntegrationServiceImpl(repository);
         provider = mock(PaymentProvider.class);
         customerPayments = new CustomerPaymentServiceImpl(repository, provider, manager);
         service = new FinanceServiceImpl(repository, provider, manager, "TOTAL_COLLECTED", "HALF_UP", true, customerPayments);
-        when(provider.create(anyLong(), anyLong(), any())).thenAnswer(call -> new PaymentProvider.Link(
+        when(provider.create(anyLong(), anyLong(), any(), anyString())).thenAnswer(call -> new PaymentProvider.Link(
                 call.getArgument(0), call.getArgument(1), "link-" + call.getArgument(0), "https://pay.payos.vn/test", "qr"));
     }
 
@@ -121,6 +124,27 @@ class FinanceServiceTest {
     }
 
     @Test
+    void cancellingUnpaidRetailOrderCancelsPayOsLinkAndClosesOrder() {
+        var jdbc = new JdbcTemplate(datasource);
+        jdbc.update("UPDATE seller_order SET status='AWAITING_PAYMENT' WHERE seller_order_id=1");
+        context(true, null, 1, null);
+        var link = customerPayments.initiate(1, key(), BUYER).payment();
+        when(provider.cancel(link.orderCode())).thenReturn(new PaymentProvider.Status(
+                link.orderCode(), link.amount(), 0, link.linkId(), "CANCELLED", null));
+
+        customerPayments.cancelUnpaidOrder(1, "Đổi ý trước khi thanh toán", BUYER);
+        customerPayments.cancelUnpaidOrder(1, "Đổi ý trước khi thanh toán", BUYER);
+
+        assertThat(repository.count("SELECT COUNT(*) FROM customer_order WHERE order_id=1 AND status='CANCELLED'"))
+                .isEqualTo(1);
+        assertThat(repository.count("SELECT COUNT(*) FROM seller_order WHERE seller_order_id=1 AND status='CANCELLED'"))
+                .isEqualTo(1);
+        assertThat(repository.cancellations(1).getFirst().status()).isEqualTo("APPROVED");
+        assertThat(repository.paid(1)).isZero();
+        verify(provider, times(1)).cancel(link.orderCode());
+    }
+
+    @Test
     void oneCustomerCheckoutSplitsVerifiedPaymentAcrossSellersExactlyOnce() {
         var jdbc = new JdbcTemplate(datasource);
         jdbc.update("UPDATE customer_order SET grand_total=20002 WHERE order_id=1");
@@ -137,9 +161,10 @@ class FinanceServiceTest {
         var first = customerPayments.initiate(1, idempotencyKey, BUYER);
         var repeated = customerPayments.initiate(1, idempotencyKey, BUYER);
         assertThat(first.payment().orderCode()).isEqualTo(repeated.payment().orderCode());
+        assertThat(first.payment().orderCode()).isBetween(100_000_000_000_000L, 999_999_999_999_999L);
         assertThat(first.totalAmount()).isEqualTo(20002);
         assertThat(first.allocations()).hasSize(2);
-        verify(provider, times(1)).create(anyLong(), anyLong(), any());
+        verify(provider, times(1)).create(anyLong(), anyLong(), any(), eq("DH TEST"));
         assertThatThrownBy(() -> service.initiate(repository.payments(1).getFirst().id(), key(), BUYER))
                 .hasMessage("ACTIVE_PAYMENT_EXISTS");
 
@@ -198,6 +223,8 @@ class FinanceServiceTest {
         var link = service.initiate(remaining, key(), BUYER);
         assertThat(link.amount()).isEqualTo(7001);
         assertThat(link.dueAt()).isEqualTo(FinanceIntegrationService.remainingDue(delivery));
+        verify(provider).create(anyLong(), anyLong(), any(), eq("COC SELLER-TEST"));
+        verify(provider).create(anyLong(), anyLong(), any(), eq("CON SELLER-TEST"));
     }
 
     @Test
@@ -236,11 +263,11 @@ class FinanceServiceTest {
     void timeoutRetryKeepsSameProviderOrderAndRequiresReconciliation() {
         context(true, null, 1, null);
         long id = repository.payments(1).getFirst().id();
-        when(provider.create(anyLong(), anyLong(), any())).thenThrow(new RuntimeException("timeout"));
+        when(provider.create(anyLong(), anyLong(), any(), anyString())).thenThrow(new RuntimeException("timeout"));
         String key = key();
         assertThat(service.initiate(id, key, BUYER).status()).isEqualTo("RECONCILING");
         assertThat(service.initiate(id, key, BUYER).status()).isEqualTo("RECONCILING");
-        verify(provider, times(1)).create(anyLong(), anyLong(), any());
+        verify(provider, times(1)).create(anyLong(), anyLong(), any(), anyString());
         assertThatThrownBy(() -> service.initiate(id, key(), BUYER)).hasMessage("ACTIVE_PAYMENT_EXISTS");
         var p = repository.payment(id);
         when(provider.get(p.orderCode())).thenReturn(new PaymentProvider.Status(p.orderCode(), p.amount(), p.amount(), "link", "PAID", "reconciled-ref"));
