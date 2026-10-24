@@ -36,6 +36,9 @@ public interface CatalogServiceClient {
     @PutMapping("/internal/v1/inventory/reservations/{reservationKey}/release")
     StockReservationResponse releaseStockReservation(@PathVariable String reservationKey);
 
+    @PutMapping("/internal/v1/inventory/reservations/{reservationKey}/cancel-confirmed")
+    StockReservationResponse cancelConfirmedStockReservation(@PathVariable String reservationKey);
+
     @PostMapping("/internal/v1/promotions/calculate")
     PromotionCalculationResult calculatePromotions(@RequestBody PromotionCalculationRequest request);
 
