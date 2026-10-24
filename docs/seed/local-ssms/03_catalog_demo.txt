@@ -119,6 +119,13 @@ BEGIN TRY
     JOIN dbo.product p ON p.store_id = s.store_id AND p.product_code = d.product_code
     WHERE NOT EXISTS (SELECT 1 FROM dbo.product_variant v WHERE v.sku = d.sku);
 
+    UPDATE s SET name=d.name FROM dbo.store s JOIN @stores d ON d.store_code=s.store_code;
+    UPDATE p SET name=d.name,description=d.description
+    FROM dbo.product p JOIN dbo.store s ON s.store_id=p.store_id
+    JOIN @products d ON d.store_code=s.store_code AND d.product_code=p.product_code;
+    UPDATE v SET variant_name=d.variant_name
+    FROM dbo.product_variant v JOIN @products d ON d.sku=v.sku;
+
     IF (SELECT COUNT(*) FROM @products d JOIN dbo.store s ON s.store_code = d.store_code
         JOIN dbo.product p ON p.store_id = s.store_id AND p.product_code = d.product_code
         JOIN dbo.product_variant v ON v.product_id = p.product_id AND v.sku = d.sku) <> 10
@@ -212,6 +219,13 @@ BEGIN TRY
     FROM @products d JOIN dbo.store s ON s.store_code = d.store_code
     JOIN dbo.product p ON p.store_id = s.store_id AND p.product_code = d.product_code
     WHERE NOT EXISTS (SELECT 1 FROM dbo.product_variant v WHERE v.sku = d.sku);
+
+    UPDATE s SET name=d.name FROM dbo.store s JOIN @stores d ON d.store_code=s.store_code;
+    UPDATE p SET name=d.name,description=d.description
+    FROM dbo.product p JOIN dbo.store s ON s.store_id=p.store_id
+    JOIN @products d ON d.store_code=s.store_code AND d.product_code=p.product_code;
+    UPDATE v SET variant_name=d.variant_name
+    FROM dbo.product_variant v JOIN @products d ON d.sku=v.sku;
 
     IF (SELECT COUNT(*) FROM @products d JOIN dbo.store s ON s.store_code = d.store_code
         JOIN dbo.product p ON p.store_id = s.store_id AND p.product_code = d.product_code

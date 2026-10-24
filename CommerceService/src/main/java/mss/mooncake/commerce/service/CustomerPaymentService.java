@@ -9,4 +9,5 @@ public interface CustomerPaymentService {
     CustomerPaymentResponse initiate(long orderId, String key, FinanceService.Actor actor);
     CustomerPaymentResponse reconcile(long orderId, FinanceService.Actor actor, boolean cancel);
     boolean receive(PaymentProvider.Receipt receipt);
+    void cancelUnpaidOrder(long orderId, String reason, FinanceService.Actor actor);
 }
