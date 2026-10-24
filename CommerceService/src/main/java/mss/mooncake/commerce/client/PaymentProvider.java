@@ -8,7 +8,7 @@ public interface PaymentProvider {
     record Receipt(long orderCode, long amount, String linkId, String reference, String currency) { }
     record Status(long orderCode, long amount, long paid, String linkId, String status, String reference) { }
 
-    Link create(long orderCode, long amount, Instant expiresAt);
+    Link create(long orderCode, long amount, Instant expiresAt, String description);
     Receipt verify(Webhook webhook);
     Status get(long orderCode);
     Status cancel(long orderCode);
