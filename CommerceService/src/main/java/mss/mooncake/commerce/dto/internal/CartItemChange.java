@@ -1,4 +1,4 @@
-package mss.mooncake.commerce.service;
+package mss.mooncake.commerce.dto.internal;
 
 import mss.mooncake.commerce.dto.response.CartItemResponse;
 

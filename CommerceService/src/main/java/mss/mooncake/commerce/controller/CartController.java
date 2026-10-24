@@ -8,7 +8,7 @@ import mss.mooncake.commerce.dto.response.CartResponse;
 import mss.mooncake.commerce.dto.response.CartPricingResponse;
 import mss.mooncake.commerce.security.CommercePrincipal;
 import mss.mooncake.commerce.service.CartApplicationService;
-import mss.mooncake.commerce.service.CartItemChange;
+import mss.mooncake.commerce.dto.internal.CartItemChange;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;

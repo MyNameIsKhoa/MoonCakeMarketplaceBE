@@ -2,6 +2,7 @@ package mss.mooncake.commerce.service;
 
 import mss.mooncake.commerce.dto.request.AddCartItemRequest;
 import mss.mooncake.commerce.dto.response.CartItemResponse;
+import mss.mooncake.commerce.dto.internal.CartItemChange;
 import mss.mooncake.commerce.dto.response.CartResponse;
 import mss.mooncake.commerce.dto.response.CartPricingResponse;
 
