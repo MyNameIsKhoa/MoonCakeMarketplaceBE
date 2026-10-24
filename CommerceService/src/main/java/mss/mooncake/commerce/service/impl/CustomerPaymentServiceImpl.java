@@ -12,6 +12,7 @@ import mss.mooncake.commerce.repository.FinanceRepository.CustomerPayment;
 import mss.mooncake.commerce.repository.FinanceRepository.CustomerPaymentItem;
 import mss.mooncake.commerce.service.CustomerPaymentService;
 import mss.mooncake.commerce.service.FinanceService;
+import mss.mooncake.commerce.service.PaymentDescription;
 import org.springframework.http.HttpStatus;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -141,7 +142,8 @@ public class CustomerPaymentServiceImpl implements CustomerPaymentService {
         }));
         if (claimed) {
             try {
-                var link = provider.create(reserved.orderCode(), reserved.amount(), reserved.expiresAt());
+                var link = provider.create(reserved.orderCode(), reserved.amount(), reserved.expiresAt(),
+                        PaymentDescription.customer(repository.customerOrderNumber(orderId), orderId));
                 transaction.executeWithoutResult(status -> {
                     lockOrder(orderId);
                     require(link.orderCode() == reserved.orderCode() && link.amount() == reserved.amount()
@@ -224,7 +226,6 @@ public class CustomerPaymentServiceImpl implements CustomerPaymentService {
                         SELECT COUNT(*) FROM seller_order WHERE seller_order_id=?
                         AND status IN ('AWAITING_PAYMENT','PENDING_CONFIRMATION')
                         """, id) == 1, "ORDER_CANNOT_BE_CANCELLED");
-                require(!repository.active(id), "ACTIVE_PAYMENT_EXISTS");
                 var cases = repository.cancellations(id);
                 require(cases.isEmpty() || cases.stream().allMatch(c -> "REQUESTED".equals(c.status())),
                         "CANCELLATION_ALREADY_EXISTS");
@@ -258,8 +259,8 @@ public class CustomerPaymentServiceImpl implements CustomerPaymentService {
 
         String reservationKey = repository.stockReservationKey(orderId);
         if (reservationKey != null) {
-            require(catalog != null && "CANCELLED".equals(
-                    catalog.cancelConfirmedStockReservation(reservationKey).status()), "STOCK_RESTORE_REQUIRED");
+            var restored = catalog == null ? null : catalog.cancelConfirmedStockReservation(reservationKey);
+            require(restored != null && "CANCELLED".equals(restored.status()), "STOCK_RESTORE_REQUIRED");
         }
         transaction.executeWithoutResult(status -> {
             var ids = lockOrder(orderId);
