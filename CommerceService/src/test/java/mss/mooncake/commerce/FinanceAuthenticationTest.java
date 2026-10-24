@@ -22,6 +22,7 @@ import mss.mooncake.commerce.security.CommercePrincipal;
 import mss.mooncake.commerce.security.JwtAuthenticationFilter;
 import mss.mooncake.commerce.security.JwtTokenProvider;
 import mss.mooncake.commerce.service.FinanceActorResolver;
+import mss.mooncake.commerce.service.impl.FinanceActorResolverImpl;
 import mss.mooncake.commerce.service.FinanceService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -35,7 +36,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 class FinanceAuthenticationTest {
     private static final String SECRET = "FinanceRegressionSecretAtLeastThirtyTwoBytesLong";
     private final IdentityServiceClient identity = mock(IdentityServiceClient.class);
-    private final FinanceActorResolver resolver = new FinanceActorResolver(identity);
+    private final FinanceActorResolver resolver = new FinanceActorResolverImpl(identity);
 
     @AfterEach
     void clearSecurityContext() { SecurityContextHolder.clearContext(); }

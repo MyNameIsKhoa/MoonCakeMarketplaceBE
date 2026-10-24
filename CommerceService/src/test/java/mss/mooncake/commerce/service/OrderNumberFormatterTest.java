@@ -6,7 +6,7 @@ import java.time.LocalDate;
 import org.junit.jupiter.api.Test;
 
 class OrderNumberFormatterTest {
-    private final OrderNumberFormatter formatter = new OrderNumberFormatter();
+    private final OrderNumberFormatter formatter = new mss.mooncake.commerce.service.impl.OrderNumberFormatterImpl();
 
     @Test
     void formatsPublicNumbersWithoutUserIdOrRandomDigits() {
