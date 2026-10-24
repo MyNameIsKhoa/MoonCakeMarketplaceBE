@@ -20,6 +20,10 @@ import mss.mooncake.commerce.dto.internal.FinanceOrderContext;
 import mss.mooncake.commerce.repository.FinanceRepository;
 import mss.mooncake.commerce.service.FinanceIntegrationService;
 import mss.mooncake.commerce.service.FinanceService;
+import mss.mooncake.commerce.service.impl.FinanceServiceImpl;
+import mss.mooncake.commerce.service.impl.FinanceIntegrationServiceImpl;
+import mss.mooncake.commerce.service.CustomerPaymentService;
+import mss.mooncake.commerce.service.impl.CustomerPaymentServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -34,6 +38,7 @@ class FinanceServiceTest {
     private static final FinanceService.Actor ADMIN = new FinanceService.Actor(303, null, null, true);
     private FinanceRepository repository;
     private FinanceService service;
+    private CustomerPaymentService customerPayments;
     private FinanceIntegrationService integration;
     private PaymentProvider provider;
     private TransactionTemplate transaction;
@@ -52,7 +57,8 @@ class FinanceServiceTest {
         datasource.setMaximumPoolSize(5);
         var jdbc = new JdbcTemplate(datasource);
         // Execute the real migrations, adapting only SQL Server syntax unsupported by H2.
-        for (String file : new String[]{"V1__commerce_physical_schema.sql", "V3__tv5_finance.sql"}) {
+        for (String file : new String[]{"V1__commerce_physical_schema.sql", "V3__tv5_finance.sql",
+                "V7__customer_order_payment.sql"}) {
             var resource = new ClassPathResource("db/migration/" + file);
             String sql = resource.getContentAsString(StandardCharsets.UTF_8)
                     .replace("dbo.", "").replace("SYSUTCDATETIME()", "CURRENT_TIMESTAMP")
@@ -85,9 +91,10 @@ class FinanceServiceTest {
         repository = new FinanceRepository(jdbc);
         var manager = new DataSourceTransactionManager(datasource);
         transaction = new TransactionTemplate(manager);
-        integration = new FinanceIntegrationService(repository);
+        integration = new FinanceIntegrationServiceImpl(repository);
         provider = mock(PaymentProvider.class);
-        service = new FinanceService(repository, provider, manager, "TOTAL_COLLECTED", "HALF_UP", true);
+        customerPayments = new CustomerPaymentServiceImpl(repository, provider, manager);
+        service = new FinanceServiceImpl(repository, provider, manager, "TOTAL_COLLECTED", "HALF_UP", true, customerPayments);
         when(provider.create(anyLong(), anyLong(), any())).thenAnswer(call -> new PaymentProvider.Link(
                 call.getArgument(0), call.getArgument(1), "link-" + call.getArgument(0), "https://pay.payos.vn/test", "qr"));
     }
@@ -111,6 +118,44 @@ class FinanceServiceTest {
         var p = repository.payment(id);
         when(provider.verify(any())).thenReturn(new PaymentProvider.Receipt(p.orderCode(), p.amount(), p.linkId(), reference, "VND"));
         service.webhook(new Webhook());
+    }
+
+    @Test
+    void oneCustomerCheckoutSplitsVerifiedPaymentAcrossSellersExactlyOnce() {
+        var jdbc = new JdbcTemplate(datasource);
+        jdbc.update("UPDATE customer_order SET grand_total=20002 WHERE order_id=1");
+        jdbc.update("""
+                INSERT INTO seller_order(order_id,seller_order_no,store_id_ref,supplier_id_ref,
+                store_name_snapshot,supplier_name_snapshot,subtotal,total_amount,status)
+                VALUES(1,'SELLER-SECOND',2,21,'Second store','Second supplier',10001,10001,'ACCEPTED')
+                """);
+        context(true, null, 1, null);
+        transaction.executeWithoutResult(status -> integration.syncOrder(
+                new FinanceOrderContext(2, 10, 21, 10001, null, null, true, 1)));
+
+        String idempotencyKey = key();
+        var first = customerPayments.initiate(1, idempotencyKey, BUYER);
+        var repeated = customerPayments.initiate(1, idempotencyKey, BUYER);
+        assertThat(first.payment().orderCode()).isEqualTo(repeated.payment().orderCode());
+        assertThat(first.totalAmount()).isEqualTo(20002);
+        assertThat(first.allocations()).hasSize(2);
+        verify(provider, times(1)).create(anyLong(), anyLong(), any());
+        assertThatThrownBy(() -> service.initiate(repository.payments(1).getFirst().id(), key(), BUYER))
+                .hasMessage("ACTIVE_PAYMENT_EXISTS");
+
+        var group = first.payment();
+        when(provider.verify(any())).thenReturn(new PaymentProvider.Receipt(group.orderCode(), 1,
+                group.linkId(), "wrong-total", "VND"));
+        assertThatThrownBy(() -> service.webhook(new Webhook())).hasMessage("WEBHOOK_PAYMENT_MISMATCH");
+        when(provider.verify(any())).thenReturn(new PaymentProvider.Receipt(group.orderCode(), 20002,
+                group.linkId(), "customer-payment-reference", "VND"));
+        service.webhook(new Webhook());
+        service.webhook(new Webhook());
+        assertThat(repository.paid(1)).isEqualTo(10001);
+        assertThat(repository.paid(2)).isEqualTo(10001);
+        assertThat(repository.count("SELECT COUNT(*) FROM finance_ledger WHERE entry_type='HELD'")).isEqualTo(2);
+        assertThat(repository.count("SELECT COUNT(*) FROM customer_payment_webhook_inbox")).isEqualTo(1);
+        assertThat(customerPayments.summary(1, BUYER).payment().status()).isEqualTo("SUCCESS");
     }
 
     private void deliver() {
@@ -349,7 +394,7 @@ class FinanceServiceTest {
     void policiesAndSuccessfulTransferProofAreRequired() {
         long id = fullPayment();
         deliver();
-        var unconfigured = new FinanceService(repository, provider, new DataSourceTransactionManager(datasource), "", "", false);
+        var unconfigured = new FinanceServiceImpl(repository, provider, new DataSourceTransactionManager(datasource), "", "", false);
         assertThat(unconfigured.summary(1, BUYER).eligibility().blockingReasons())
                 .contains("FEE_BASIS_NOT_AGREED", "ROUNDING_NOT_AGREED");
         assertThatThrownBy(() -> unconfigured.createSettlement(1, key(), ADMIN)).hasMessage("SETTLEMENT_NOT_ELIGIBLE");

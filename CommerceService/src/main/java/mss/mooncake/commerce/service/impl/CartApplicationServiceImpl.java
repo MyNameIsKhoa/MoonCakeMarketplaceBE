@@ -24,7 +24,7 @@ import mss.mooncake.commerce.entity.CartItemEntity;
 import mss.mooncake.commerce.repository.CartItemRepository;
 import mss.mooncake.commerce.repository.CartRepository;
 import mss.mooncake.commerce.service.CartApplicationService;
-import mss.mooncake.commerce.service.CartItemChange;
+import mss.mooncake.commerce.dto.internal.CartItemChange;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;

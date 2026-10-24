@@ -33,7 +33,7 @@ class RetailCheckoutServiceTest {
     private final CartApplicationService carts = mock(CartApplicationService.class);
     private final CatalogServiceClient catalog = mock(CatalogServiceClient.class);
     private final IdentityServiceClient identity = mock(IdentityServiceClient.class);
-    private final RetailCheckoutService service = new RetailCheckoutService(repository, carts, catalog, identity);
+    private final RetailCheckoutService service = new mss.mooncake.commerce.service.impl.RetailCheckoutServiceImpl(repository, carts, catalog, identity);
 
     @Test
     void sameKeyReplaysSavedOrderWithoutRepricingOrReserving() {
