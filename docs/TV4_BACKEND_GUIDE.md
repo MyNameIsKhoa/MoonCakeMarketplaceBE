@@ -206,3 +206,40 @@ Các nhóm kiểm tra bao gồm ownership/privacy, schema JSON, giá/phiên bả
 - Đăng nhập dùng chung `src/context/AuthContext.tsx` của TV1: tab B2B ở mức `customer` (`src/utils/permissions.ts`) nên khách được chuyển tới màn Login chung; `RfqPortal` lấy user/hồ sơ nhà cung cấp từ `useAuth()`, REST và chat dùng cùng token trong `http.ts` (401/token hết hạn sẽ đăng xuất toàn app).
 - Các mock RFQ còn lại trong `SellerCenter` (tab RFQ) và `UserProfile` (tab RFQ) thuộc trang của thành viên khác, chưa nối API; có thể chuyển hướng sang tab B2B.
 
+## 9. Kịch bản demo (UI)
+
+### Chuẩn bị (một lần)
+
+1. Tạo `.env` từ `.env.example` và đặt `CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173` (FE dev chạy cổng 3000), rồi `docker compose up -d`.
+2. Có admin trong `ADMIN_USER_IDS` (xem README mục Docker), rồi chạy `node scripts/seed-demo-catalog.mjs`: tạo các nhà cung cấp `VERIFIED`, gian hàng `ACTIVE` và sản phẩm. FE chưa có màn tạo/kích hoạt gian hàng nên bước này bắt buộc.
+3. Chạy `node scripts/seed-demo-tv4.mjs`: tạo buyer doanh nghiệp có sẵn địa chỉ và kiểm tra hai nhà cung cấp demo đã sẵn sàng gửi báo giá. Chạy lại được; không cần quyền admin. Biến `GATEWAY_URL`, `BUYER_PASSWORD`, `SUPPLIER_PASSWORD` đổi mặc định.
+4. FE: `npm run dev` trong repo MoonCakeMarketplaceFE, mở `http://localhost:3000`. Nếu Gateway không ở cổng 8080, đặt `VITE_API_BASE_URL`.
+
+| Vai trò | Tài khoản mặc định |
+|---|---|
+| Buyer | `buyer.b2b@mooncake.local` / `MoonCake@Buyer2026` |
+| Nhà cung cấp gửi báo giá | `supplier.kinh-do@mooncake.local` / `MoonCake@Supplier2026` |
+| Nhà cung cấp khác (đối thủ) | `supplier.givral@mooncake.local` / `MoonCake@Supplier2026` |
+
+Mở buyer và nhà cung cấp ở **hai cửa sổ trình duyệt riêng** (một cửa sổ ẩn danh): token đăng nhập lưu trong `localStorage`, dùng chung giữa các tab cùng trình duyệt.
+
+### Các bước (khoảng 10 phút)
+
+| # | Ai | Thao tác | Điểm cần nhấn mạnh |
+|---|---|---|---|
+| 1 | Buyer | Đăng nhập → tab **Doanh Nghiệp** → **Tạo yêu cầu báo giá** (tiêu đề, số lượng, ngân sách, ngày giao) | Công bố ngay (`OPEN`); địa điểm giao và yêu cầu tùy chỉnh chỉ chủ RFQ thấy |
+| 2 | Kinh Đô | **Sàn yêu cầu báo giá** → mở RFQ → **Gửi báo giá** (cọc 30%, đơn giá, phí ship) | Tiền là VND nguyên; mục từ catalog lấy tên/SKU từ Catalog, giá theo thương lượng |
+| 3 | Kinh Đô | Sửa báo giá → phiên bản 2 với giá mới | Bản cũ thành "Đã có phiên bản mới" nhưng giữ nguyên giá đã gửi |
+| 4 | Buyer | Mở RFQ → **So sánh báo giá** → **Xem chi tiết** | Givral đăng nhập không đọc được báo giá của Kinh Đô |
+| 5 | Cả hai | Buyer **Nhắn tin với nhà cung cấp**, hai bên nhắn qua lại | Chat thời gian thực qua Gateway; tin hiện ngay ở cửa sổ kia |
+| 6 | Buyer | **Chấp nhận** phiên bản 2 → chọn địa chỉ (hoặc **Thêm địa chỉ mới**) | Hiện "Đơn hàng #… (đơn nhà bán #…)"; báo giá thành "Đã chấp nhận" |
+| 7 | Buyer | Tab **Thanh Toán** → nhập **mã đơn nhà bán** | TV5 có `DEPOSIT` + `REMAINING` (VND nguyên, hạn 00:00 giờ Việt Nam 3 ngày trước ngày giao), hoặc một khoản `FULL` khi cọc 0%/100% |
+
+Có thể demo thêm: buyer từ chối báo giá, nhà cung cấp rút báo giá, hoặc nhập số tiền lẻ đồng để thấy `AMOUNT_NOT_WHOLE_VND`.
+
+### Lưu ý
+
+- Tạo link payOS ở bước 7 cần khóa `PAYOS_*` trong `.env`; không có khóa thì chỉ demo tới danh sách khoản thanh toán.
+- API trả thời gian theo UTC (`17:00Z` là 00:00 giờ Việt Nam hôm sau).
+- Mỗi lần demo tạo RFQ/đơn mới trong database; dữ liệu không tự xóa.
+
