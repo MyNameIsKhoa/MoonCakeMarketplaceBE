@@ -28,6 +28,9 @@ public class FinanceRepository {
                     expiresAt, checkoutUrl, qrCode);
         }
     }
+    public record CustomerPayment(long id, long orderId, long orderCode, String key, long amount,
+            String status, String linkId, String checkoutUrl, String qrCode, Instant expiresAt) { }
+    public record CustomerPaymentItem(long paymentId, long sellerOrderId, long amount, String sellerOrderNo) { }
 
     private final JdbcTemplate jdbc;
 
@@ -53,6 +56,12 @@ public class FinanceRepository {
             rs.getString("status"), rs.getString("hold_status"), rs.getObject("order_code", Long.class),
             rs.getString("payment_link_id"), rs.getString("idempotency_key"), instant(rs, "due_at"),
             instant(rs, "expires_at"), rs.getString("checkout_url"), rs.getString("qr_code"));
+
+    private final RowMapper<CustomerPayment> customerPayments = (rs, n) -> new CustomerPayment(
+            rs.getLong("customer_payment_id"), rs.getLong("customer_order_id"), rs.getLong("order_code"),
+            rs.getString("idempotency_key"), rs.getLong("amount"), rs.getString("status"),
+            rs.getString("payment_link_id"), rs.getString("checkout_url"), rs.getString("qr_code"),
+            instant(rs, "expires_at"));
 
     public int update(String sql, Object... args) { return jdbc.update(sql, args); }
     public long count(String sql, Object... args) { return jdbc.queryForObject(sql, Long.class, args); }
@@ -120,6 +129,64 @@ public class FinanceRepository {
                 SELECT COUNT(*) FROM payment WHERE seller_order_id=? AND status IN
                 ('CREATING','PENDING','RECONCILING','CANCELLING') AND order_code IS NOT NULL
                 """, orderId) > 0;
+    }
+
+    public void lockCustomerOrder(long orderId) {
+        if (update("UPDATE customer_order SET status=status WHERE order_id=?", orderId) != 1) {
+            throw new FinanceException(HttpStatus.NOT_FOUND, "ORDER_NOT_FOUND");
+        }
+    }
+
+    public long customerOrderOwner(long orderId) {
+        return count("SELECT customer_id_ref FROM customer_order WHERE order_id=?", orderId);
+    }
+
+    public long customerOrderTotal(long orderId) {
+        return jdbc.queryForObject("SELECT grand_total FROM customer_order WHERE order_id=?", java.math.BigDecimal.class,
+                orderId).longValueExact();
+    }
+
+    public boolean retailOrder(long orderId) {
+        return count("SELECT COUNT(*) FROM customer_order WHERE order_id=? AND source_type='RETAIL'", orderId) == 1;
+    }
+
+    public List<Long> sellerOrderIds(long orderId) {
+        return jdbc.queryForList("SELECT seller_order_id FROM seller_order WHERE order_id=? ORDER BY seller_order_id",
+                Long.class, orderId);
+    }
+
+    public CustomerPayment customerPayment(long id) {
+        var found = jdbc.query("SELECT * FROM customer_payment WHERE customer_payment_id=?", customerPayments, id);
+        if (found.isEmpty()) { throw new FinanceException(HttpStatus.NOT_FOUND, "PAYMENT_NOT_FOUND"); }
+        return found.getFirst();
+    }
+
+    public List<CustomerPayment> customerPayments(long orderId) {
+        return jdbc.query("SELECT * FROM customer_payment WHERE customer_order_id=? ORDER BY customer_payment_id DESC",
+                customerPayments, orderId);
+    }
+
+    public List<CustomerPayment> customerPaymentByCode(long code) {
+        return jdbc.query("SELECT * FROM customer_payment WHERE order_code=?", customerPayments, code);
+    }
+
+    public List<CustomerPaymentItem> customerPaymentItems(long id) {
+        return jdbc.query("""
+                SELECT i.payment_id,p.seller_order_id,i.amount,s.seller_order_no
+                FROM customer_payment_item i JOIN payment p ON p.payment_id=i.payment_id
+                JOIN seller_order s ON s.seller_order_id=p.seller_order_id
+                WHERE i.customer_payment_id=? ORDER BY p.seller_order_id
+                """, (rs, n) -> new CustomerPaymentItem(rs.getLong("payment_id"),
+                        rs.getLong("seller_order_id"), rs.getLong("amount"), rs.getString("seller_order_no")), id);
+    }
+
+    public boolean activeCustomerPayment(long sellerOrderId) {
+        return count("""
+                SELECT COUNT(*) FROM customer_payment_item i
+                JOIN customer_payment c ON c.customer_payment_id=i.customer_payment_id
+                JOIN payment p ON p.payment_id=i.payment_id
+                WHERE p.seller_order_id=? AND c.status IN ('CREATING','RECONCILING','PENDING','CANCELLING')
+                """, sellerOrderId) > 0;
     }
 
     public List<FinanceResponse.Case> cancellations(long orderId) {

@@ -6,9 +6,12 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import mss.mooncake.commerce.dto.response.FinanceResponse;
+import mss.mooncake.commerce.dto.response.CustomerPaymentResponse;
 import mss.mooncake.commerce.service.FinanceService;
+import mss.mooncake.commerce.service.CustomerPaymentService;
 import mss.mooncake.commerce.service.FinanceActorResolver;
 import org.springframework.security.core.Authentication;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -33,10 +36,17 @@ public class FinanceController {
     public record Evidence(@NotBlank @Size(max = 1000) @Pattern(regexp = "https://[^\\s]+") String evidenceUrl) { }
     private final FinanceService service;
     private final FinanceActorResolver actors;
+    private final CustomerPaymentService customerPayments;
 
-    public FinanceController(FinanceService service, FinanceActorResolver actors) {
+    @Autowired
+    public FinanceController(FinanceService service, FinanceActorResolver actors, CustomerPaymentService customerPayments) {
         this.service = service;
         this.actors = actors;
+        this.customerPayments = customerPayments;
+    }
+
+    public FinanceController(FinanceService service, FinanceActorResolver actors) {
+        this(service, actors, null);
     }
 
     private FinanceService.Actor actor(Authentication authentication) {
@@ -46,6 +56,27 @@ public class FinanceController {
     @GetMapping("/orders/{orderId}")
     public FinanceResponse summary(@PathVariable long orderId, Authentication authentication) {
         return service.summary(orderId, actor(authentication));
+    }
+
+    @GetMapping("/customer-orders/{orderId}")
+    public CustomerPaymentResponse customerSummary(@PathVariable long orderId, Authentication authentication) {
+        return customerPayments.summary(orderId, actor(authentication));
+    }
+
+    @PostMapping("/customer-orders/{orderId}/initiate")
+    public CustomerPaymentResponse initiateCustomer(@PathVariable long orderId,
+            @RequestHeader("Idempotency-Key") String key, Authentication authentication) {
+        return customerPayments.initiate(orderId, key, actor(authentication));
+    }
+
+    @PostMapping("/customer-orders/{orderId}/reconcile")
+    public CustomerPaymentResponse reconcileCustomer(@PathVariable long orderId, Authentication authentication) {
+        return customerPayments.reconcile(orderId, actor(authentication), false);
+    }
+
+    @PostMapping("/customer-orders/{orderId}/cancel-link")
+    public CustomerPaymentResponse cancelCustomerLink(@PathVariable long orderId, Authentication authentication) {
+        return customerPayments.reconcile(orderId, actor(authentication), true);
     }
 
     @PostMapping("/{paymentId}/initiate")
