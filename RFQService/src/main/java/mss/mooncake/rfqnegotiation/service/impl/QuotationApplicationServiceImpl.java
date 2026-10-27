@@ -22,6 +22,7 @@ import mss.mooncake.rfqnegotiation.exception.ApiException;
 import mss.mooncake.rfqnegotiation.repository.*;
 import mss.mooncake.rfqnegotiation.security.ActorContext;
 import mss.mooncake.rfqnegotiation.service.QuotationApplicationService;
+import mss.mooncake.rfqnegotiation.util.DeliveryDateRule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
@@ -112,6 +113,9 @@ public class QuotationApplicationServiceImpl implements QuotationApplicationServ
     private CreateOrderFromAcceptedQuotationRequest makeSnapshot(RfqEntity rfq, QuotationEntity q, SnapshotData data, String key, LocalDateTime now) {
             var address=data.address(); var store=data.store(); var supplier=data.supplier();
             if (q.getProposedDeliveryDate()==null || q.getProposedDeliveryDate().isBefore(now.toLocalDate())) throw ApiException.conflict("INVALID_DELIVERY_DATE", "Ngày giao hàng không hợp lệ");
+            if (DeliveryDateRule.tooSoon(q.getDepositPercent(), q.getProposedDeliveryDate(), now)) throw ApiException.conflict("DELIVERY_TOO_SOON_FOR_REMAINING",
+                    "Ngày giao " + DeliveryDateRule.format(q.getProposedDeliveryDate()) + " quá gần để kịp thanh toán phần còn lại (hạn 3 ngày trước ngày giao). "
+                    + "Hãy nhắn nhà cung cấp gửi phiên bản mới với ngày giao từ " + DeliveryDateRule.format(DeliveryDateRule.earliestWithRemaining(now)) + " trở đi.");
             var lines=items.findByQuotationIdOrderByIdAsc(q.getId()).stream().map(i -> new CreateOrderFromAcceptedQuotationRequest.Item(
                     i.getVariantIdRef(),null,i.getItemNameSnapshot(),null,i.getSkuSnapshot(),null,
                     i.getQuantity(),i.getUnitPrice(),i.getDiscountAmount(),i.getSubtotal())).toList();
