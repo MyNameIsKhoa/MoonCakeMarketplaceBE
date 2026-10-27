@@ -1,10 +1,7 @@
 package mss.mooncake.commerce.service.impl;
 
-import feign.FeignException;
 import java.time.LocalDateTime;
 import java.util.List;
-import mss.mooncake.commerce.client.IdentityServiceClient;
-import mss.mooncake.commerce.client.dto.identity.SupplierSummaryResponse;
 import mss.mooncake.commerce.dto.request.CreateReviewRequest;
 import mss.mooncake.commerce.dto.request.CreateShipmentRequest;
 import mss.mooncake.commerce.dto.request.UpdateShipmentRequest;
@@ -39,29 +36,28 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
     private final SellerOrderRepository sellerOrderRepository;
     private final CustomerOrderRepository customerOrderRepository;
     private final OrderItemRepository orderItemRepository;
-    private final IdentityServiceClient identity;
 
     public FulfillmentApplicationServiceImpl(
             ShipmentRepository shipmentRepository,
             ReviewRepository reviewRepository,
             SellerOrderRepository sellerOrderRepository,
             CustomerOrderRepository customerOrderRepository,
-            OrderItemRepository orderItemRepository,
-            IdentityServiceClient identity) {
+            OrderItemRepository orderItemRepository) {
         this.shipmentRepository = shipmentRepository;
         this.reviewRepository = reviewRepository;
         this.sellerOrderRepository = sellerOrderRepository;
         this.customerOrderRepository = customerOrderRepository;
         this.orderItemRepository = orderItemRepository;
-        this.identity = identity;
     }
 
     @Override
     @Transactional
-    public ShipmentResponse createShipment(CreateShipmentRequest request, Long userId) {
+    public ShipmentResponse createShipment(CreateShipmentRequest request, Long supplierId) {
         SellerOrderEntity sellerOrder = findSellerOrderOrThrow(request.sellerOrderId());
 
-        requireSupplierOwner(sellerOrder, userId, "You do not have permission to manage shipments for this seller order");
+        if (supplierId != null && !sellerOrder.getSupplierIdRef().equals(supplierId)) {
+            throw new ForbiddenException("You do not have permission to manage shipments for this seller order");
+        }
 
         String orderStatus = sellerOrder.getStatus();
         if (OrderStatus.CANCELLED.name().equalsIgnoreCase(orderStatus)
@@ -92,11 +88,13 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
 
     @Override
     @Transactional
-    public ShipmentResponse updateShipment(Long shipmentId, UpdateShipmentRequest request, Long userId) {
+    public ShipmentResponse updateShipment(Long shipmentId, UpdateShipmentRequest request, Long supplierId) {
         ShipmentEntity shipment = findShipmentOrThrow(shipmentId);
         SellerOrderEntity sellerOrder = findSellerOrderOrThrow(shipment.getSellerOrderId());
 
-        requireSupplierOwner(sellerOrder, userId, "You do not have permission to update this shipment");
+        if (supplierId != null && !sellerOrder.getSupplierIdRef().equals(supplierId)) {
+            throw new ForbiddenException("You do not have permission to update this shipment");
+        }
 
         if (shipment.getStatus() == ShipmentStatus.DELIVERED) {
             throw new ConflictException("Cannot modify a shipment that has already been delivered");
@@ -121,11 +119,13 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
 
     @Override
     @Transactional
-    public ShipmentResponse markAsShipped(Long shipmentId, Long userId) {
+    public ShipmentResponse markAsShipped(Long shipmentId, Long supplierId) {
         ShipmentEntity shipment = findShipmentOrThrow(shipmentId);
         SellerOrderEntity sellerOrder = findSellerOrderOrThrow(shipment.getSellerOrderId());
 
-        requireSupplierOwner(sellerOrder, userId, "You do not have permission to ship this order");
+        if (supplierId != null && !sellerOrder.getSupplierIdRef().equals(supplierId)) {
+            throw new ForbiddenException("You do not have permission to ship this order");
+        }
 
         if (shipment.getStatus() == ShipmentStatus.DELIVERED) {
             throw new ConflictException("Shipment is already delivered");
@@ -143,12 +143,12 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
 
     @Override
     @Transactional
-    public ShipmentResponse markAsDelivered(Long shipmentId, Long userId, boolean isAdmin) {
+    public ShipmentResponse markAsDelivered(Long shipmentId, Long actorId, boolean isAdmin) {
         ShipmentEntity shipment = findShipmentOrThrow(shipmentId);
         SellerOrderEntity sellerOrder = findSellerOrderOrThrow(shipment.getSellerOrderId());
 
-        if (!isAdmin) {
-            requireSupplierOwner(sellerOrder, userId, "You do not have permission to confirm delivery for this shipment");
+        if (!isAdmin && actorId != null && !sellerOrder.getSupplierIdRef().equals(actorId)) {
+            throw new ForbiddenException("You do not have permission to confirm delivery for this shipment");
         }
 
         if (shipment.getStatus() == ShipmentStatus.DELIVERED) {
@@ -167,9 +167,9 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
 
     @Override
     @Transactional(readOnly = true)
-    public List<ShipmentResponse> getShipmentsBySellerOrder(Long sellerOrderId, Long userId, Long customerId, boolean isAdmin) {
+    public List<ShipmentResponse> getShipmentsBySellerOrder(Long sellerOrderId, Long currentUserId, boolean isCustomer, boolean isAdmin) {
         SellerOrderEntity sellerOrder = findSellerOrderOrThrow(sellerOrderId);
-        verifyReadPermission(sellerOrder, userId, customerId, isAdmin);
+        verifyReadPermission(sellerOrder, currentUserId, isCustomer, isAdmin);
 
         return shipmentRepository.findBySellerOrderId(sellerOrderId).stream()
                 .map(this::mapToShipmentResponse)
@@ -178,10 +178,10 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
 
     @Override
     @Transactional(readOnly = true)
-    public ShipmentResponse getShipmentById(Long shipmentId, Long userId, Long customerId, boolean isAdmin) {
+    public ShipmentResponse getShipmentById(Long shipmentId, Long currentUserId, boolean isCustomer, boolean isAdmin) {
         ShipmentEntity shipment = findShipmentOrThrow(shipmentId);
         SellerOrderEntity sellerOrder = findSellerOrderOrThrow(shipment.getSellerOrderId());
-        verifyReadPermission(sellerOrder, userId, customerId, isAdmin);
+        verifyReadPermission(sellerOrder, currentUserId, isCustomer, isAdmin);
 
         return mapToShipmentResponse(shipment);
     }
@@ -325,39 +325,20 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
                 .orElseThrow(() -> new ResourceNotFoundException("Shipment not found with ID: " + shipmentId));
     }
 
-    // Every JWT carries ROLE_CUSTOMER, so the buyer check cannot depend on roles: a supplier is also a customer.
-    private void verifyReadPermission(SellerOrderEntity sellerOrder, Long userId, Long customerId, boolean isAdmin) {
-        if (isAdmin) {
+    private void verifyReadPermission(SellerOrderEntity sellerOrder, Long currentUserId, boolean isCustomer, boolean isAdmin) {
+        if (isAdmin || currentUserId == null) {
             return;
         }
-        if (customerId != null) {
+        if (isCustomer) {
             CustomerOrderEntity customerOrder = customerOrderRepository.findById(sellerOrder.getOrderId())
                     .orElseThrow(() -> new ResourceNotFoundException("Customer order not found with ID: " + sellerOrder.getOrderId()));
-            if (customerOrder.getCustomerIdRef().equals(customerId)) {
-                return;
+            if (!customerOrder.getCustomerIdRef().equals(currentUserId)) {
+                throw new ForbiddenException("You do not have access to view this shipment");
             }
-        }
-        requireSupplierOwner(sellerOrder, userId, "You do not have access to view this shipment");
-    }
-
-    // Seller orders store the Identity supplier profile id, not the JWT user id.
-    private void requireSupplierOwner(SellerOrderEntity sellerOrder, Long userId, String message) {
-        Long supplierId = supplierIdOf(userId);
-        if (supplierId == null || !supplierId.equals(sellerOrder.getSupplierIdRef())) {
-            throw new ForbiddenException(message);
-        }
-    }
-
-    private Long supplierIdOf(Long userId) {
-        if (userId == null) {
-            return null;
-        }
-        try {
-            SupplierSummaryResponse supplier = identity.getSupplierSummaryByUser(userId);
-            return supplier != null && userId.equals(supplier.userId()) ? supplier.supplierId() : null;
-        } catch (FeignException.NotFound missing) {
-            // No supplier profile: the user owns no seller order.
-            return null;
+        } else {
+            if (!sellerOrder.getSupplierIdRef().equals(currentUserId)) {
+                throw new ForbiddenException("You do not have access to view this shipment");
+            }
         }
     }
 
