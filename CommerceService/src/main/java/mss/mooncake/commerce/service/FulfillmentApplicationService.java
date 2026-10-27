@@ -11,18 +11,17 @@ import mss.mooncake.commerce.dto.response.ShipmentResponse;
 public interface FulfillmentApplicationService {
 
     // --- Shipment Operations ---
-    // userId is the JWT user id; the supplier owner is resolved through Identity (seller orders store supplierId).
-    ShipmentResponse createShipment(CreateShipmentRequest request, Long userId);
+    ShipmentResponse createShipment(CreateShipmentRequest request, Long supplierId);
 
-    ShipmentResponse updateShipment(Long shipmentId, UpdateShipmentRequest request, Long userId);
+    ShipmentResponse updateShipment(Long shipmentId, UpdateShipmentRequest request, Long supplierId);
 
-    ShipmentResponse markAsShipped(Long shipmentId, Long userId);
+    ShipmentResponse markAsShipped(Long shipmentId, Long supplierId);
 
-    ShipmentResponse markAsDelivered(Long shipmentId, Long userId, boolean isAdmin);
+    ShipmentResponse markAsDelivered(Long shipmentId, Long actorId, boolean isAdmin);
 
-    List<ShipmentResponse> getShipmentsBySellerOrder(Long sellerOrderId, Long userId, Long customerId, boolean isAdmin);
+    List<ShipmentResponse> getShipmentsBySellerOrder(Long sellerOrderId, Long currentUserId, boolean isCustomer, boolean isAdmin);
 
-    ShipmentResponse getShipmentById(Long shipmentId, Long userId, Long customerId, boolean isAdmin);
+    ShipmentResponse getShipmentById(Long shipmentId, Long currentUserId, boolean isCustomer, boolean isAdmin);
 
     // --- Order Acceptance Operations ---
     SellerOrderAcceptanceResponse acceptSellerOrder(Long sellerOrderId, Long customerId);

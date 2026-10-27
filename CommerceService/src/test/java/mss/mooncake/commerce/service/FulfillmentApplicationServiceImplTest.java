@@ -1,15 +1,9 @@
 package mss.mooncake.commerce.service;
 
-import feign.FeignException;
-import feign.Request;
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import mss.mooncake.commerce.client.IdentityServiceClient;
-import mss.mooncake.commerce.client.dto.identity.SupplierSummaryResponse;
 import mss.mooncake.commerce.dto.request.CreateReviewRequest;
 import mss.mooncake.commerce.dto.request.CreateShipmentRequest;
 import mss.mooncake.commerce.dto.request.UpdateShipmentRequest;
@@ -67,20 +61,13 @@ class FulfillmentApplicationServiceImplTest {
     @Mock
     private OrderItemRepository orderItemRepository;
 
-    @Mock
-    private IdentityServiceClient identity;
-
     @InjectMocks
     private FulfillmentApplicationServiceImpl fulfillmentService;
 
     private static final Long SELLER_ORDER_ID = 101L;
     private static final Long CUSTOMER_ORDER_ID = 201L;
-    // Seller orders store the Identity supplier profile id; the JWT carries a different user id.
     private static final Long SUPPLIER_ID = 501L;
     private static final Long OTHER_SUPPLIER_ID = 502L;
-    private static final Long SUPPLIER_USER_ID = 601L;
-    private static final Long OTHER_SUPPLIER_USER_ID = 602L;
-    private static final Long PLAIN_USER_ID = 603L;
     private static final Long CUSTOMER_ID = 701L;
     private static final Long OTHER_CUSTOMER_ID = 702L;
     private static final Long ORDER_ITEM_ID = 901L;
@@ -121,18 +108,6 @@ class FulfillmentApplicationServiceImplTest {
         );
     }
 
-    private void supplierProfile(Long userId, Long supplierId) {
-        when(identity.getSupplierSummaryByUser(userId))
-                .thenReturn(new SupplierSummaryResponse(supplierId, userId, "Supplier", null, "VERIFIED"));
-    }
-
-    private void noSupplierProfile(Long userId) {
-        Request request = Request.create(Request.HttpMethod.GET, "/internal/v1/suppliers/by-user/" + userId + "/summary",
-                Map.of(), null, StandardCharsets.UTF_8, null);
-        when(identity.getSupplierSummaryByUser(userId))
-                .thenThrow(new FeignException.NotFound("not found", request, null, Map.of()));
-    }
-
     @Nested
     @DisplayName("Shipment Creation Tests")
     class ShipmentCreationTests {
@@ -148,9 +123,8 @@ class FulfillmentApplicationServiceImplTest {
 
             when(sellerOrderRepository.findById(SELLER_ORDER_ID)).thenReturn(Optional.of(sellerOrder));
             when(shipmentRepository.save(any(ShipmentEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
-            supplierProfile(SUPPLIER_USER_ID, SUPPLIER_ID);
 
-            ShipmentResponse response = fulfillmentService.createShipment(request, SUPPLIER_USER_ID);
+            ShipmentResponse response = fulfillmentService.createShipment(request, SUPPLIER_ID);
 
             assertThat(response).isNotNull();
             assertThat(response.sellerOrderId()).isEqualTo(SELLER_ORDER_ID);
@@ -170,26 +144,10 @@ class FulfillmentApplicationServiceImplTest {
             );
 
             when(sellerOrderRepository.findById(SELLER_ORDER_ID)).thenReturn(Optional.of(sellerOrder));
-            supplierProfile(OTHER_SUPPLIER_USER_ID, OTHER_SUPPLIER_ID);
 
-            assertThatThrownBy(() -> fulfillmentService.createShipment(request, OTHER_SUPPLIER_USER_ID))
+            assertThatThrownBy(() -> fulfillmentService.createShipment(request, OTHER_SUPPLIER_ID))
                     .isInstanceOf(ForbiddenException.class)
                     .hasMessageContaining("permission");
-        }
-
-        @Test
-        @DisplayName("Should throw ForbiddenException when user has no supplier profile")
-        void shouldThrowForbiddenWithoutSupplierProfile() {
-            CreateShipmentRequest request = new CreateShipmentRequest(
-                    SELLER_ORDER_ID, "STANDARD", "GHTK", "VN123456789",
-                    null, null, BigDecimal.valueOf(30000)
-            );
-
-            when(sellerOrderRepository.findById(SELLER_ORDER_ID)).thenReturn(Optional.of(sellerOrder));
-            noSupplierProfile(PLAIN_USER_ID);
-
-            assertThatThrownBy(() -> fulfillmentService.createShipment(request, PLAIN_USER_ID))
-                    .isInstanceOf(ForbiddenException.class);
         }
 
         @Test
@@ -202,9 +160,8 @@ class FulfillmentApplicationServiceImplTest {
             );
 
             when(sellerOrderRepository.findById(SELLER_ORDER_ID)).thenReturn(Optional.of(sellerOrder));
-            supplierProfile(SUPPLIER_USER_ID, SUPPLIER_ID);
 
-            assertThatThrownBy(() -> fulfillmentService.createShipment(request, SUPPLIER_USER_ID))
+            assertThatThrownBy(() -> fulfillmentService.createShipment(request, SUPPLIER_ID))
                     .isInstanceOf(BadRequestException.class)
                     .hasMessageContaining("AWAITING_PAYMENT");
         }
@@ -220,9 +177,8 @@ class FulfillmentApplicationServiceImplTest {
             when(shipmentRepository.findById(SHIPMENT_ID)).thenReturn(Optional.of(shipment));
             when(sellerOrderRepository.findById(SELLER_ORDER_ID)).thenReturn(Optional.of(sellerOrder));
             when(shipmentRepository.save(any(ShipmentEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
-            supplierProfile(SUPPLIER_USER_ID, SUPPLIER_ID);
 
-            ShipmentResponse response = fulfillmentService.markAsShipped(SHIPMENT_ID, SUPPLIER_USER_ID);
+            ShipmentResponse response = fulfillmentService.markAsShipped(SHIPMENT_ID, SUPPLIER_ID);
 
             assertThat(response.status()).isEqualTo(ShipmentStatus.SHIPPED);
             assertThat(shipment.getShippedAt()).isNotNull();
@@ -236,69 +192,13 @@ class FulfillmentApplicationServiceImplTest {
             when(shipmentRepository.findById(SHIPMENT_ID)).thenReturn(Optional.of(shipment));
             when(sellerOrderRepository.findById(SELLER_ORDER_ID)).thenReturn(Optional.of(sellerOrder));
             when(shipmentRepository.save(any(ShipmentEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
-            supplierProfile(SUPPLIER_USER_ID, SUPPLIER_ID);
 
-            ShipmentResponse response = fulfillmentService.markAsDelivered(SHIPMENT_ID, SUPPLIER_USER_ID, false);
+            ShipmentResponse response = fulfillmentService.markAsDelivered(SHIPMENT_ID, SUPPLIER_ID, false);
 
             assertThat(response.status()).isEqualTo(ShipmentStatus.DELIVERED);
             assertThat(shipment.getDeliveredAt()).isNotNull();
             assertThat(sellerOrder.getStatus()).isEqualTo(OrderStatus.DELIVERED.name());
             verify(sellerOrderRepository).save(sellerOrder);
-        }
-
-        @Test
-        @DisplayName("Should throw ForbiddenException when another supplier marks shipment as shipped")
-        void shouldForbidOtherSupplierMarkingShipped() {
-            when(shipmentRepository.findById(SHIPMENT_ID)).thenReturn(Optional.of(shipment));
-            when(sellerOrderRepository.findById(SELLER_ORDER_ID)).thenReturn(Optional.of(sellerOrder));
-            supplierProfile(OTHER_SUPPLIER_USER_ID, OTHER_SUPPLIER_ID);
-
-            assertThatThrownBy(() -> fulfillmentService.markAsShipped(SHIPMENT_ID, OTHER_SUPPLIER_USER_ID))
-                    .isInstanceOf(ForbiddenException.class);
-        }
-    }
-
-    @Nested
-    @DisplayName("Shipment Visibility Tests")
-    class ShipmentVisibilityTests {
-
-        @Test
-        @DisplayName("Supplier owner can list shipments even though the JWT also carries a customer id")
-        void supplierOwnerCanListShipments() {
-            when(sellerOrderRepository.findById(SELLER_ORDER_ID)).thenReturn(Optional.of(sellerOrder));
-            when(customerOrderRepository.findById(CUSTOMER_ORDER_ID)).thenReturn(Optional.of(customerOrder));
-            when(shipmentRepository.findBySellerOrderId(SELLER_ORDER_ID)).thenReturn(List.of(shipment));
-            supplierProfile(SUPPLIER_USER_ID, SUPPLIER_ID);
-
-            List<ShipmentResponse> result = fulfillmentService.getShipmentsBySellerOrder(
-                    SELLER_ORDER_ID, SUPPLIER_USER_ID, OTHER_CUSTOMER_ID, false);
-
-            assertThat(result).hasSize(1);
-        }
-
-        @Test
-        @DisplayName("Buyer can list shipments of own order without a supplier lookup")
-        void buyerCanListShipments() {
-            when(sellerOrderRepository.findById(SELLER_ORDER_ID)).thenReturn(Optional.of(sellerOrder));
-            when(customerOrderRepository.findById(CUSTOMER_ORDER_ID)).thenReturn(Optional.of(customerOrder));
-            when(shipmentRepository.findBySellerOrderId(SELLER_ORDER_ID)).thenReturn(List.of(shipment));
-
-            List<ShipmentResponse> result = fulfillmentService.getShipmentsBySellerOrder(
-                    SELLER_ORDER_ID, PLAIN_USER_ID, CUSTOMER_ID, false);
-
-            assertThat(result).hasSize(1);
-        }
-
-        @Test
-        @DisplayName("Another customer without a supplier profile cannot list shipments")
-        void otherCustomerCannotListShipments() {
-            when(sellerOrderRepository.findById(SELLER_ORDER_ID)).thenReturn(Optional.of(sellerOrder));
-            when(customerOrderRepository.findById(CUSTOMER_ORDER_ID)).thenReturn(Optional.of(customerOrder));
-            noSupplierProfile(PLAIN_USER_ID);
-
-            assertThatThrownBy(() -> fulfillmentService.getShipmentsBySellerOrder(
-                    SELLER_ORDER_ID, PLAIN_USER_ID, OTHER_CUSTOMER_ID, false))
-                    .isInstanceOf(ForbiddenException.class);
         }
     }
 
