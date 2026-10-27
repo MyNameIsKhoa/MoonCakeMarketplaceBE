@@ -66,6 +66,7 @@ class QuotationManagementServiceTest {
     private RfqEntity rfq;
     private final OffsetDateTime validity = OffsetDateTime.now(ZoneOffset.UTC).plusDays(2).withNano(0);
     private final LocalDate deliveryDate = LocalDate.now(ZoneOffset.UTC).plusDays(7);
+    private final LocalDate todayInVietnam = LocalDate.now(java.time.ZoneId.of("Asia/Ho_Chi_Minh"));
 
     @BeforeEach
     void setUp() {
@@ -290,6 +291,34 @@ class QuotationManagementServiceTest {
         assertThat(quotation.getStatus()).isEqualTo(QuotationStatus.ACCEPTED);
     }
 
+    @Test
+    void depositQuotationNeedsDeliveryAtLeastFourDaysAheadInVietnam() {
+        assertCode(() -> service.create(1L, "create-1", request("30.00", todayInVietnam.plusDays(3))),
+                "DELIVERY_TOO_SOON_FOR_REMAINING");
+        verify(quotations, never()).saveAndFlush(any());
+
+        assertThat(service.create(1L, "create-2", request("30.00", todayInVietnam.plusDays(4))).status())
+                .isEqualTo(QuotationStatus.SUBMITTED);
+    }
+
+    @Test
+    void quotationWithoutRemainingBalanceMayDeliverSoon() {
+        assertThat(service.create(1L, "create-0", request("0.00", todayInVietnam.plusDays(1))).status())
+                .isEqualTo(QuotationStatus.SUBMITTED);
+        assertThat(service.create(1L, "create-100", request("100.00", todayInVietnam.plusDays(1))).status())
+                .isEqualTo(QuotationStatus.SUBMITTED);
+    }
+
+    @Test
+    void depositRevisionNeedsDeliveryAtLeastFourDaysAhead() {
+        prepareRevision();
+
+        assertCode(() -> service.revise(90L, "revision-1", new ReviseQuotationRequest(3, new BigDecimal("30.00"),
+                validity, 3, todayInVietnam.plusDays(2), "EXPRESS", new BigDecimal("10000.00"), "Chuyển khoản",
+                List.of(customItem("100.00", "0")))), "DELIVERY_TOO_SOON_FOR_REMAINING");
+        verify(quotations, never()).saveAndFlush(any());
+    }
+
     private QuotationEntity prepareRevision() {
         QuotationEntity previous = previousQuotation();
         when(quotations.findById(90L)).thenReturn(Optional.of(previous));
@@ -319,6 +348,11 @@ class QuotationManagementServiceTest {
     private CreateQuotationRequest request(QuotationItemRequest item) {
         return new CreateQuotationRequest(30L, new BigDecimal("30.00"), validity, 3,
                 deliveryDate, "EXPRESS", new BigDecimal("10000.00"), "Chuyển khoản", List.of(item));
+    }
+
+    private CreateQuotationRequest request(String depositPercent, LocalDate delivery) {
+        return new CreateQuotationRequest(30L, new BigDecimal(depositPercent), validity, 3,
+                delivery, "EXPRESS", new BigDecimal("10000.00"), "Chuyển khoản", List.of(customItem("100.00", "0")));
     }
 
     private QuotationItemRequest customItem(String price, String discount) {

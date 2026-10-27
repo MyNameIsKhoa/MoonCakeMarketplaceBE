@@ -112,6 +112,14 @@ class QuotationAcceptanceIntegrationTest {
         assertThat(conversions.count()).isZero();
         verifyNoInteractions(commerce);
     }
+    @Test void rejectsDepositOrderWhoseRemainingDeadlineWouldAlreadyBeOver() {
+        var q=quotations.findById(id).orElseThrow();
+        q.setProposedDeliveryDate(LocalDate.now(java.time.ZoneId.of("Asia/Ho_Chi_Minh")).plusDays(3)); quotations.save(q);
+        assertThatThrownBy(()->service.acceptQuotation(id,new AcceptQuotationRequest(1,301L),"delivery-too-soon"))
+                .isInstanceOf(ApiException.class).extracting("code").isEqualTo("DELIVERY_TOO_SOON_FOR_REMAINING");
+        assertThat(conversions.count()).isZero();
+        verifyNoInteractions(commerce);
+    }
     @Test void rejectsAcceptanceAfterRfqCancellation() {
         var rfq=rfqs.findById(quotations.findById(id).orElseThrow().getRfqId()).orElseThrow();
         rfq.setStatus(RfqStatus.CANCELLED); rfqs.save(rfq);

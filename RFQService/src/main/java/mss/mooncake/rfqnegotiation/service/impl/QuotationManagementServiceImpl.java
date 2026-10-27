@@ -45,6 +45,7 @@ import mss.mooncake.rfqnegotiation.repository.RfqRepository;
 import mss.mooncake.rfqnegotiation.repository.RfqTargetStoreRepository;
 import mss.mooncake.rfqnegotiation.security.ActorContext;
 import mss.mooncake.rfqnegotiation.service.QuotationManagementService;
+import mss.mooncake.rfqnegotiation.util.DeliveryDateRule;
 import mss.mooncake.rfqnegotiation.util.Paging;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
@@ -361,6 +362,11 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
         }
         if (quotation.getProposedDeliveryDate().isBefore(LocalDate.now(ZoneOffset.UTC))) {
             throw ApiException.badRequest("INVALID_DELIVERY_DATE", "Ngày giao dự kiến không được ở quá khứ");
+        }
+        if (DeliveryDateRule.tooSoon(quotation.getDepositPercent(), quotation.getProposedDeliveryDate(), now)) {
+            throw ApiException.badRequest("DELIVERY_TOO_SOON_FOR_REMAINING", "Báo giá có tiền cọc cần ngày giao từ "
+                    + DeliveryDateRule.format(DeliveryDateRule.earliestWithRemaining(now)) + " trở đi: phần còn lại "
+                    + "phải thanh toán trước ngày giao 3 ngày, nên ngày giao cần cách hôm nay ít nhất 4 ngày.");
         }
         quotation.setRfqId(rfqId);
         quotation.setSupplierIdRef(supplierId);
