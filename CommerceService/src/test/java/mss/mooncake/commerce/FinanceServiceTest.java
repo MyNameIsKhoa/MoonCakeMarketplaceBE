@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -142,6 +143,24 @@ class FinanceServiceTest {
         assertThat(repository.cancellations(1).getFirst().status()).isEqualTo("APPROVED");
         assertThat(repository.paid(1)).isZero();
         verify(provider, times(1)).cancel(link.orderCode());
+    }
+
+    @Test
+    void cancellingUnpaidRetailOrderDoesNotCallPayOsForExpiredLink() {
+        var jdbc = new JdbcTemplate(datasource);
+        jdbc.update("UPDATE seller_order SET status='AWAITING_PAYMENT' WHERE seller_order_id=1");
+        context(true, null, 1, null);
+        var link = customerPayments.initiate(1, key(), BUYER).payment();
+        jdbc.update("UPDATE customer_payment SET expires_at=? WHERE customer_payment_id=?",
+                FinanceRepository.utc(Instant.now().minusSeconds(60)), link.id());
+
+        customerPayments.cancelUnpaidOrder(1, "Đổi ý trước khi thanh toán", BUYER);
+
+        assertThat(repository.count("SELECT COUNT(*) FROM customer_order WHERE order_id=1 AND status='CANCELLED'"))
+                .isEqualTo(1);
+        assertThat(repository.count("SELECT COUNT(*) FROM customer_payment " +
+                "WHERE customer_payment_id=? AND status='EXPIRED'", link.id())).isEqualTo(1);
+        verify(provider, never()).cancel(anyLong());
     }
 
     @Test
