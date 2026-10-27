@@ -10,5 +10,7 @@ public record CreateStoreRequest(
 
         @Size(max = 500, message = "URL banner tối đa 500 ký tự") String bannerUrl,
 
-        @Size(max = 100, message = "Theme key tối đa 100 ký tự") String themeKey) {
+        @Size(max = 100, message = "Theme key tối đa 100 ký tự") String themeKey,
+
+        @Size(max = 2000, message = "Mô tả store tối đa 2000 ký tự") String description) {
 }

@@ -64,7 +64,7 @@ Upstream URL override: `IDENTITY_SERVICE_URL`, `CATALOG_SERVICE_URL`, `COMMERCE_
 
 Identity phát access token JWT ký HS256. Gateway và cả bốn business service xác minh chữ ký, `iss`, `aud` và `exp`; API nghiệp vụ yêu cầu Bearer token. Token dùng chung cấu hình `JWT_SECRET` (tối thiểu 32 byte), `JWT_ISSUER` (mặc định `mooncake-identity`) và `JWT_AUDIENCE` (mặc định `mooncake-api`). Không có secret mặc định trong runtime; đặt các biến này trong môi trường chạy hoặc `.env` không commit trước khi chạy Docker Compose.
 
-Token hiện có thời hạn 24 giờ và chứa `userId`, `customerId`, `roles`; Identity phát `ROLE_CUSTOMER` sau khi đăng nhập thành công. HS256 cần cùng secret tại các app để kiểm tra token; đây là lựa chọn MVP, cần giữ secret ngoài source control và thay secret khi bị lộ.
+Token hiện có thời hạn 24 giờ và chứa `userId`, `customerId`, `roles`; Identity phát `ROLE_CUSTOMER` sau khi đăng nhập thành công, thêm `ROLE_SUPPLIER` nếu supplier profile đang `VERIFIED` và `ROLE_ADMIN` nếu userId nằm trong `ADMIN_USER_IDS`. Role chốt lúc phát token: supplier vừa được duyệt phải đăng nhập lại; service vẫn kiểm tra trạng thái `VERIFIED` thật khi thao tác dữ liệu supplier. HS256 cần cùng secret tại các app để kiểm tra token; đây là lựa chọn MVP, cần giữ secret ngoài source control và thay secret khi bị lộ.
 
 PowerShell local có thể tạo secret ngẫu nhiên cho phiên hiện tại bằng:
 
@@ -95,6 +95,32 @@ Supplier onboarding bắt đầu ở `PENDING`. Admin xem hồ sơ bằng `GET /
 Mỗi business service có datasource SQL Server và Flyway location riêng. V1 Flyway migration hiện đã được đồng bộ theo bộ physical SQL Server v1; các migration tiếp theo phải chỉ bổ sung/điều chỉnh sau khi team cập nhật physical source of truth.
 
 Khi chạy service trực tiếp trên máy, `application.yml` mặc định kết nối SQL Server ở `localhost:1433`; đổi bằng `*_DB_URL`, `*_DB_USERNAME`, `*_DB_PASSWORD`. Compose đầy đủ publish bốn SQL container ra host lần lượt ở `14331`–`14334`, còn trong mạng Docker mỗi SQL Server vẫn nghe `1433`. `ddl-auto` là `none`; migration là nguồn tạo schema.
+
+## Docker: toàn bộ backend (`docker-compose.yml`)
+
+Mỗi business service có SQL Server riêng (database-per-service). Với mỗi service, Compose bật theo thứ tự: `<svc>-db` (đợi healthcheck `SELECT 1`) → `<svc>-db-init` (tạo database nếu chưa có, chạy xong thì thoát) → service (Flyway tạo bảng). Service cũng tự bật các service mà nó gọi tới: Catalog → Identity; Commerce → Identity, Catalog; RFQ → Identity, Catalog, Commerce. Gateway chỉ phụ thuộc Identity và Catalog. Dữ liệu lưu trong volume `*-db-data`.
+
+`.env` ở root cần có: `JWT_SECRET`, sáu biến `*_TO_*_TOKEN`, và nên có `MSSQL_SA_PASSWORD` (mật khẩu đủ mạnh cho SQL Server; nếu thiếu sẽ dùng mật khẩu mặc định trong file).
+
+```powershell
+docker compose up -d --build                                   # toàn bộ: 5 service + 4 SQL Server (~7–8GB RAM)
+docker compose up -d --build api-gateway catalog-store-service # chỉ Gateway + Catalog + Identity + 2 SQL Server (~4GB)
+docker compose ps                                              # trạng thái; *-db-init "Exited (0)" là bình thường
+docker compose logs -f catalog-store-service                   # xem log một service
+docker compose down                                            # tắt, giữ dữ liệu; thêm -v để xóa sạch dữ liệu
+```
+
+Cổng trên máy: Gateway `8080`, Identity `8081`, Catalog `8082`, Commerce `8083`, RFQ `8084`, SQL Server `14331`–`14334` (user `sa`, mật khẩu `MSSQL_SA_PASSWORD`). Tắt các service đang chạy bằng `java -jar` trước, vì trùng cổng 8080–8084.
+
+Admin: DB mới chưa có user nào. Đăng ký tài khoản admin, lấy `userId`, rồi tạo lại container Identity với biến này (PowerShell): `$env:ADMIN_USER_IDS="1"; docker compose up -d identity-service`. `scripts/catalog-smoke.ps1 -RegisterAdmin ...` làm bước đăng ký và in ra `userId`.
+
+CORS mặc định cho phép FE ở `http://localhost:3000` và `http://localhost:5173`.
+
+## Checkout mua lẻ (TV3)
+
+Chạy Identity, Catalog, Commerce và Gateway cùng lúc (`docker compose up -d --build api-gateway commerce-service`). Flyway của Catalog áp dụng V6 (`store.shipping_fee`); store chưa có phí sẽ không thể checkout. Supplier đã `VERIFIED`, store `ACTIVE`, địa chỉ thuộc buyer và tồn kho đủ là các điều kiện bắt buộc. FE lấy giỏ/giá qua `/api/cart`, `/api/cart/pricing`, rồi gửi toàn bộ giỏ bằng `POST /api/checkout` với `addressId` và `Idempotency-Key` ổn định khi retry. Commerce giữ kho qua Catalog tối đa 15 phút, tạo order ở trạng thái chờ xác nhận kho, sau đó đăng ký khoản thanh toán PayOS FULL theo từng seller order trong cùng Commerce DB. Response thành công là **đã tạo đơn, chưa thanh toán**. Nếu timeout/503, retry cùng key; không tự gửi một đơn mới. Key được giữ 30 phút sau khi hoàn tất/thất bại.
+
+`scripts/seed-demo-catalog.mjs` đặt phí cố định demo 30.000đ/store cho dữ liệu mẫu; đây không phải mặc định áp dụng cho mọi store. Migration không tự điền phí cho store thật. Chưa có integration test SQL Server/Docker cho toàn luồng giữ kho–thanh toán; unit/context tests không thay thế được bước đó.
 
 ## Demo Docker: Gateway + Identity + JWT
 

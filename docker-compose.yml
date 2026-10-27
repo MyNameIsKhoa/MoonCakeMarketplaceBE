@@ -1,4 +1,15 @@
-x-sqlserver: &sqlserver
+# MoonCake Marketplace — toàn bộ backend: 4 business service, mỗi service một SQL Server riêng, + API Gateway.
+#
+# Mỗi service phụ thuộc chuỗi: <svc>-db (healthy) → <svc>-db-init (tạo database, chạy xong thì thoát) → service.
+# Bật một service sẽ tự bật DB của nó và các service nó gọi tới (khai báo trong depends_on).
+#
+#   docker compose up -d                                        # toàn bộ hệ thống
+#   docker compose up -d api-gateway catalog-store-service      # chỉ Gateway + Catalog + Identity (nhẹ hơn)
+#   docker compose down                                         # tắt, giữ dữ liệu (volume)
+#
+# Secret lấy từ file .env ở thư mục này (đã gitignore): JWT_SECRET, các *_TO_*_TOKEN, MSSQL_SA_PASSWORD.
+
+x-mssql: &mssql
   image: mcr.microsoft.com/mssql/server:2022-latest
   restart: unless-stopped
   environment:
@@ -7,64 +18,71 @@ x-sqlserver: &sqlserver
     SQLCMDPASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
     MSSQL_MEMORY_LIMIT_MB: ${MSSQL_MEMORY_LIMIT_MB:-1024}
   healthcheck:
-    test: ["CMD", "/opt/mssql-tools18/bin/sqlcmd", "-C", "-S", "localhost", "-U", "sa", "-b", "-Q", "SELECT 1"]
+    test: ["CMD", "/opt/mssql-tools18/bin/sqlcmd", "-C", "-S", "localhost", "-U", "sa", "-Q", "SELECT 1", "-b"]
     interval: 10s
     timeout: 5s
-    start_period: 30s
-    retries: 20
+    retries: 30
+    start_period: 20s
 
-x-db-init: &db-init
+x-mssql-init: &mssql-init
   image: mcr.microsoft.com/mssql/server:2022-latest
-  restart: "no"
+  entrypoint: ["/opt/mssql-tools18/bin/sqlcmd"]
   environment:
     SQLCMDPASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
-  volumes:
-    - ./docs/sqlserver:/scripts:ro
-  entrypoint: ["/opt/mssql-tools18/bin/sqlcmd"]
+  restart: "no"
+
+x-jwt-env: &jwt-env
+  JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a random value of at least 32 characters}
+  JWT_ISSUER: ${JWT_ISSUER:-mooncake-identity}
+  JWT_AUDIENCE: ${JWT_AUDIENCE:-mooncake-api}
 
 services:
+  # ─── Databases (cổng host 14331–14334; SQL Server cài trên máy vẫn dùng 1433) ───
+
   identity-db:
-    <<: *sqlserver
+    <<: *mssql
     ports: ["14331:1433"]
     volumes: ["identity-db-data:/var/opt/mssql"]
+  identity-db-init:
+    <<: *mssql-init
+    command: ["-C", "-S", "identity-db", "-U", "sa", "-b", "-Q", "IF DB_ID('mss_identity') IS NULL CREATE DATABASE mss_identity"]
+    depends_on: { identity-db: { condition: service_healthy } }
+
   catalog-db:
-    <<: *sqlserver
+    <<: *mssql
     ports: ["14332:1433"]
     volumes: ["catalog-db-data:/var/opt/mssql"]
+  catalog-db-init:
+    <<: *mssql-init
+    command: ["-C", "-S", "catalog-db", "-U", "sa", "-b", "-Q", "IF DB_ID('mss_catalog_store') IS NULL CREATE DATABASE mss_catalog_store"]
+    depends_on: { catalog-db: { condition: service_healthy } }
+
   commerce-db:
-    <<: *sqlserver
+    <<: *mssql
     ports: ["14333:1433"]
     volumes: ["commerce-db-data:/var/opt/mssql"]
+  commerce-db-init:
+    <<: *mssql-init
+    command: ["-C", "-S", "commerce-db", "-U", "sa", "-b", "-Q", "IF DB_ID('mss_commerce') IS NULL CREATE DATABASE mss_commerce"]
+    depends_on: { commerce-db: { condition: service_healthy } }
+
   rfq-db:
-    <<: *sqlserver
+    <<: *mssql
     ports: ["14334:1433"]
     volumes: ["rfq-db-data:/var/opt/mssql"]
-
-  identity-db-init:
-    <<: *db-init
-    command: ["-C", "-S", "identity-db", "-U", "sa", "-b", "-i", "/scripts/01_create_mss_identity.sql"]
-    depends_on: { identity-db: { condition: service_healthy } }
-  catalog-db-init:
-    <<: *db-init
-    command: ["-C", "-S", "catalog-db", "-U", "sa", "-b", "-i", "/scripts/02_create_mss_catalog_store.sql"]
-    depends_on: { catalog-db: { condition: service_healthy } }
-  commerce-db-init:
-    <<: *db-init
-    command: ["-C", "-S", "commerce-db", "-U", "sa", "-b", "-i", "/scripts/03_create_mss_commerce.sql"]
-    depends_on: { commerce-db: { condition: service_healthy } }
   rfq-db-init:
-    <<: *db-init
-    command: ["-C", "-S", "rfq-db", "-U", "sa", "-b", "-i", "/scripts/04_create_mss_rfq_negotiation.sql"]
+    <<: *mssql-init
+    command: ["-C", "-S", "rfq-db", "-U", "sa", "-b", "-Q", "IF DB_ID('mss_rfq_negotiation') IS NULL CREATE DATABASE mss_rfq_negotiation"]
     depends_on: { rfq-db: { condition: service_healthy } }
+
+  # ─── Business services ───────────────────────────────────────────────────────
 
   identity-service:
     build:
       context: .
       dockerfile: IdentityService/Dockerfile
     environment:
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a random value of at least 32 characters}
-      JWT_ISSUER: ${JWT_ISSUER:-mooncake-identity}
-      JWT_AUDIENCE: ${JWT_AUDIENCE:-mooncake-api}
+      <<: *jwt-env
       CATALOG_TO_IDENTITY_TOKEN: ${CATALOG_TO_IDENTITY_TOKEN:?Set a unique 32+ character token}
       COMMERCE_TO_IDENTITY_TOKEN: ${COMMERCE_TO_IDENTITY_TOKEN:?Set a unique 32+ character token}
       RFQ_TO_IDENTITY_TOKEN: ${RFQ_TO_IDENTITY_TOKEN:?Set a unique 32+ character token}
@@ -73,32 +91,44 @@ services:
       IDENTITY_DB_USERNAME: sa
       IDENTITY_DB_PASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
     ports: ["8081:8081"]
-    depends_on: { identity-db-init: { condition: service_completed_successfully } }
+    restart: on-failure
+    depends_on:
+      identity-db-init: { condition: service_completed_successfully }
+
   catalog-store-service:
     build:
       context: .
       dockerfile: CatalogStoreService/Dockerfile
     environment:
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a random value of at least 32 characters}
-      JWT_ISSUER: ${JWT_ISSUER:-mooncake-identity}
-      JWT_AUDIENCE: ${JWT_AUDIENCE:-mooncake-api}
+      <<: *jwt-env
       CATALOG_TO_IDENTITY_TOKEN: ${CATALOG_TO_IDENTITY_TOKEN:?Set a unique 32+ character token}
       COMMERCE_TO_CATALOG_TOKEN: ${COMMERCE_TO_CATALOG_TOKEN:?Set a unique 32+ character token}
       RFQ_TO_CATALOG_TOKEN: ${RFQ_TO_CATALOG_TOKEN:?Set a unique 32+ character token}
       CATALOG_DB_URL: jdbc:sqlserver://catalog-db:1433;databaseName=mss_catalog_store;encrypt=false;trustServerCertificate=true
       CATALOG_DB_USERNAME: sa
       CATALOG_DB_PASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
+      # Catalog gọi Identity (Feign) để xác minh supplier / chủ store.
       IDENTITY_SERVICE_URL: http://identity-service:8081
     ports: ["8082:8082"]
-    depends_on: { catalog-db-init: { condition: service_completed_successfully }, identity-service: { condition: service_started } }
+    restart: on-failure
+    depends_on:
+      catalog-db-init: { condition: service_completed_successfully }
+      identity-service: { condition: service_started }
+
   commerce-service:
     build:
       context: .
       dockerfile: CommerceService/Dockerfile
     environment:
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a random value of at least 32 characters}
-      JWT_ISSUER: ${JWT_ISSUER:-mooncake-identity}
-      JWT_AUDIENCE: ${JWT_AUDIENCE:-mooncake-api}
+      <<: *jwt-env
+      PAYOS_CLIENT_ID: ${PAYOS_CLIENT_ID:-}
+      PAYOS_API_KEY: ${PAYOS_API_KEY:-}
+      PAYOS_CHECKSUM_KEY: ${PAYOS_CHECKSUM_KEY:-}
+      PAYOS_RETURN_URL: ${PAYOS_RETURN_URL:-http://localhost:5173/?finance=return}
+      PAYOS_CANCEL_URL: ${PAYOS_CANCEL_URL:-http://localhost:5173/?finance=cancel}
+      FINANCE_FEE_BASIS: ${FINANCE_FEE_BASIS:-}
+      FINANCE_FEE_ROUNDING: ${FINANCE_FEE_ROUNDING:-}
+      FINANCE_DISPUTE_ADMIN_ENABLED: ${FINANCE_DISPUTE_ADMIN_ENABLED:-false}
       COMMERCE_TO_IDENTITY_TOKEN: ${COMMERCE_TO_IDENTITY_TOKEN:?Set a unique 32+ character token}
       COMMERCE_TO_CATALOG_TOKEN: ${COMMERCE_TO_CATALOG_TOKEN:?Set a unique 32+ character token}
       RFQ_TO_COMMERCE_TOKEN: ${RFQ_TO_COMMERCE_TOKEN:?Set a unique 32+ character token}
@@ -108,15 +138,18 @@ services:
       IDENTITY_SERVICE_URL: http://identity-service:8081
       CATALOG_SERVICE_URL: http://catalog-store-service:8082
     ports: ["8083:8083"]
-    depends_on: { commerce-db-init: { condition: service_completed_successfully }, identity-service: { condition: service_started }, catalog-store-service: { condition: service_started } }
+    restart: on-failure
+    depends_on:
+      commerce-db-init: { condition: service_completed_successfully }
+      identity-service: { condition: service_started }
+      catalog-store-service: { condition: service_started }
+
   rfq-negotiation-service:
     build:
       context: .
       dockerfile: RFQService/Dockerfile
     environment:
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a random value of at least 32 characters}
-      JWT_ISSUER: ${JWT_ISSUER:-mooncake-identity}
-      JWT_AUDIENCE: ${JWT_AUDIENCE:-mooncake-api}
+      <<: *jwt-env
       RFQ_TO_IDENTITY_TOKEN: ${RFQ_TO_IDENTITY_TOKEN:?Set a unique 32+ character token}
       RFQ_TO_CATALOG_TOKEN: ${RFQ_TO_CATALOG_TOKEN:?Set a unique 32+ character token}
       RFQ_TO_COMMERCE_TOKEN: ${RFQ_TO_COMMERCE_TOKEN:?Set a unique 32+ character token}
@@ -127,22 +160,32 @@ services:
       CATALOG_SERVICE_URL: http://catalog-store-service:8082
       COMMERCE_SERVICE_URL: http://commerce-service:8083
     ports: ["8084:8084"]
-    depends_on: { rfq-db-init: { condition: service_completed_successfully }, commerce-service: { condition: service_started } }
+    restart: on-failure
+    depends_on:
+      rfq-db-init: { condition: service_completed_successfully }
+      identity-service: { condition: service_started }
+      catalog-store-service: { condition: service_started }
+      commerce-service: { condition: service_started }
+
+  # ─── Gateway ─────────────────────────────────────────────────────────────────
+  # Chỉ chuyển tiếp request nên không cần Commerce/RFQ lúc khởi động; route tới service chưa bật sẽ trả lỗi.
+
   api-gateway:
     build:
       context: .
       dockerfile: API-Gateway/Dockerfile
     environment:
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a random value of at least 32 characters}
-      JWT_ISSUER: ${JWT_ISSUER:-mooncake-identity}
-      JWT_AUDIENCE: ${JWT_AUDIENCE:-mooncake-api}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+      <<: *jwt-env
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
       IDENTITY_SERVICE_URL: http://identity-service:8081
       CATALOG_SERVICE_URL: http://catalog-store-service:8082
       COMMERCE_SERVICE_URL: http://commerce-service:8083
       RFQ_SERVICE_URL: http://rfq-negotiation-service:8084
     ports: ["8080:8080"]
-    depends_on: { identity-service: { condition: service_started }, catalog-store-service: { condition: service_started }, commerce-service: { condition: service_started }, rfq-negotiation-service: { condition: service_started } }
+    restart: on-failure
+    depends_on:
+      identity-service: { condition: service_started }
+      catalog-store-service: { condition: service_started }
 
 volumes:
   identity-db-data:

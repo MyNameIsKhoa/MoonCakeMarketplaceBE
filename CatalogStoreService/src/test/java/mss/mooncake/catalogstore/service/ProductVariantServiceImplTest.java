@@ -8,6 +8,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import mss.mooncake.catalogstore.dto.request.CreateVariantRequest;
@@ -23,12 +27,13 @@ import mss.mooncake.catalogstore.exception.ForbiddenException;
 import mss.mooncake.catalogstore.exception.ResourceNotFoundException;
 import mss.mooncake.catalogstore.repository.ProductRepository;
 import mss.mooncake.catalogstore.repository.ProductVariantRepository;
+import mss.mooncake.catalogstore.repository.StockReservationLineRepository;
 import mss.mooncake.catalogstore.service.impl.ProductVariantServiceImpl;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -43,9 +48,18 @@ class ProductVariantServiceImplTest {
     @Mock private ProductRepository productRepository;
     @Mock private ProductVariantRepository variantRepository;
     @Mock private StoreAccessService storeAccessService;
+    @Mock private StockReservationLineRepository reservationLines;
 
-    @InjectMocks
     private ProductVariantServiceImpl variantService;
+
+    /** "Bây giờ" cố định 2026-10-22 08:00 UTC để đếm hold còn hiệu lực. */
+    private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 22, 8, 0);
+
+    @BeforeEach
+    void setUp() {
+        variantService = new ProductVariantServiceImpl(productRepository, variantRepository, storeAccessService,
+                reservationLines, Clock.fixed(Instant.parse("2026-10-22T08:00:00Z"), ZoneOffset.UTC));
+    }
 
     // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -165,6 +179,38 @@ class ProductVariantServiceImplTest {
             assertThat(response.stockQuantity()).isEqualTo(5);
             assertThat(response.status()).isEqualTo("ACTIVE");
             verify(storeAccessService).requireOwnedStore(STORE_ID, OWNER);
+        }
+
+        @Test
+        @DisplayName("giảm tồn kho xuống dưới lượng đang giữ (IN12) → 409, không ghi DB")
+        void stockBelowHeldQuantity() {
+            when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.of(product(ProductStatus.ACTIVE)));
+            when(variantRepository.findByIdAndProductId(7L, PRODUCT_ID)).thenReturn(Optional.of(variant(7L, ProductStatus.ACTIVE)));
+            when(reservationLines.heldQuantity(7L, NOW)).thenReturn(6L);
+
+            assertThatThrownBy(() -> variantService.updateVariant(PRODUCT_ID, 7L,
+                    new UpdateVariantRequest(null, null, null, null, 5, null), OWNER))
+                    .isInstanceOf(ConflictException.class)
+                    .hasMessageContaining("đang được giữ");
+            verify(variantRepository).lockByIds(List.of(7L));
+            verify(variantRepository, never()).saveAndFlush(any());
+        }
+
+        @Test
+        @DisplayName("đặt tồn kho đúng bằng lượng đang giữ → 200; không đổi tồn kho thì không đếm hold")
+        void stockEqualToHeldQuantity() {
+            ProductVariantEntity v = variant(7L, ProductStatus.ACTIVE);
+            when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.of(product(ProductStatus.ACTIVE)));
+            when(variantRepository.findByIdAndProductId(7L, PRODUCT_ID)).thenReturn(Optional.of(v));
+            when(reservationLines.heldQuantity(7L, NOW)).thenReturn(6L);
+            when(variantRepository.saveAndFlush(v)).thenReturn(v);
+
+            assertThat(variantService.updateVariant(PRODUCT_ID, 7L,
+                    new UpdateVariantRequest(null, null, null, null, 6, null), OWNER).stockQuantity()).isEqualTo(6);
+
+            variantService.updateVariant(PRODUCT_ID, 7L,
+                    new UpdateVariantRequest(null, "Tên mới", null, null, null, null), OWNER);
+            verify(reservationLines).heldQuantity(7L, NOW); // chỉ lần cập nhật có stockQuantity
         }
 
         @Test

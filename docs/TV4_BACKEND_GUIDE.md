@@ -18,14 +18,15 @@ RFQ → lưu intent PENDING → Commerce tạo đơn và khoản thanh toán
 | Nội dung | Quy tắc đã triển khai |
 |---|---|
 | Công bố | Tạo RFQ chuyển ngay thành `OPEN`; gửi báo giá chuyển ngay thành `SUBMITTED`. Không có luồng bản nháp/publish/submit riêng. |
+| Gửi riêng | Không gửi `targetStoreIds` (hoặc rỗng) → `audience=ALL`, lên sàn chung như trước. Gửi 1–20 cửa hàng `ACTIVE` → `audience=SELECTED_STORES`: RFQ không lên sàn chung; chỉ chủ RFQ và nhà cung cấp sở hữu cửa hàng được mời xem, báo giá, nhắn tin. Nhà cung cấp khác nhận `404 RFQ_NOT_FOUND` như RFQ không tồn tại; nhà cung cấp được mời báo giá từ cửa hàng không được mời → `403 STORE_NOT_TARGETED`; chủ RFQ mở hội thoại với nhà cung cấp không được mời → `403 SUPPLIER_NOT_TARGETED`. Chủ RFQ thấy toàn bộ `targetStores`, nhà cung cấp chỉ thấy cửa hàng của mình. Danh sách cố định sau khi tạo. |
 | Sửa RFQ | Chỉ owner, RFQ mở/còn hạn và chưa có bất kỳ báo giá nào. PATCH phân biệt field vắng với `null`. |
 | Đóng/hủy RFQ | CLOSED dừng nhận báo giá mới, vẫn accept báo giá đã gửi còn hiệu lực. Hết hạn RFQ dừng intake, hiệu lực báo giá theo validUntil. CANCELLED chặn accept mới; giữ đơn và intent đã hình thành. Hủy đơn thuộc Commerce. |
 | Phiên bản | Server tăng version theo RFQ/cửa hàng. Revision chỉ từ bản mới nhất đang `SUBMITTED`, chưa có conversion; RFQ phải `OPEN` và còn hạn. Bản cũ thành `REVISED`, giữ nguyên item/giá/điều khoản. |
 | Nhiều báo giá | Có thể accept nhiều báo giá của một RFQ. Mỗi báo giá tạo một customer order và seller order riêng; chưa có gộp đơn/phân bổ tổng quantity. |
 | Snapshot | Item tùy chỉnh có thể không có variant. Item dùng Catalog phải thuộc đúng product/store/supplier, dùng tên/SKU từ Catalog và giá thương lượng từ request. |
 | Tổng tiền | Item subtotal = quantity × unitPrice − discountAmount; subtotal nội bộ khi tạo đơn = tổng item subtotal; totalAmount = subtotal + shippingFee. Response báo giá trả `totalAmount` và subtotal từng item. |
-| Làm tròn | Tiền/percent tối đa 2 chữ số thập phân. Đặt cọc = total × percent / 100, `HALF_UP` đến 2 chữ số. |
-| Thanh toán | Chỉ sau conversion tạo `DEPOSIT` và `REMAINING` ở Commerce. Khoản bằng 0 được bỏ qua; tổng đơn phải lớn hơn 0. Phần còn lại đến hạn 00:00 UTC trước ngày giao 3 ngày. |
+| Làm tròn | Chốt theo TV5: tiền báo giá (đơn giá, giảm giá, phí vận chuyển) là **VND nguyên** — gửi `"90000"` hoặc `"90000.00"`, phần lẻ đồng bị từ chối `400 AMOUNT_NOT_WHOLE_VND`; percent tối đa 2 chữ số thập phân. Đặt cọc = total × percent / 100, `HALF_UP` về **đồng** (vd 30% của 1.005 = 302). Commerce cũng từ chối snapshot có phần lẻ đồng, vì mọi dòng `payment` phải là số nguyên (`CK_payment_integer_vnd`). Ngân sách RFQ chỉ để tham khảo nên vẫn nhận tối đa 2 chữ số thập phân. |
+| Thanh toán | Conversion đăng ký đơn với TV5 qua `FinanceIntegrationService.syncOrder` (cùng transaction, giống checkout lẻ): TV5 tạo `finance_context` và các khoản thanh toán payOS, TV4 không tự ghi bảng `payment`. Cọc làm tròn nằm **giữa 0 và tổng đơn** → `DEPOSIT` + `REMAINING`; cọc 0%, 100% hoặc làm tròn chạm 0/tổng → một khoản `FULL` (đơn `AWAITING_PAYMENT`, `depositAmount`/`remainingAmount` để trống như đơn lẻ). `REMAINING` đến hạn 00:00 giờ Việt Nam, 3 ngày trước ngày giao. Người mua xem/khởi tạo thanh toán ở `GET /api/payments/orders/{sellerOrderId}`. |
 | Địa chỉ | Buyer chọn addressId; RFQ xác minh customer owner qua Identity và lưu snapshot bất biến trong intent. |
 | Hết hiệu lực | Báo giá `SUBMITTED` quá `validUntil` được trả về với `status=EXPIRED` (tính khi đọc, không ghi DB); `GET /api/quotations?status=EXPIRED|SUBMITTED` lọc theo đúng trạng thái hiển thị này. Supplier vẫn revise được bản mới nhất để gia hạn. |
 | Retry | Tạo/revise/accept báo giá yêu cầu `Idempotency-Key`. Dùng lại cùng key và cùng body; đổi body bị `409`. Keys phân biệt hoa/thường. |
@@ -38,9 +39,9 @@ Các thay đổi không thuộc TV4 như payment provider/webhook/refund/settlem
 
 | Method | URL | Quyền/chức năng |
 |---|---|---|
-| GET | `/api/rfqs` | Public search (ẩn RFQ `OPEN` đã quá `expiresAt`; detail vẫn đọc được); `mine=true` cần buyer đăng nhập. |
+| GET | `/api/rfqs` | Public search (ẩn RFQ `OPEN` đã quá `expiresAt`; detail vẫn đọc được) gồm RFQ `ALL` và RFQ gửi riêng mời cửa hàng của người gọi; `mine=true` cần buyer đăng nhập. |
 | GET | `/api/rfqs/{rfqId}` | Public detail; owner thấy private fields. |
-| POST | `/api/rfqs` | Buyer tạo/công bố, trả 201 và Location. |
+| POST | `/api/rfqs` | Buyer tạo/công bố, trả 201 và Location; `targetStoreIds` (mảng ID string) tùy chọn để gửi riêng. |
 | PATCH | `/api/rfqs/{rfqId}` | Owner sửa trước báo giá, Content-Type merge-patch. |
 | POST | `/api/rfqs/{rfqId}/close`, `/cancel` | Owner đóng/hủy RFQ. |
 | GET/POST | `/api/rfqs/{rfqId}/quotations` | Buyer so sánh; supplier đọc của mình/gửi báo giá. |
@@ -53,6 +54,8 @@ Các thay đổi không thuộc TV4 như payment provider/webhook/refund/settlem
 | POST | `/api/rfqs/{rfqId}/conversations` | Buyer chọn supplierId; supplier dùng hồ sơ của mình. |
 | GET | `/api/conversations`, `/api/conversations/{id}` | Hội thoại của participant. |
 | GET | `/api/conversations/{id}/messages` | Cursor trước/sau, limit 1..100, mặc định 50. |
+| GET | `/api/conversations/unread-count` | `{unreadCount}`: tin của bên kia sau lần đọc cuối (FE hiện badge trên thanh menu). |
+| POST | `/api/conversations/{id}/read` | Participant đánh dấu đã đọc tới tin mới nhất; không lùi; 204. |
 
 Collection dùng page từ 0, size mặc định 20/tối đa 100; response `{items,page,size,totalElements,totalPages}`. Sort có allowlist và ID làm thứ tự phụ.
 
@@ -166,8 +169,8 @@ Broker hiện là in-memory: chạy một RFQ instance. Chưa có attachment/rea
 
 ## 6. Migration và kiểm tra
 
-- RFQ V2: quotation decision/command idempotency; V3: durable conversion; V4: chat dedup; V5: acceptance key collation; V6: trạng thái conversion `FAILED`.
-- Commerce V2: unique quotation conversion; V3: opaque key collation. Order/address/items/payment tạo trong một transaction.
+- RFQ V2: quotation decision/command idempotency; V3: durable conversion; V4: chat dedup; V5: acceptance key collation; V6: trạng thái conversion `FAILED`; V7: `rfq.audience` + bảng `rfq_target_store` (gửi riêng cửa hàng); V8: bảng `conversation_read_state` (tin đã đọc của từng participant).
+- Commerce V5: unique quotation conversion; V6: opaque key collation (V2/V3/V4 thuộc cart uniqueness, TV5 finance và retail checkout). Order/address/items/payment tạo trong một transaction.
 - Các business service dùng Spring Boot 4 `spring-boot-starter-flyway` để migration thực sự chạy khi khởi động.
 - Catalog mapping được đối chiếu SQL Server V1: audit chỉ có ở PRODUCT; STORE/VARIANT không được truy vấn các cột audit chưa tồn tại.
 
@@ -203,6 +206,43 @@ Các nhóm kiểm tra bao gồm ownership/privacy, schema JSON, giá/phiên bả
 
 - Tab **Doanh Nghiệp / B2B** (`src/pages/B2BPortal.tsx`) mở `src/features/rfq/RfqPortal.tsx`: sàn RFQ, RFQ của tôi, so sánh/chấp nhận/từ chối báo giá, soạn báo giá và phiên bản mới, báo giá của tôi, tin nhắn. Chat ở `src/features/chat/` (STOMP tối giản trên WebSocket gốc, không thêm dependency).
 - Gọi API qua `src/services/api/http.ts`; base URL `VITE_API_BASE_URL` (mặc định `http://localhost:8080`). FE dev chạy cổng **3000** (`npm run dev`), nên Gateway cần `CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000` (cũng dùng cho origin WebSocket).
-- Đăng nhập tạm trong `src/services/api/session.ts` (sessionStorage theo tab) cho tới khi TV1 có màn đăng nhập chung.
+- Đăng nhập dùng chung `src/context/AuthContext.tsx` của TV1: tab B2B ở mức `customer` (`src/utils/permissions.ts`) nên khách được chuyển tới màn Login chung; `RfqPortal` lấy user/hồ sơ nhà cung cấp từ `useAuth()`, REST và chat dùng cùng token trong `http.ts` (401/token hết hạn sẽ đăng xuất toàn app).
 - Các mock RFQ còn lại trong `SellerCenter` (tab RFQ) và `UserProfile` (tab RFQ) thuộc trang của thành viên khác, chưa nối API; có thể chuyển hướng sang tab B2B.
+
+## 9. Kịch bản demo (UI)
+
+### Chuẩn bị (một lần)
+
+1. Tạo `.env` từ `.env.example` và đặt `CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173` (FE dev chạy cổng 3000), rồi `docker compose up -d`.
+2. Có admin trong `ADMIN_USER_IDS` (xem README mục Docker), rồi chạy `node scripts/seed-demo-catalog.mjs`: tạo các nhà cung cấp `VERIFIED`, gian hàng `ACTIVE` và sản phẩm. FE chưa có màn tạo/kích hoạt gian hàng nên bước này bắt buộc.
+3. Chạy `node scripts/seed-demo-tv4.mjs`: tạo buyer doanh nghiệp có sẵn địa chỉ và kiểm tra hai nhà cung cấp demo đã sẵn sàng gửi báo giá. Chạy lại được; không cần quyền admin. Biến `GATEWAY_URL`, `BUYER_PASSWORD`, `SUPPLIER_PASSWORD` đổi mặc định.
+4. FE: `npm run dev` trong repo MoonCakeMarketplaceFE, mở `http://localhost:3000`. Nếu Gateway không ở cổng 8080, đặt `VITE_API_BASE_URL`.
+
+| Vai trò | Tài khoản mặc định |
+|---|---|
+| Buyer | `buyer.b2b@mooncake.local` / `MoonCake@Buyer2026` |
+| Nhà cung cấp gửi báo giá | `supplier.kinh-do@mooncake.local` / `MoonCake@Supplier2026` |
+| Nhà cung cấp khác (đối thủ) | `supplier.givral@mooncake.local` / `MoonCake@Supplier2026` |
+
+Mở buyer và nhà cung cấp ở **hai cửa sổ trình duyệt riêng** (một cửa sổ ẩn danh): token đăng nhập lưu trong `localStorage`, dùng chung giữa các tab cùng trình duyệt.
+
+### Các bước (khoảng 10 phút)
+
+| # | Ai | Thao tác | Điểm cần nhấn mạnh |
+|---|---|---|---|
+| 1 | Buyer | Đăng nhập → tab **Doanh Nghiệp** → **Tạo yêu cầu báo giá** (tiêu đề, số lượng, ngân sách, ngày giao) | Công bố ngay (`OPEN`); địa điểm giao và yêu cầu tùy chỉnh chỉ chủ RFQ thấy |
+| 2 | Kinh Đô | **Sàn yêu cầu báo giá** → mở RFQ → **Gửi báo giá** (cọc 30%, đơn giá, phí ship) | Tiền là VND nguyên; mục từ catalog lấy tên/SKU từ Catalog, giá theo thương lượng |
+| 3 | Kinh Đô | Sửa báo giá → phiên bản 2 với giá mới | Bản cũ thành "Đã có phiên bản mới" nhưng giữ nguyên giá đã gửi |
+| 4 | Buyer | Mở RFQ → **So sánh báo giá** → **Xem chi tiết** | Givral đăng nhập không đọc được báo giá của Kinh Đô |
+| 5 | Cả hai | Buyer **Nhắn tin với nhà cung cấp**, hai bên nhắn qua lại | Chat thời gian thực qua Gateway; tin hiện ngay ở cửa sổ kia |
+| 6 | Buyer | **Chấp nhận** phiên bản 2 → chọn địa chỉ (hoặc **Thêm địa chỉ mới**) | Hiện "Đơn hàng #… (đơn nhà bán #…)"; báo giá thành "Đã chấp nhận" |
+| 7 | Buyer | Tab **Thanh Toán** → nhập **mã đơn nhà bán** | TV5 có `DEPOSIT` + `REMAINING` (VND nguyên, hạn 00:00 giờ Việt Nam 3 ngày trước ngày giao), hoặc một khoản `FULL` khi cọc 0%/100% |
+
+Có thể demo thêm: buyer từ chối báo giá, nhà cung cấp rút báo giá, hoặc nhập số tiền lẻ đồng để thấy `AMOUNT_NOT_WHOLE_VND`.
+
+### Lưu ý
+
+- Tạo link payOS ở bước 7 cần khóa `PAYOS_*` trong `.env`; không có khóa thì chỉ demo tới danh sách khoản thanh toán.
+- API trả thời gian theo UTC (`17:00Z` là 00:00 giờ Việt Nam hôm sau).
+- Mỗi lần demo tạo RFQ/đơn mới trong database; dữ liệu không tự xóa.
 

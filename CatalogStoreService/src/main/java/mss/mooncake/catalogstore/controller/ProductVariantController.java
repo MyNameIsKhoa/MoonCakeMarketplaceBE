@@ -19,16 +19,18 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
  * Public API cho Variant (TV2).
  *
- * GET   /api/products/{productId}/variants                — CA11 public; owner thấy mọi trạng thái
- * GET   /api/products/{productId}/variants/{variantId}    — CA12 public; owner thấy mọi trạng thái
- * POST  /api/products/{productId}/variants                — CA13 supplier owner của store
- * PATCH /api/products/{productId}/variants/{variantId}    — CA14 supplier owner của store
+ * GET /api/products/{productId}/variants — CA11 public; owner thấy mọi trạng
+ * thái
+ * GET /api/products/{productId}/variants/{variantId} — CA12 public; owner thấy
+ * mọi trạng thái
+ * POST /api/products/{productId}/variants — CA13 supplier owner của store
+ * PATCH /api/products/{productId}/variants/{variantId} — CA14 supplier owner
+ * của store
  */
 @RestController
 @RequestMapping("/api/products/{productId}/variants")
@@ -58,15 +60,15 @@ public class ProductVariantController {
 
     @GetMapping("/{variantId}")
     public ResponseEntity<VariantResponse> getVariant(@PathVariable Long productId,
-                                                      @PathVariable Long variantId,
-                                                      @AuthenticationPrincipal UserPrincipal principal) {
+            @PathVariable Long variantId,
+            @AuthenticationPrincipal UserPrincipal principal) {
         return ResponseEntity.ok(variantService.getVariant(productId, variantId, userIdOf(principal)));
     }
 
     @PostMapping
     public ResponseEntity<VariantResponse> createVariant(@PathVariable Long productId,
-                                                         @Valid @RequestBody CreateVariantRequest request,
-                                                         @AuthenticationPrincipal UserPrincipal principal) {
+            @Valid @RequestBody CreateVariantRequest request,
+            @AuthenticationPrincipal UserPrincipal principal) {
         VariantResponse response = variantService.createVariant(productId, request, principal.getUserId());
         return ResponseEntity.created(URI.create("/api/products/" + productId + "/variants/" + response.variantId()))
                 .body(response);
@@ -74,9 +76,9 @@ public class ProductVariantController {
 
     @PatchMapping("/{variantId}")
     public ResponseEntity<VariantResponse> updateVariant(@PathVariable Long productId,
-                                                         @PathVariable Long variantId,
-                                                         @Valid @RequestBody UpdateVariantRequest request,
-                                                         @AuthenticationPrincipal UserPrincipal principal) {
+            @PathVariable Long variantId,
+            @Valid @RequestBody UpdateVariantRequest request,
+            @AuthenticationPrincipal UserPrincipal principal) {
         return ResponseEntity.ok(variantService.updateVariant(productId, variantId, request, principal.getUserId()));
     }
 }

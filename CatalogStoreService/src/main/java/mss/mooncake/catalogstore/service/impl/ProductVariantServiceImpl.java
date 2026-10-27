@@ -1,5 +1,8 @@
 package mss.mooncake.catalogstore.service.impl;
 
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.util.List;
 import mss.mooncake.catalogstore.dto.request.CreateVariantRequest;
 import mss.mooncake.catalogstore.dto.request.UpdateVariantRequest;
 import mss.mooncake.catalogstore.dto.response.PageResponse;
@@ -12,6 +15,7 @@ import mss.mooncake.catalogstore.exception.ConflictException;
 import mss.mooncake.catalogstore.exception.ResourceNotFoundException;
 import mss.mooncake.catalogstore.repository.ProductRepository;
 import mss.mooncake.catalogstore.repository.ProductVariantRepository;
+import mss.mooncake.catalogstore.repository.StockReservationLineRepository;
 import mss.mooncake.catalogstore.service.ProductVariantService;
 import mss.mooncake.catalogstore.service.StoreAccessService;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -27,13 +31,19 @@ public class ProductVariantServiceImpl implements ProductVariantService {
     private final ProductRepository productRepository;
     private final ProductVariantRepository variantRepository;
     private final StoreAccessService storeAccessService;
+    private final StockReservationLineRepository reservationLines;
+    private final Clock clock;
 
     public ProductVariantServiceImpl(ProductRepository productRepository,
             ProductVariantRepository variantRepository,
-            StoreAccessService storeAccessService) {
+            StoreAccessService storeAccessService,
+            StockReservationLineRepository reservationLines,
+            Clock clock) {
         this.productRepository = productRepository;
         this.variantRepository = variantRepository;
         this.storeAccessService = storeAccessService;
+        this.reservationLines = reservationLines;
+        this.clock = clock;
     }
 
     // ─── Helpers
@@ -185,10 +195,16 @@ public class ProductVariantServiceImpl implements ProductVariantService {
         if (request.basePrice() != null) {
             variant.setBasePrice(request.basePrice());
         }
-        // Tồn kho đặt giá trị tuyệt đối từ màn quản lý của supplier.
-        // Trừ kho khi checkout sẽ dùng UPDATE có điều kiện riêng (chốt với TV3), không
-        // đi qua API này.
+        // Tồn kho đặt giá trị tuyệt đối từ màn quản lý của supplier; trừ kho khi bán đi qua IN12 confirm.
+        // Khóa dòng variant (cùng thứ tự khóa với IN12 reserve) rồi mới đếm hold, để không thể giảm tồn
+        // xuống dưới lượng khách đang giữ trong lúc checkout.
         if (request.stockQuantity() != null) {
+            variantRepository.lockByIds(List.of(variantId));
+            long held = reservationLines.heldQuantity(variantId, LocalDateTime.now(clock));
+            if (request.stockQuantity() < held) {
+                throw new ConflictException("Không thể đặt tồn kho " + request.stockQuantity()
+                        + " thấp hơn lượng đang được giữ cho đơn hàng (" + held + ").");
+            }
             variant.setStockQuantity(request.stockQuantity());
         }
         if (request.status() != null) {

@@ -19,4 +19,13 @@ public class DeliveryAddressEntity extends BaseCommerceEntity {
     @Column(name = "ward", length = 100) private String ward;
     @Column(name = "district", length = 100) private String district;
     @Column(name = "city", nullable = false, length = 100) private String city;
+
+    public Long getOrderId() { return orderId; }
+    public Long getSourceAddressIdRef() { return sourceAddressIdRef; }
+    public String getRecipientName() { return recipientName; }
+    public String getRecipientPhone() { return recipientPhone; }
+    public String getAddressLine() { return addressLine; }
+    public String getWard() { return ward; }
+    public String getDistrict() { return district; }
+    public String getCity() { return city; }
 }

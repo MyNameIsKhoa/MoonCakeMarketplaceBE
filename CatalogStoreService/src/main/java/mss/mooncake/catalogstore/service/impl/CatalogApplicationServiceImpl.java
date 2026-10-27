@@ -1,10 +1,12 @@
 package mss.mooncake.catalogstore.service.impl;
 
-import java.util.LinkedHashSet;
+import mss.mooncake.catalogstore.service.CatalogApplicationService;
+
+import java.time.Clock;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import java.util.function.Function;
+import java.util.LinkedHashSet;
 import java.util.stream.Collectors;
 import mss.mooncake.catalogstore.dto.response.ProductSnapshotResponse;
 import mss.mooncake.catalogstore.dto.response.VariantSnapshotResponse;
@@ -16,43 +18,38 @@ import mss.mooncake.catalogstore.enums.StoreStatus;
 import mss.mooncake.catalogstore.exception.ResourceNotFoundException;
 import mss.mooncake.catalogstore.repository.ProductRepository;
 import mss.mooncake.catalogstore.repository.ProductVariantRepository;
+import mss.mooncake.catalogstore.repository.StockReservationLineRepository;
 import mss.mooncake.catalogstore.repository.StoreRepository;
-import mss.mooncake.catalogstore.service.CatalogApplicationService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/**
- * Snapshot cho Commerce/RFQ. Trả dữ liệu ở mọi trạng thái (kèm status ở IN07) để caller tự quyết;
- * không lọc theo quyền public vì chỉ service đã xác thực mới gọi được /internal/**.
- */
 @Service
-@Transactional(readOnly = true)
 public class CatalogApplicationServiceImpl implements CatalogApplicationService {
+    private final ProductVariantRepository variants;
+    private final ProductRepository products;
+    private final StoreRepository stores;
+    private final StockReservationLineRepository reservationLines;
+    private final Clock clock;
 
-    private final ProductRepository productRepository;
-    private final ProductVariantRepository variantRepository;
-    private final StoreRepository storeRepository;
-
-    public CatalogApplicationServiceImpl(ProductRepository productRepository,
-                                         ProductVariantRepository variantRepository,
-                                         StoreRepository storeRepository) {
-        this.productRepository = productRepository;
-        this.variantRepository = variantRepository;
-        this.storeRepository = storeRepository;
+    public CatalogApplicationServiceImpl(ProductVariantRepository variants, ProductRepository products,
+                                         StoreRepository stores, StockReservationLineRepository reservationLines,
+                                         Clock clock) {
+        this.variants = variants;
+        this.products = products;
+        this.stores = stores;
+        this.reservationLines = reservationLines;
+        this.clock = clock;
     }
 
     @Override
+    @Transactional(readOnly = true)
     public ProductSnapshotResponse getProductSnapshot(Long productId, Long variantId) {
-        ProductEntity product = productRepository.findById(productId)
-                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy sản phẩm với id: " + productId));
-        ProductVariantEntity variant = variantRepository.findById(variantId)
-                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy biến thể với id: " + variantId));
-        if (!Objects.equals(variant.getProductId(), product.getId())) {
-            throw new ResourceNotFoundException(
-                    "Không tìm thấy biến thể " + variantId + " của sản phẩm " + productId);
-        }
-        StoreEntity store = storeRepository.findById(product.getStoreId())
-                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy cửa hàng của sản phẩm"));
+        ProductVariantEntity variant = variants.findByIdAndProductId(variantId, productId)
+                .orElseThrow(() -> new ResourceNotFoundException("Variant does not belong to product"));
+        ProductEntity product = products.findById(productId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found"));
+        StoreEntity store = stores.findById(product.getStoreId())
+                .orElseThrow(() -> new ResourceNotFoundException("Store not found for product " + productId));
         String status = availability(store, product, variant);
         // agreedUnitPrice giữ tên field cũ vì Commerce/RFQ đã mirror DTO; giá trị là basePrice hiện tại.
         return new ProductSnapshotResponse(product.getId(), variant.getId(), product.getName(),
@@ -71,35 +68,35 @@ public class CatalogApplicationServiceImpl implements CatalogApplicationService 
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<VariantSnapshotResponse> getVariantSnapshots(List<Long> variantIds) {
-        // Gộp ID trùng, giữ thứ tự đầu vào.
-        List<Long> ids = List.copyOf(new LinkedHashSet<>(variantIds));
-
-        Map<Long, ProductVariantEntity> variants = variantRepository.findByIdIn(ids).stream()
-                .collect(Collectors.toMap(ProductVariantEntity::getId, Function.identity()));
-        List<Long> missing = ids.stream().filter(id -> !variants.containsKey(id)).toList();
-        if (!missing.isEmpty()) {
-            throw new ResourceNotFoundException("Không tìm thấy biến thể: " + missing);
-        }
-
-        // Load product và store theo lô (3 query cho cả batch, không N+1).
-        Map<Long, ProductEntity> products = productRepository.findAllById(
-                        variants.values().stream().map(ProductVariantEntity::getProductId).distinct().toList())
-                .stream()
-                .collect(Collectors.toMap(ProductEntity::getId, Function.identity()));
-        Map<Long, StoreEntity> stores = storeRepository.findAllById(
-                        products.values().stream().map(ProductEntity::getStoreId).distinct().toList())
-                .stream()
-                .collect(Collectors.toMap(StoreEntity::getId, Function.identity()));
-
-        return ids.stream().map(id -> {
-            ProductVariantEntity v = variants.get(id);
-            ProductEntity p = products.get(v.getProductId());
-            StoreEntity s = stores.get(p.getStoreId());
-            return new VariantSnapshotResponse(v.getId(), p.getId(), s.getId(), s.getSupplierIdRef(),
-                    p.getProductCode(), p.getName(), v.getVariantName(), v.getSku(), v.getImageUrl(),
-                    v.getBasePrice(), v.getStockQuantity(),
-                    v.getStatus().name(), p.getStatus().name(), s.getStatus().name());
+        List<Long> uniqueIds = new LinkedHashSet<>(variantIds).stream().toList();
+        Map<Long, ProductVariantEntity> byId = variants.findByIdIn(uniqueIds).stream()
+                .collect(Collectors.toMap(ProductVariantEntity::getId, value -> value));
+        List<Long> missing = uniqueIds.stream().filter(id -> !byId.containsKey(id)).toList();
+        if (!missing.isEmpty()) throw new ResourceNotFoundException("Variants not found: " + missing);
+        Map<Long, ProductEntity> productById = products.findAllById(byId.values().stream()
+                .map(ProductVariantEntity::getProductId).collect(Collectors.toSet())).stream()
+                .collect(Collectors.toMap(ProductEntity::getId, value -> value));
+        Map<Long, StoreEntity> storeById = stores.findAllById(productById.values().stream()
+                .map(ProductEntity::getStoreId).collect(Collectors.toSet())).stream()
+                .collect(Collectors.toMap(StoreEntity::getId, value -> value));
+        // Lượng đang giữ bởi IN12 (HELD, chưa hết hạn) cho cả batch trong một query.
+        Map<Long, Long> heldById = reservationLines.heldQuantities(uniqueIds, LocalDateTime.now(clock)).stream()
+                .collect(Collectors.toMap(StockReservationLineRepository.HeldQuantity::getVariantId,
+                        StockReservationLineRepository.HeldQuantity::getQuantity));
+        return uniqueIds.stream().map(id -> {
+            ProductVariantEntity variant = byId.get(id);
+            ProductEntity product = productById.get(variant.getProductId());
+            if (product == null) throw new ResourceNotFoundException("Product not found for variant " + id);
+            StoreEntity store = storeById.get(product.getStoreId());
+            if (store == null) throw new ResourceNotFoundException("Store not found for variant " + id);
+            int available = (int) Math.max(0L, variant.getStockQuantity() - heldById.getOrDefault(id, 0L));
+            return new VariantSnapshotResponse(id, product.getId(), store.getId(),
+                    store.getSupplierIdRef(), product.getProductCode(), product.getName(),
+                    variant.getVariantName(), variant.getSku(), variant.getImageUrl(),
+                    variant.getBasePrice(), variant.getStockQuantity(), available, variant.getStatus().name(),
+                    product.getStatus().name(), store.getStatus().name());
         }).toList();
     }
 }
