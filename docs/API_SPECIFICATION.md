@@ -288,6 +288,8 @@ Contract TV4 hiện tại: create/revision có 1–50 mục hàng, yêu cầu `I
 | CH02 | `GET /api/conversations` | Xem danh sách hội thoại của tài khoản | Bên tham gia |
 | CH03 | `GET /api/conversations/{conversationId}` | Xem thông tin hội thoại | Bên tham gia |
 | CH04 | `GET /api/conversations/{conversationId}/messages` | Xem lịch sử tin nhắn | Bên tham gia |
+| CH05 | `GET /api/conversations/unread-count` | Đếm tin bên kia gửi sau lần đọc cuối, trên mọi hội thoại | Người dùng đã đăng nhập |
+| CH06 | `POST /api/conversations/{conversationId}/read` | Đánh dấu đã đọc tới tin mới nhất (204) | Bên tham gia |
 
 Lịch sử tin nhắn sử dụng `beforeMessageId` hoặc `afterMessageId` và `limit` (mặc định 50, tối đa 100). Phản hồi gồm `items`, `nextCursor`, `hasMore`.
 
