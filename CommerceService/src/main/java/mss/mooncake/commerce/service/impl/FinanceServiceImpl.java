@@ -15,7 +15,7 @@ import mss.mooncake.commerce.repository.FinanceRepository.Context;
 import mss.mooncake.commerce.repository.FinanceRepository.Payment;
 import mss.mooncake.commerce.service.FinanceService;
 import mss.mooncake.commerce.service.FinanceIntegrationService;
-import mss.mooncake.commerce.service.PaymentDescription;
+import mss.mooncake.commerce.util.PaymentDescription;
 import mss.mooncake.commerce.service.CustomerPaymentService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;

@@ -2,7 +2,7 @@ package mss.mooncake.commerce;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import mss.mooncake.commerce.service.PaymentDescription;
+import mss.mooncake.commerce.util.PaymentDescription;
 import org.junit.jupiter.api.Test;
 
 class PaymentDescriptionTest {
