@@ -1,6 +1,7 @@
 package mss.mooncake.commerce.controller;
 
 import jakarta.validation.Valid;
+import io.swagger.v3.oas.annotations.Hidden;
 import mss.mooncake.commerce.dto.request.CreateOrderFromQuotationRequest;
 import mss.mooncake.commerce.dto.response.OrderResponse;
 import mss.mooncake.commerce.service.OrderApplicationService;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@Hidden
 @RequestMapping("/internal/v1/orders")
 public class InternalOrderController {
     private final OrderApplicationService orderApplicationService;

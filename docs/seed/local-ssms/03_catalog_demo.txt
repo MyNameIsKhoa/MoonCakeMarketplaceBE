@@ -1,0 +1,273 @@
+-- SSMS LOCAL ONLY: mss_identity and mss_catalog_store must be on the SAME SQL Server instance.
+-- Chạy sau 02_identity_demo.txt, khi Catalog Flyway V6 đã tạo xong bảng.
+-- Đây chỉ là dữ liệu thử; URL ảnh cần FE Vite đang phục vụ /images/demo/...
+USE mss_catalog_store;
+GO
+IF DB_ID(N'mss_identity') IS NULL THROW 51320, 'Missing mss_identity database on this SQL Server.', 1;
+GO
+-- Development-only storefront/catalog seed. Run in SSMS after Catalog Flyway V6 and Identity seed.
+-- Supplier IDs are looked up in mss_identity on the SAME local SQL Server, seed-only.
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF OBJECT_ID(N'dbo.store', N'U') IS NULL OR OBJECT_ID(N'dbo.product_variant', N'U') IS NULL
+    THROW 51101, 'Run Catalog Flyway migrations before the demo seed.', 1;
+
+DECLARE @trangMocSupplierId BIGINT = (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'trang-moc@demo.mss.invalid');
+DECLARE @nguyetVienSupplierId BIGINT = (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'nguyet-vien@demo.mss.invalid');
+DECLARE @saoNhoSupplierId BIGINT = (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'sao-nho@demo.mss.invalid');
+IF @trangMocSupplierId IS NULL OR @nguyetVienSupplierId IS NULL OR @saoNhoSupplierId IS NULL
+   OR @trangMocSupplierId <= 0 OR @nguyetVienSupplierId <= 0 OR @saoNhoSupplierId <= 0
+   OR @trangMocSupplierId = @nguyetVienSupplierId OR @trangMocSupplierId = @saoNhoSupplierId
+   OR @nguyetVienSupplierId = @saoNhoSupplierId
+    THROW 51102, 'Missing or duplicate Identity supplier IDs.', 1;
+
+DECLARE @categories TABLE (name NVARCHAR(255), slug NVARCHAR(255) PRIMARY KEY);
+INSERT INTO @categories (name, slug) VALUES
+    (N'Bánh truyền thống', N'truyen-thong'),
+    (N'Bánh hiện đại', N'hien-dai'),
+    (N'Bánh chay', N'chay'),
+    (N'Bánh cao cấp', N'cao-cap'),
+    (N'Bánh thiếu nhi', N'thieu-nhi');
+
+DECLARE @stores TABLE (store_code NVARCHAR(100) PRIMARY KEY, supplier_id_ref BIGINT,
+    name NVARCHAR(255), slug NVARCHAR(255), logo_url NVARCHAR(500), banner_url NVARCHAR(500));
+INSERT INTO @stores VALUES
+    (N'DEMO-TRANG-MOC', @trangMocSupplierId, N'Trăng Mộc', N'demo-trang-moc',
+     N'/images/demo/stores/trang-moc-logo.svg', N'/images/demo/stores/trang-moc-banner.webp'),
+    (N'DEMO-NGUYET-VIEN', @nguyetVienSupplierId, N'Nguyệt Viên', N'demo-nguyet-vien',
+     N'/images/demo/stores/nguyet-vien-logo.svg', N'/images/demo/stores/nguyet-vien-banner.webp'),
+    (N'DEMO-SAO-NHO', @saoNhoSupplierId, N'Sao Nhỏ', N'demo-sao-nho',
+     N'/images/demo/stores/sao-nho-logo.svg', N'/images/demo/stores/sao-nho-banner.webp');
+
+DECLARE @products TABLE (store_code NVARCHAR(100), category_slug NVARCHAR(255),
+    product_code NVARCHAR(100) PRIMARY KEY, name NVARCHAR(255), description NVARCHAR(MAX),
+    sku NVARCHAR(100), variant_name NVARCHAR(255), image_url NVARCHAR(500),
+    base_price DECIMAL(18,2), stock_quantity INT);
+INSERT INTO @products VALUES
+    (N'DEMO-TRANG-MOC', N'truyen-thong', N'DEMO-TM-THAP-CAM', N'Bánh nướng thập cẩm hai trứng',
+     N'Bánh trung thu nướng nhân thập cẩm và hai lòng đỏ trứng muối.',
+     N'DEMO-TM-THAP-CAM-150', N'Hộp 1 bánh 150 g', N'/images/demo/products/banh-nuong-thap-cam.webp', 165000, 80),
+    (N'DEMO-TRANG-MOC', N'truyen-thong', N'DEMO-TM-HAT-SEN', N'Bánh dẻo hạt sen',
+     N'Bánh dẻo truyền thống nhân hạt sen dịu ngọt.',
+     N'DEMO-TM-HAT-SEN-150', N'Hộp 1 bánh 150 g', N'/images/demo/products/banh-deo-hat-sen.webp', 125000, 60),
+    (N'DEMO-NGUYET-VIEN', N'hien-dai', N'DEMO-NV-LAVA', N'Bánh lava trứng muối',
+     N'Bánh trung thu hiện đại với nhân custard trứng muối chảy.',
+     N'DEMO-NV-LAVA-150', N'Hộp 1 bánh 150 g', N'/images/demo/products/banh-lava-trung-muoi.webp', 195000, 70),
+    (N'DEMO-NGUYET-VIEN', N'hien-dai', N'DEMO-NV-SOCOLA', N'Bánh socola hạnh nhân',
+     N'Vỏ socola, nhân hạnh nhân; phiên bản bánh trung thu hiện đại.',
+     N'DEMO-NV-SOCOLA-150', N'Hộp 1 bánh 150 g', N'/images/demo/products/banh-socola-hanh-nhan.webp', 185000, 50),
+    (N'DEMO-TRANG-MOC', N'chay', N'DEMO-TM-DAU-XANH', N'Bánh chay đậu xanh',
+     N'Bánh trung thu chay nhân đậu xanh, không dùng trứng.',
+     N'DEMO-TM-DAU-XANH-150', N'Hộp 1 bánh 150 g', N'/images/demo/products/banh-chay-dau-xanh.webp', 120000, 75),
+    (N'DEMO-TRANG-MOC', N'chay', N'DEMO-TM-ME-DEN', N'Bánh chay mè đen',
+     N'Bánh trung thu chay nhân mè đen thơm bùi.',
+     N'DEMO-TM-ME-DEN-150', N'Hộp 1 bánh 150 g', N'/images/demo/products/banh-chay-me-den.webp', 130000, 45),
+    (N'DEMO-NGUYET-VIEN', N'cao-cap', N'DEMO-NV-HOP-QUA', N'Hộp quà Trăng Vàng bốn bánh',
+     N'Hộp quà Tết Trung thu gồm bốn bánh với nhiều hương vị.',
+     N'DEMO-NV-HOP-QUA-4', N'Hộp 4 bánh', N'/images/demo/products/hop-qua-trang-vang.webp', 880000, 25),
+    (N'DEMO-NGUYET-VIEN', N'cao-cap', N'DEMO-NV-MATCHA', N'Bánh matcha hạt sen cao cấp',
+     N'Bánh trung thu nhân trà xanh matcha và hạt sen.',
+     N'DEMO-NV-MATCHA-150', N'Hộp 1 bánh 150 g', N'/images/demo/products/banh-matcha-cao-cap.webp', 245000, 40),
+    (N'DEMO-SAO-NHO', N'thieu-nhi', N'DEMO-SN-SUA-DUA', N'Bánh mini sữa dừa',
+     N'Bánh trung thu mini nhân sữa dừa dành cho khẩu phần nhỏ.',
+     N'DEMO-SN-SUA-DUA-80', N'Hộp 1 bánh 80 g', N'/images/demo/products/banh-mini-sua-dua.webp', 85000, 90),
+    (N'DEMO-SAO-NHO', N'thieu-nhi', N'DEMO-SN-DAU-TAY', N'Bánh mini dâu tây',
+     N'Bánh trung thu mini nhân dâu tây dành cho khẩu phần nhỏ.',
+     N'DEMO-SN-DAU-TAY-80', N'Hộp 1 bánh 80 g', N'/images/demo/products/banh-mini-dau-tay.webp', 90000, 80);
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    INSERT INTO dbo.category (parent_category_id, name, slug, status)
+    SELECT NULL, c.name, c.slug, N'ACTIVE' FROM @categories c
+    WHERE NOT EXISTS (SELECT 1 FROM dbo.category existing WHERE existing.slug = c.slug);
+    IF EXISTS (SELECT 1 FROM @categories c JOIN dbo.category existing ON existing.slug = c.slug
+               WHERE existing.status <> N'ACTIVE' OR existing.parent_category_id IS NOT NULL)
+        THROW 51103, 'A demo category is inactive; no existing category was changed.', 1;
+
+    IF EXISTS (SELECT 1 FROM @stores d JOIN dbo.store s ON s.store_code = d.store_code
+               WHERE s.supplier_id_ref <> d.supplier_id_ref OR s.slug <> d.slug OR s.status <> N'ACTIVE'
+                  OR s.logo_url IS NULL OR s.banner_url IS NULL)
+        THROW 51104, 'An existing demo store has different ownership, slug or status.', 1;
+    IF EXISTS (SELECT 1 FROM @stores d JOIN dbo.store s ON s.slug = d.slug WHERE s.store_code <> d.store_code)
+        THROW 51105, 'A demo store slug is already used by another store.', 1;
+    INSERT INTO dbo.store (supplier_id_ref, store_code, name, slug, logo_url, banner_url, status)
+    SELECT d.supplier_id_ref, d.store_code, d.name, d.slug, d.logo_url, d.banner_url, N'ACTIVE'
+    FROM @stores d WHERE NOT EXISTS (SELECT 1 FROM dbo.store s WHERE s.store_code = d.store_code);
+
+    IF EXISTS (SELECT 1 FROM @products d JOIN dbo.store s ON s.store_code = d.store_code
+               JOIN dbo.product p ON p.store_id = s.store_id AND p.product_code = d.product_code
+               JOIN dbo.category c ON c.slug = d.category_slug
+               WHERE p.category_id <> c.category_id OR p.status <> N'ACTIVE')
+        THROW 51106, 'An existing demo product has a different category or status.', 1;
+    INSERT INTO dbo.product (store_id, category_id, product_code, name, description, status)
+    SELECT s.store_id, c.category_id, d.product_code, d.name, d.description, N'ACTIVE'
+    FROM @products d JOIN dbo.store s ON s.store_code = d.store_code
+    JOIN dbo.category c ON c.slug = d.category_slug
+    WHERE NOT EXISTS (SELECT 1 FROM dbo.product p WHERE p.store_id = s.store_id AND p.product_code = d.product_code);
+
+    IF EXISTS (SELECT 1 FROM @products d JOIN dbo.product_variant v ON v.sku = d.sku
+               JOIN dbo.product p ON p.product_id = v.product_id
+               JOIN dbo.store s ON s.store_id = p.store_id
+               WHERE p.product_code <> d.product_code OR s.store_code <> d.store_code OR v.status <> N'ACTIVE'
+                  OR v.image_url IS NULL)
+        THROW 51107, 'An existing demo SKU belongs to another product or is inactive.', 1;
+    INSERT INTO dbo.product_variant (product_id, sku, variant_name, image_url, base_price, stock_quantity, status)
+    SELECT p.product_id, d.sku, d.variant_name, d.image_url, d.base_price, d.stock_quantity, N'ACTIVE'
+    FROM @products d JOIN dbo.store s ON s.store_code = d.store_code
+    JOIN dbo.product p ON p.store_id = s.store_id AND p.product_code = d.product_code
+    WHERE NOT EXISTS (SELECT 1 FROM dbo.product_variant v WHERE v.sku = d.sku);
+
+    UPDATE s SET name=d.name FROM dbo.store s JOIN @stores d ON d.store_code=s.store_code;
+    UPDATE p SET name=d.name,description=d.description
+    FROM dbo.product p JOIN dbo.store s ON s.store_id=p.store_id
+    JOIN @products d ON d.store_code=s.store_code AND d.product_code=p.product_code;
+    UPDATE v SET variant_name=d.variant_name
+    FROM dbo.product_variant v JOIN @products d ON d.sku=v.sku;
+
+    IF (SELECT COUNT(*) FROM @products d JOIN dbo.store s ON s.store_code = d.store_code
+        JOIN dbo.product p ON p.store_id = s.store_id AND p.product_code = d.product_code
+        JOIN dbo.product_variant v ON v.product_id = p.product_id AND v.sku = d.sku) <> 10
+        THROW 51108, 'Demo catalog verification failed.', 1;
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+SELECT c.slug AS category_slug, COUNT(p.product_id) AS demo_product_count
+FROM @products d JOIN dbo.category c ON c.slug = d.category_slug
+JOIN dbo.store s ON s.store_code = d.store_code
+JOIN dbo.product p ON p.store_id = s.store_id AND p.product_code = d.product_code
+GROUP BY c.slug ORDER BY c.slug;
+GO
+-- Demo references to real brand names. Images, prices, stock and sellers are illustrative;
+-- no listed store represents an authorized brand account. Run in SSMS after the first Catalog demo batch.
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF OBJECT_ID(N'dbo.store', N'U') IS NULL OR OBJECT_ID(N'dbo.product_variant', N'U') IS NULL
+   OR COL_LENGTH(N'dbo.store', N'shipping_fee') IS NULL
+    THROW 51301, 'Run Catalog Flyway migrations through V6 before the brand demo seed.', 1;
+
+DECLARE @stores TABLE (store_code NVARCHAR(100) PRIMARY KEY, supplier_id_ref BIGINT,
+    name NVARCHAR(255), slug NVARCHAR(255), logo_url NVARCHAR(500), banner_url NVARCHAR(500),
+    shipping_fee DECIMAL(18,2));
+INSERT INTO @stores VALUES
+    (N'DEMO-BRAND-KINH-DO', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'kinh-do@demo.mss.invalid'), N'Kinh Đô', N'demo-kinh-do', N'/images/demo/stores/kinh-do/logo.png', N'/images/demo/brands/stores/kinh-do-banner.webp', 30000),
+    (N'DEMO-BRAND-NHU-LAN', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'nhu-lan@demo.mss.invalid'), N'Như Lan', N'demo-nhu-lan', N'/images/demo/brands/stores/nhu-lan-logo.svg', N'/images/demo/brands/stores/nhu-lan-banner.webp', 25000),
+    (N'DEMO-BRAND-MADAME-HUONG', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'madame-huong@demo.mss.invalid'), N'Madame Hương', N'demo-madame-huong', N'/images/demo/brands/stores/madame-huong-logo.svg', N'/images/demo/brands/stores/madame-huong-banner.webp', 35000),
+    (N'DEMO-BRAND-BRODARD', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'brodard@demo.mss.invalid'), N'Brodard', N'demo-brodard', N'/images/demo/brands/stores/brodard-logo.svg', N'/images/demo/brands/stores/brodard-banner.webp', 30000),
+    (N'DEMO-BRAND-GIVRAL', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'givral@demo.mss.invalid'), N'Givral', N'demo-givral', N'/images/demo/stores/givral/logo.png', N'/images/demo/brands/stores/givral-banner.webp', 28000),
+    (N'DEMO-BRAND-KIDOS', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'kidos@demo.mss.invalid'), N'KIDO''s Bakery', N'demo-kidos-bakery', N'/images/demo/brands/stores/kidos-logo.svg', N'/images/demo/brands/stores/kidos-banner.webp', 30000),
+    (N'DEMO-BRAND-MAISON', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'maison@demo.mss.invalid'), N'Maison', N'demo-maison', N'/images/demo/brands/stores/maison-logo.svg', N'/images/demo/brands/stores/maison-banner.webp', 35000),
+    (N'DEMO-BRAND-DONG-KHANH', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'dong-khanh@demo.mss.invalid'), N'Đồng Khánh', N'demo-dong-khanh', N'/images/demo/stores/dong-khanh/logo.png', N'/images/demo/products/banh-matcha-cao-cap.webp', 30000),
+    (N'DEMO-BRAND-HY-LAM-MON', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'hy-lam-mon@demo.mss.invalid'), N'Hỷ Lâm Môn', N'demo-hy-lam-mon', N'/images/demo/stores/hy-lam-mon/logo.png', N'/images/demo/products/banh-mini-sua-dua.webp', 30000),
+    (N'DEMO-BRAND-DUC-PHAT', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'duc-phat@demo.mss.invalid'), N'Đức Phát', N'demo-duc-phat', N'/images/demo/stores/duc-phat/logo.png', N'/images/demo/products/banh-deo-hat-sen.webp', 30000),
+    (N'DEMO-BRAND-ABC', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'abc@demo.mss.invalid'), N'ABC Bakery', N'demo-abc', N'/images/demo/stores/abc/logo.png', N'/images/demo/products/banh-lava-trung-muoi.webp', 30000),
+    (N'DEMO-BRAND-KHIET-MINH', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'khiet-minh@demo.mss.invalid'), N'Khiết Minh', N'demo-khiet-minh', N'/images/demo/stores/khiet-minh/logo.jpg', N'/images/demo/products/banh-chay-dau-xanh.webp', 30000);
+
+IF EXISTS (SELECT 1 FROM @stores WHERE supplier_id_ref IS NULL OR supplier_id_ref <= 0)
+   OR (SELECT COUNT(DISTINCT supplier_id_ref) FROM @stores) <> 12
+    THROW 51302, 'Missing or duplicate Identity supplier IDs.', 1;
+
+DECLARE @products TABLE (store_code NVARCHAR(100), category_slug NVARCHAR(255),
+    product_code NVARCHAR(100) PRIMARY KEY, name NVARCHAR(255), description NVARCHAR(MAX),
+    sku NVARCHAR(100), variant_name NVARCHAR(255), image_url NVARCHAR(500),
+    base_price DECIMAL(18,2), stock_quantity INT);
+INSERT INTO @products VALUES
+    (N'DEMO-BRAND-KINH-DO', N'cao-cap', N'DEMO-KD-TRANG-VANG', N'Hộp quà Trăng Vàng (demo)', N'Hộp bánh Trung thu lấy cảm hứng từ dòng quà tặng Trăng Vàng; quy cách và giá chỉ dùng thử giao diện.', N'DEMO-KD-TRANG-VANG-4', N'Hộp 4 bánh minh họa', N'/images/demo/brands/products/kinh-do-hop-qua.webp', 1280000, 25),
+    (N'DEMO-BRAND-KINH-DO', N'truyen-thong', N'DEMO-KD-THAP-CAM', N'Bánh nướng thập cẩm hai trứng (demo)', N'Bánh nướng truyền thống nhân thập cẩm, hình ảnh và giá minh họa.', N'DEMO-KD-THAP-CAM-200', N'Bánh 200 g minh họa', N'/images/demo/brands/products/kinh-do-truyen-thong.webp', 185000, 60),
+    (N'DEMO-BRAND-KINH-DO', N'thieu-nhi', N'DEMO-KD-THIEU-NHI', N'Hộp bánh Trung thu thiếu nhi (demo)', N'Hộp bánh mini chủ đề thiếu nhi, thiết kế minh họa; không kèm quà tặng.', N'DEMO-KD-THIEU-NHI-4', N'Hộp 4 bánh mini minh họa', N'/images/demo/brands/products/kinh-do-thieu-nhi.webp', 195000, 45),
+    (N'DEMO-BRAND-NHU-LAN', N'truyen-thong', N'DEMO-NL-THAP-CAM', N'Bánh nướng thập cẩm gà quay (demo)', N'Hương vị thập cẩm gà quay tham khảo từ dòng bánh truyền thống; giá minh họa.', N'DEMO-NL-THAP-CAM-200', N'Bánh 200 g minh họa', N'/images/demo/brands/products/nhu-lan-thap-cam.webp', 185000, 50),
+    (N'DEMO-BRAND-MADAME-HUONG', N'truyen-thong', N'DEMO-MH-COM-SEN', N'Bánh cốm và hạt sen (demo)', N'Hương vị cốm và sen gợi mùa thu Hà Nội; tên quy cách và giá là dữ liệu thử.', N'DEMO-MH-COM-SEN-150', N'Bánh 150 g minh họa', N'/images/demo/brands/products/madame-huong-com-sen.webp', 185000, 40),
+    (N'DEMO-BRAND-BRODARD', N'truyen-thong', N'DEMO-BD-HAI-SAN', N'Bánh hải sản xốt bào ngư (demo)', N'Hương vị hải sản xốt bào ngư tham khảo danh mục bánh Trung thu Brodard; giá minh họa.', N'DEMO-BD-HAI-SAN-200', N'Bánh 200 g minh họa', N'/images/demo/brands/products/brodard-hai-san.webp', 240000, 35),
+    (N'DEMO-BRAND-GIVRAL', N'truyen-thong', N'DEMO-GV-HAT-SEN', N'Bánh hạt sen (demo)', N'Bánh Trung thu nhân hạt sen minh họa cho gian hàng Givral; giá không phải niêm yết.', N'DEMO-GV-HAT-SEN-200', N'Bánh 200 g minh họa', N'/images/demo/brands/products/givral-hat-sen.webp', 145000, 55),
+    (N'DEMO-BRAND-KIDOS', N'hien-dai', N'DEMO-KIDOS-MATCHA', N'Bánh trà xanh phô mai (demo)', N'Hương vị trà xanh phô mai tham khảo hồ sơ công bố sản phẩm KIDO; ảnh và giá minh họa.', N'DEMO-KIDOS-MATCHA-150', N'Bánh 150 g minh họa', N'/images/demo/brands/products/kidos-tra-xanh-pho-mai.webp', 160000, 50),
+    (N'DEMO-BRAND-MAISON', N'cao-cap', N'DEMO-MAISON-HOP-QUA', N'Hộp quà Trung thu Maison (demo)', N'Hộp quà bánh Trung thu lấy cảm hứng từ bộ sưu tập Maison; thành phần và giá chỉ dùng thử.', N'DEMO-MAISON-HOP-QUA-4', N'Hộp 4 bánh minh họa', N'/images/demo/brands/products/maison-hop-qua.webp', 890000, 30),
+    (N'DEMO-BRAND-DONG-KHANH', N'hien-dai', N'DEMO-DK-MTCC', N'Bánh nướng matcha cao cấp', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-DK-MTCC-1', N'Bánh 150g', N'/images/demo/products/banh-matcha-cao-cap.webp', 88000, 120),
+    (N'DEMO-BRAND-DONG-KHANH', N'truyen-thong', N'DEMO-DK-TCLX', N'Bánh nướng thập cẩm lạp xưởng', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-DK-TCLX-1', N'Bánh 200g', N'/images/demo/products/banh-nuong-thap-cam.webp', 95000, 150),
+    (N'DEMO-BRAND-DONG-KHANH', N'cao-cap', N'DEMO-DK-DV', N'Hộp quà Đồng Khánh Đoàn Viên', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-DK-DV-1', N'Hộp 4 bánh', N'/images/demo/products/hop-qua-trang-vang.webp', 820000, 35),
+    (N'DEMO-BRAND-HY-LAM-MON', N'thieu-nhi', N'DEMO-HLM-SDLD', N'Bánh nướng mini sữa dừa', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-HLM-SDLD-1', N'Set 6 bánh', N'/images/demo/products/banh-mini-sua-dua.webp', 180000, 80),
+    (N'DEMO-BRAND-HY-LAM-MON', N'hien-dai', N'DEMO-HLM-SCHN', N'Bánh socola hạnh nhân', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-HLM-SCHN-1', N'Bánh 150g', N'/images/demo/products/banh-socola-hanh-nhan.webp', 79000, 100),
+    (N'DEMO-BRAND-HY-LAM-MON', N'chay', N'DEMO-HLM-CMD', N'Bánh chay mè đen', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-HLM-CMD-1', N'Bánh 150g', N'/images/demo/products/banh-chay-me-den.webp', 65000, 90),
+    (N'DEMO-BRAND-DUC-PHAT', N'truyen-thong', N'DEMO-DP-TCJB', N'Bánh nướng thập cẩm jambon', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-DP-TCJB-1', N'Bánh 250g', N'/images/demo/products/banh-nuong-thap-cam.webp', 125000, 100),
+    (N'DEMO-BRAND-DUC-PHAT', N'thieu-nhi', N'DEMO-DP-MDT', N'Bánh mini dâu tây', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-DP-MDT-1', N'Set 4 bánh', N'/images/demo/products/banh-mini-dau-tay.webp', 160000, 80),
+    (N'DEMO-BRAND-DUC-PHAT', N'truyen-thong', N'DEMO-DP-DHS', N'Bánh dẻo hạt sen Đức Phát', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-DP-DHS-1', N'Bánh 180g', N'/images/demo/products/banh-deo-hat-sen.webp', 68000, 100),
+    (N'DEMO-BRAND-ABC', N'hien-dai', N'DEMO-ABC-LVTM', N'Bánh lava trứng muối ABC', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-ABC-LVTM-1', N'Hộp 6 bánh', N'/images/demo/products/banh-lava-trung-muoi.webp', 420000, 60),
+    (N'DEMO-BRAND-ABC', N'truyen-thong', N'DEMO-ABC-TCTT', N'Bánh nướng thập cẩm ABC', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-ABC-TCTT-1', N'Bánh 150g', N'/images/demo/products/banh-nuong-thap-cam.webp', 68000, 150),
+    (N'DEMO-BRAND-ABC', N'thieu-nhi', N'DEMO-ABC-MDT', N'Bánh mini dâu tây ABC', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-ABC-MDT-1', N'Set 4 bánh', N'/images/demo/products/banh-mini-dau-tay.webp', 150000, 80),
+    (N'DEMO-BRAND-KHIET-MINH', N'chay', N'DEMO-KM-CDX', N'Bánh chay đậu xanh', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-KM-CDX-1', N'Bánh 150g', N'/images/demo/products/banh-chay-dau-xanh.webp', 72000, 120),
+    (N'DEMO-BRAND-KHIET-MINH', N'chay', N'DEMO-KM-CMD', N'Bánh chay mè đen', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-KM-CMD-1', N'Bánh 150g', N'/images/demo/products/banh-chay-me-den.webp', 72000, 100),
+    (N'DEMO-BRAND-KHIET-MINH', N'chay', N'DEMO-KM-MTC', N'Bánh chay matcha', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-KM-MTC-1', N'Bánh 150g', N'/images/demo/products/banh-matcha-cao-cap.webp', 78000, 90);
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+    IF EXISTS (SELECT 1 FROM @products p LEFT JOIN dbo.category c ON c.slug = p.category_slug
+               WHERE c.category_id IS NULL OR c.status <> N'ACTIVE')
+        THROW 51303, 'Run the base demo category seed first.', 1;
+    IF EXISTS (SELECT 1 FROM @stores d JOIN dbo.store s ON s.store_code = d.store_code
+               WHERE s.supplier_id_ref <> d.supplier_id_ref OR s.slug <> d.slug OR s.status <> N'ACTIVE')
+        THROW 51304, 'An existing demo brand store conflicts with the seed.', 1;
+    IF EXISTS (SELECT 1 FROM @stores d JOIN dbo.store s ON s.slug = d.slug WHERE s.store_code <> d.store_code)
+        THROW 51305, 'A demo brand slug belongs to another store.', 1;
+
+    UPDATE s SET name = d.name, logo_url = d.logo_url, banner_url = d.banner_url,
+        shipping_fee = COALESCE(s.shipping_fee, d.shipping_fee)
+    FROM dbo.store s JOIN @stores d ON d.store_code = s.store_code;
+
+    INSERT INTO dbo.store (supplier_id_ref, store_code, name, slug, logo_url, banner_url, shipping_fee, status)
+    SELECT d.supplier_id_ref, d.store_code, d.name, d.slug, d.logo_url, d.banner_url, d.shipping_fee, N'ACTIVE'
+    FROM @stores d WHERE NOT EXISTS (SELECT 1 FROM dbo.store s WHERE s.store_code = d.store_code);
+
+    IF EXISTS (SELECT 1 FROM @products d JOIN dbo.store s ON s.store_code = d.store_code
+               JOIN dbo.product p ON p.store_id = s.store_id AND p.product_code = d.product_code
+               JOIN dbo.category c ON c.slug = d.category_slug
+               WHERE p.category_id <> c.category_id OR p.status <> N'ACTIVE')
+        THROW 51306, 'An existing demo brand product conflicts with the seed.', 1;
+    INSERT INTO dbo.product (store_id, category_id, product_code, name, description, status)
+    SELECT s.store_id, c.category_id, d.product_code, d.name, d.description, N'ACTIVE'
+    FROM @products d JOIN dbo.store s ON s.store_code = d.store_code
+    JOIN dbo.category c ON c.slug = d.category_slug
+    WHERE NOT EXISTS (SELECT 1 FROM dbo.product p WHERE p.store_id = s.store_id AND p.product_code = d.product_code);
+
+    IF EXISTS (SELECT 1 FROM @products d JOIN dbo.product_variant v ON v.sku = d.sku
+               JOIN dbo.product p ON p.product_id = v.product_id JOIN dbo.store s ON s.store_id = p.store_id
+               WHERE p.product_code <> d.product_code OR s.store_code <> d.store_code OR v.status <> N'ACTIVE')
+        THROW 51307, 'An existing demo brand SKU conflicts with the seed.', 1;
+    INSERT INTO dbo.product_variant (product_id, sku, variant_name, image_url, base_price, stock_quantity, status)
+    SELECT p.product_id, d.sku, d.variant_name, d.image_url, d.base_price, d.stock_quantity, N'ACTIVE'
+    FROM @products d JOIN dbo.store s ON s.store_code = d.store_code
+    JOIN dbo.product p ON p.store_id = s.store_id AND p.product_code = d.product_code
+    WHERE NOT EXISTS (SELECT 1 FROM dbo.product_variant v WHERE v.sku = d.sku);
+
+    UPDATE s SET name=d.name FROM dbo.store s JOIN @stores d ON d.store_code=s.store_code;
+    UPDATE p SET name=d.name,description=d.description
+    FROM dbo.product p JOIN dbo.store s ON s.store_id=p.store_id
+    JOIN @products d ON d.store_code=s.store_code AND d.product_code=p.product_code;
+    UPDATE v SET variant_name=d.variant_name
+    FROM dbo.product_variant v JOIN @products d ON d.sku=v.sku;
+
+    IF (SELECT COUNT(*) FROM @products d JOIN dbo.store s ON s.store_code = d.store_code
+        JOIN dbo.product p ON p.store_id = s.store_id AND p.product_code = d.product_code
+        JOIN dbo.product_variant v ON v.product_id = p.product_id AND v.sku = d.sku) <> 24
+        THROW 51308, 'Demo brand catalog verification failed.', 1;
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+SELECT s.store_code, COUNT(p.product_id) AS demo_product_count
+FROM @products d JOIN dbo.store s ON s.store_code = d.store_code
+JOIN dbo.product p ON p.store_id = s.store_id AND p.product_code = d.product_code
+GROUP BY s.store_code ORDER BY s.store_code;
+GO
+UPDATE dbo.store SET shipping_fee=30000 WHERE store_code LIKE N'DEMO-%' AND shipping_fee IS NULL;
+SELECT COUNT(*) AS demo_store_count FROM dbo.store WHERE store_code LIKE N'DEMO-%';
+SELECT COUNT(*) AS demo_product_count FROM dbo.product WHERE product_code LIKE N'DEMO-%';
+SELECT COUNT(*) AS demo_variant_count FROM dbo.product_variant WHERE sku LIKE N'DEMO-%';

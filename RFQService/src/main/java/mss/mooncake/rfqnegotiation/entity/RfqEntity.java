@@ -11,6 +11,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import lombok.Getter;
 import lombok.Setter;
+import mss.mooncake.rfqnegotiation.enums.RfqAudience;
 import mss.mooncake.rfqnegotiation.enums.RfqStatus;
 
 @Getter
@@ -32,4 +33,6 @@ public class RfqEntity extends BaseRfqEntity {
     @Column(name = "status", nullable = false, length = 30) private RfqStatus status;
     @Column(name = "expires_at") private LocalDateTime expiresAt;
     @Column(name = "created_at", nullable = false) private LocalDateTime createdAt;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "audience", nullable = false, length = 20) private RfqAudience audience = RfqAudience.ALL;
 }

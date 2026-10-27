@@ -10,7 +10,8 @@ import org.springframework.util.StringUtils;
 /**
  * Query phân trang {@code ?page=&size=&sort=} cho API listing; controller nhận trực tiếp như tham số (model attribute).
  * Quy ước MSS: page từ 0, size mặc định 20, tối đa 100; vượt giới hạn trả 400, không tự cắt.
- * Sort dạng "field" hoặc "field,asc|desc", field phải nằm trong allowlist của từng API; luôn thêm id làm tie-breaker.
+ * Sort dạng "field" hoặc "field,asc|desc", field phải nằm trong allowlist của từng API; thêm id làm tie-breaker
+ * nếu sort chưa có id.
  */
 public record PageQuery(Integer page, Integer size, String sort) {
 
@@ -22,7 +23,10 @@ public record PageQuery(Integer page, Integer size, String sort) {
         int s = size == null ? DEFAULT_SIZE : size;
         if (p < 0) throw new BadRequestException("page phải >= 0");
         if (s < 1 || s > MAX_SIZE) throw new BadRequestException("size phải trong khoảng 1.." + MAX_SIZE);
-        return PageRequest.of(p, s, parseSort(allowedSortFields, defaultSort).and(Sort.by("id")));
+        Sort sortSpec = parseSort(allowedSortFields, defaultSort);
+        // Chỉ thêm id khi chưa có: SQL Server từ chối ORDER BY lặp cột ("specified more than once").
+        if (sortSpec.getOrderFor("id") == null) sortSpec = sortSpec.and(Sort.by("id"));
+        return PageRequest.of(p, s, sortSpec);
     }
 
     private Sort parseSort(Set<String> allowedSortFields, Sort defaultSort) {

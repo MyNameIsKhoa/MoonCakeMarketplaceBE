@@ -146,9 +146,33 @@ class InternalCatalogContractTest {
                 .andExpect(jsonPath("$[1].imageUrl").value("https://img/SKU-CT-A.png"))
                 .andExpect(jsonPath("$[1].basePrice").value(180000))
                 .andExpect(jsonPath("$[1].stockQuantity").value(12))
+                .andExpect(jsonPath("$[1].availableQuantity").value(12))
                 .andExpect(jsonPath("$[1].variantStatus").value("ACTIVE"))
                 .andExpect(jsonPath("$[1].productStatus").value("ACTIVE"))
                 .andExpect(jsonPath("$[1].storeStatus").value("ACTIVE"));
+    }
+
+    @Test
+    @DisplayName("IN07: availableQuantity trừ lượng đang giữ bởi IN12; release thì trả lại; stockQuantity giữ on-hand")
+    void in07_availableQuantitySubtractsLiveHolds() throws Exception {
+        String hold = "{\"reservationKey\":\"ct-hold-1\",\"expiresAt\":\""
+                + java.time.OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(15) + "\","
+                + "\"lines\":[{\"variantId\":" + variantA + ",\"quantity\":5}]}";
+        mockMvc.perform(asService(post("/internal/v1/inventory/reservations")
+                        .contentType(MediaType.APPLICATION_JSON).content(hold), "commerce", COMMERCE_TOKEN))
+                .andExpect(status().isOk());
+
+        String body = "{\"variantIds\":[" + variantA + "]}";
+        mockMvc.perform(asService(batch(body), "commerce", COMMERCE_TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].stockQuantity").value(12))
+                .andExpect(jsonPath("$[0].availableQuantity").value(7));
+
+        mockMvc.perform(asService(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .put("/internal/v1/inventory/reservations/ct-hold-1/release"), "commerce", COMMERCE_TOKEN))
+                .andExpect(status().isOk());
+        mockMvc.perform(asService(batch(body), "commerce", COMMERCE_TOKEN))
+                .andExpect(jsonPath("$[0].availableQuantity").value(12));
     }
 
     @Test
@@ -215,7 +239,7 @@ class InternalCatalogContractTest {
                 .andExpect(jsonPath("$.lines[0].lineSubtotal").value(360000))
                 .andExpect(jsonPath("$.lines[0].discountAmount").value(36000))
                 .andExpect(jsonPath("$.lines[0].lineTotal").value(324000))
-                .andExpect(jsonPath("$.lines[0].promotionId").value(promotionId))
+                .andExpect(jsonPath("$.lines[0].appliedRules[0].promotionId").value(promotionId))
                 .andExpect(jsonPath("$.appliedPromotions[0].promotionId").value(promotionId))
                 .andExpect(jsonPath("$.appliedPromotions[0].promotionName").value("Trung thu 10%"))
                 .andExpect(jsonPath("$.appliedPromotions[0].ruleType").value("PERCENT_DISCOUNT"))

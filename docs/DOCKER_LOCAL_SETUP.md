@@ -27,7 +27,7 @@ SQL Server khởi động
     → Gateway phục vụ API
 ```
 
-Các container `*-db-init` kết thúc với mã `0` sau khi tạo database; đây là trạng thái thành công. Chúng sử dụng các script idempotent trong `docs/sqlserver`.
+Các container `*-db-init` kết thúc với mã `0` sau khi tạo database; đây là trạng thái thành công. Chúng chạy lệnh idempotent `IF DB_ID(...) IS NULL CREATE DATABASE ...` khai báo trong `docker-compose.yml` (cùng nội dung với các script trong `docs/sqlserver`).
 
 | Thành phần | Địa chỉ trên máy |
 |---|---|

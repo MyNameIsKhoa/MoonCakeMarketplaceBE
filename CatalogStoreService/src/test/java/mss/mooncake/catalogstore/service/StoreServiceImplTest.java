@@ -49,7 +49,8 @@ class StoreServiceImplTest {
     @InjectMocks
     private StoreServiceImpl storeService;
 
-    // ── Fixtures ──────────────────────────────────────────────────────────────────
+    // ── Fixtures
+    // ──────────────────────────────────────────────────────────────────
 
     private static final Long USER_A = 10L;
     private static final Long USER_B = 20L;
@@ -79,7 +80,8 @@ class StoreServiceImplTest {
         return e;
     }
 
-    // ── POST /api/stores ──────────────────────────────────────────────────────────
+    // ── POST /api/stores
+    // ──────────────────────────────────────────────────────────
 
     @Nested
     @DisplayName("createStore")
@@ -97,7 +99,7 @@ class StoreServiceImplTest {
                 return s;
             });
 
-            CreateStoreRequest req = new CreateStoreRequest("My Store", null, null, null);
+            CreateStoreRequest req = new CreateStoreRequest("My Store", null, null, null, null);
             StoreResponse resp = storeService.createStore(req, USER_A);
 
             assertThat(resp.name()).isEqualTo("My Store");
@@ -113,7 +115,7 @@ class StoreServiceImplTest {
             when(identityClient.getSupplierSummaryByUserId(USER_A))
                     .thenThrow(FeignException.NotFound.class);
 
-            CreateStoreRequest req = new CreateStoreRequest("My Store", null, null, null);
+            CreateStoreRequest req = new CreateStoreRequest("My Store", null, null, null, null);
 
             assertThatThrownBy(() -> storeService.createStore(req, USER_A))
                     .isInstanceOf(BadRequestException.class)
@@ -125,10 +127,11 @@ class StoreServiceImplTest {
         @Test
         @DisplayName("Ném BadRequestException khi supplier chưa VERIFIED/ACTIVE")
         void createStore_supplierNotVerified_throwsBadRequest() {
-            SupplierSummaryDto pendingSupplier = new SupplierSummaryDto(SUPPLIER_A_ID, USER_A, "Công ty A", "TAX-001", "PENDING");
+            SupplierSummaryDto pendingSupplier = new SupplierSummaryDto(SUPPLIER_A_ID, USER_A, "Công ty A", "TAX-001",
+                    "PENDING");
             when(identityClient.getSupplierSummaryByUserId(USER_A)).thenReturn(pendingSupplier);
 
-            CreateStoreRequest req = new CreateStoreRequest("My Store", null, null, null);
+            CreateStoreRequest req = new CreateStoreRequest("My Store", null, null, null, null);
 
             assertThatThrownBy(() -> storeService.createStore(req, USER_A))
                     .isInstanceOf(BadRequestException.class)
@@ -138,7 +141,8 @@ class StoreServiceImplTest {
         }
     }
 
-    // ── GET /api/stores ───────────────────────────────────────────────────────────
+    // ── GET /api/stores
+    // ───────────────────────────────────────────────────────────
 
     @Nested
     @DisplayName("getMyStores")
@@ -147,7 +151,6 @@ class StoreServiceImplTest {
         @Test
         @DisplayName("Chỉ trả store của supplier đang login")
         void getMyStores_returnsOnlyOwnStores() {
-            StoreEntity storeOfB = buildStore(2L, SUPPLIER_B_ID, "Store B", "store-b", "STR-BBBBBBBB");
 
             when(identityClient.getSupplierSummaryByUserId(USER_A)).thenReturn(supplierA);
             when(storeRepository.findBySupplierIdRef(SUPPLIER_A_ID))
@@ -162,7 +165,8 @@ class StoreServiceImplTest {
         }
     }
 
-    // ── GET /api/stores/{id} ──────────────────────────────────────────────────────
+    // ── GET /api/stores/{id}
+    // ──────────────────────────────────────────────────────
 
     @Nested
     @DisplayName("getStoreById")
@@ -187,7 +191,8 @@ class StoreServiceImplTest {
         }
     }
 
-    // ── PATCH /api/stores/{id} ────────────────────────────────────────────────────
+    // ── PATCH /api/stores/{id}
+    // ────────────────────────────────────────────────────
 
     @Nested
     @DisplayName("updateStore — ownership enforcement")
@@ -200,7 +205,7 @@ class StoreServiceImplTest {
             when(identityClient.getSupplierSummaryByUserId(USER_A)).thenReturn(supplierA);
             when(storeRepository.save(any())).thenReturn(storeOfSupplierA);
 
-            UpdateStoreRequest req = new UpdateStoreRequest("Store A Updated", null, null, "dark", null);
+            UpdateStoreRequest req = new UpdateStoreRequest("Store A Updated", null, null, "dark", null, null);
             StoreResponse resp = storeService.updateStore(1L, req, USER_A);
 
             assertThat(resp).isNotNull();
@@ -215,7 +220,7 @@ class StoreServiceImplTest {
             // nhưng user đang login là USER_B → supplierId = SUPPLIER_B_ID
             when(identityClient.getSupplierSummaryByUserId(USER_B)).thenReturn(supplierB);
 
-            UpdateStoreRequest req = new UpdateStoreRequest("Hacked Name", null, null, null, null);
+            UpdateStoreRequest req = new UpdateStoreRequest("Hacked Name", null, null, null, null, null);
 
             // USER_B không thể sửa store của SUPPLIER_A
             assertThatThrownBy(() -> storeService.updateStore(1L, req, USER_B))
@@ -229,7 +234,7 @@ class StoreServiceImplTest {
         @DisplayName("Ném ResourceNotFoundException khi store không tồn tại")
         void updateStore_storeNotFound() {
             when(storeRepository.findById(999L)).thenReturn(Optional.empty());
-            UpdateStoreRequest req = new UpdateStoreRequest(null, null, null, null, null);
+            UpdateStoreRequest req = new UpdateStoreRequest(null, null, null, null, null, null);
 
             assertThatThrownBy(() -> storeService.updateStore(999L, req, USER_A))
                     .isInstanceOf(ResourceNotFoundException.class);
@@ -242,7 +247,7 @@ class StoreServiceImplTest {
             when(identityClient.getSupplierSummaryByUserId(USER_B))
                     .thenThrow(FeignException.NotFound.class);
 
-            UpdateStoreRequest req = new UpdateStoreRequest(null, null, null, null, null);
+            UpdateStoreRequest req = new UpdateStoreRequest(null, null, null, null, null, null);
 
             assertThatThrownBy(() -> storeService.updateStore(1L, req, USER_B))
                     .isInstanceOf(BadRequestException.class);
@@ -253,11 +258,12 @@ class StoreServiceImplTest {
         @Test
         @DisplayName("Ném BadRequestException khi supplier chưa VERIFIED/ACTIVE")
         void updateStore_supplierNotActive_throwsBadRequest() {
-            SupplierSummaryDto pendingSupplier = new SupplierSummaryDto(SUPPLIER_A_ID, USER_A, "Công ty A", "TAX-001", "PENDING");
+            SupplierSummaryDto pendingSupplier = new SupplierSummaryDto(SUPPLIER_A_ID, USER_A, "Công ty A", "TAX-001",
+                    "PENDING");
             when(storeRepository.findById(1L)).thenReturn(Optional.of(storeOfSupplierA));
             when(identityClient.getSupplierSummaryByUserId(USER_A)).thenReturn(pendingSupplier);
 
-            UpdateStoreRequest req = new UpdateStoreRequest("Updated", null, null, null, null);
+            UpdateStoreRequest req = new UpdateStoreRequest("Updated", null, null, null, null, null);
 
             assertThatThrownBy(() -> storeService.updateStore(1L, req, USER_A))
                     .isInstanceOf(BadRequestException.class)
@@ -273,11 +279,11 @@ class StoreServiceImplTest {
             when(storeRepository.save(any(StoreEntity.class))).thenAnswer(inv -> inv.getArgument(0));
 
             StoreResponse suspended = storeService.updateStore(1L,
-                    new UpdateStoreRequest(null, null, null, null, "SUSPENDED"), USER_B, true);
+                    new UpdateStoreRequest(null, null, null, null, "SUSPENDED", null), USER_B, true);
             assertThat(suspended.status()).isEqualTo("SUSPENDED");
 
             StoreResponse restored = storeService.updateStore(1L,
-                    new UpdateStoreRequest(null, null, null, null, "INACTIVE"), USER_B, true);
+                    new UpdateStoreRequest(null, null, null, null, "INACTIVE", null), USER_B, true);
             assertThat(restored.status()).isEqualTo("INACTIVE");
         }
 
@@ -288,7 +294,7 @@ class StoreServiceImplTest {
             when(identityClient.getSupplierSummaryByUserId(USER_A)).thenReturn(supplierA);
 
             assertThatThrownBy(() -> storeService.updateStore(1L,
-                    new UpdateStoreRequest(null, null, null, null, "SUSPENDED"), USER_A))
+                    new UpdateStoreRequest(null, null, null, null, "SUSPENDED", null), USER_A))
                     .isInstanceOf(ForbiddenException.class);
             verify(storeRepository, never()).save(any());
         }
@@ -298,12 +304,13 @@ class StoreServiceImplTest {
             when(storeRepository.findById(1L)).thenReturn(Optional.of(storeOfSupplierA));
 
             assertThatThrownBy(() -> storeService.updateStore(1L,
-                    new UpdateStoreRequest(null, null, null, null, "SUSPENDED"), USER_B, true))
+                    new UpdateStoreRequest(null, null, null, null, "SUSPENDED", null), USER_B, true))
                     .isInstanceOf(BadRequestException.class);
         }
     }
 
-    // ── GET /api/stores/{idOrSlug} & by supplier ──────────────────────────────────
+    // ── GET /api/stores/{idOrSlug} & by supplier
+    // ──────────────────────────────────
 
     @Nested
     @DisplayName("getStoreByIdOrSlug & getStoresBySupplierId")
@@ -360,7 +367,8 @@ class StoreServiceImplTest {
         }
     }
 
-    // ── Internal summary ──────────────────────────────────────────────────────────
+    // ── Internal summary
+    // ──────────────────────────────────────────────────────────
 
     @Nested
     @DisplayName("getStoreSummary — internal contract")

@@ -27,6 +27,7 @@ public class SecurityConfig {
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .requestMatchers("/ws/chat", "/ws/chat/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/rfqs", "/api/rfqs/{rfqId}").permitAll()
+                        .requestMatchers("/api/quotations/*/accept").hasAuthority("ROLE_CUSTOMER")
                         .anyRequest().hasAnyAuthority("ROLE_CUSTOMER", "ROLE_SUPPLIER", "ROLE_ADMIN"))
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
                 .build();
