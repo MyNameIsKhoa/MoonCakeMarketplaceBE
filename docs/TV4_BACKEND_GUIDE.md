@@ -18,6 +18,7 @@ RFQ → lưu intent PENDING → Commerce tạo đơn và khoản thanh toán
 | Nội dung | Quy tắc đã triển khai |
 |---|---|
 | Công bố | Tạo RFQ chuyển ngay thành `OPEN`; gửi báo giá chuyển ngay thành `SUBMITTED`. Không có luồng bản nháp/publish/submit riêng. |
+| Gửi riêng | Không gửi `targetStoreIds` (hoặc rỗng) → `audience=ALL`, lên sàn chung như trước. Gửi 1–20 cửa hàng `ACTIVE` → `audience=SELECTED_STORES`: RFQ không lên sàn chung; chỉ chủ RFQ và nhà cung cấp sở hữu cửa hàng được mời xem, báo giá, nhắn tin. Nhà cung cấp khác nhận `404 RFQ_NOT_FOUND` như RFQ không tồn tại; nhà cung cấp được mời báo giá từ cửa hàng không được mời → `403 STORE_NOT_TARGETED`; chủ RFQ mở hội thoại với nhà cung cấp không được mời → `403 SUPPLIER_NOT_TARGETED`. Chủ RFQ thấy toàn bộ `targetStores`, nhà cung cấp chỉ thấy cửa hàng của mình. Danh sách cố định sau khi tạo. |
 | Sửa RFQ | Chỉ owner, RFQ mở/còn hạn và chưa có bất kỳ báo giá nào. PATCH phân biệt field vắng với `null`. |
 | Đóng/hủy RFQ | CLOSED dừng nhận báo giá mới, vẫn accept báo giá đã gửi còn hiệu lực. Hết hạn RFQ dừng intake, hiệu lực báo giá theo validUntil. CANCELLED chặn accept mới; giữ đơn và intent đã hình thành. Hủy đơn thuộc Commerce. |
 | Phiên bản | Server tăng version theo RFQ/cửa hàng. Revision chỉ từ bản mới nhất đang `SUBMITTED`, chưa có conversion; RFQ phải `OPEN` và còn hạn. Bản cũ thành `REVISED`, giữ nguyên item/giá/điều khoản. |
@@ -38,9 +39,9 @@ Các thay đổi không thuộc TV4 như payment provider/webhook/refund/settlem
 
 | Method | URL | Quyền/chức năng |
 |---|---|---|
-| GET | `/api/rfqs` | Public search (ẩn RFQ `OPEN` đã quá `expiresAt`; detail vẫn đọc được); `mine=true` cần buyer đăng nhập. |
+| GET | `/api/rfqs` | Public search (ẩn RFQ `OPEN` đã quá `expiresAt`; detail vẫn đọc được) gồm RFQ `ALL` và RFQ gửi riêng mời cửa hàng của người gọi; `mine=true` cần buyer đăng nhập. |
 | GET | `/api/rfqs/{rfqId}` | Public detail; owner thấy private fields. |
-| POST | `/api/rfqs` | Buyer tạo/công bố, trả 201 và Location. |
+| POST | `/api/rfqs` | Buyer tạo/công bố, trả 201 và Location; `targetStoreIds` (mảng ID string) tùy chọn để gửi riêng. |
 | PATCH | `/api/rfqs/{rfqId}` | Owner sửa trước báo giá, Content-Type merge-patch. |
 | POST | `/api/rfqs/{rfqId}/close`, `/cancel` | Owner đóng/hủy RFQ. |
 | GET/POST | `/api/rfqs/{rfqId}/quotations` | Buyer so sánh; supplier đọc của mình/gửi báo giá. |
@@ -166,7 +167,7 @@ Broker hiện là in-memory: chạy một RFQ instance. Chưa có attachment/rea
 
 ## 6. Migration và kiểm tra
 
-- RFQ V2: quotation decision/command idempotency; V3: durable conversion; V4: chat dedup; V5: acceptance key collation; V6: trạng thái conversion `FAILED`.
+- RFQ V2: quotation decision/command idempotency; V3: durable conversion; V4: chat dedup; V5: acceptance key collation; V6: trạng thái conversion `FAILED`; V7: `rfq.audience` + bảng `rfq_target_store` (gửi riêng cửa hàng).
 - Commerce V5: unique quotation conversion; V6: opaque key collation (V2/V3/V4 thuộc cart uniqueness, TV5 finance và retail checkout). Order/address/items/payment tạo trong một transaction.
 - Các business service dùng Spring Boot 4 `spring-boot-starter-flyway` để migration thực sự chạy khi khởi động.
 - Catalog mapping được đối chiếu SQL Server V1: audit chỉ có ở PRODUCT; STORE/VARIANT không được truy vấn các cột audit chưa tồn tại.

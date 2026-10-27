@@ -33,7 +33,7 @@ try {
     [Environment]::SetEnvironmentVariable('SPRING_JPA_HIBERNATE_DDL_AUTO', 'none', 'Process')
 
     $taskModules = @(
-        @{ Module = 'RFQService'; Container = 'rfq-db'; Port = 14334; Database = 'mss_rfq_tv4_test'; Test = 'QuotationAcceptanceIntegrationTest,RfqApplicationServiceTest,RfqRequestContractTest' },
+        @{ Module = 'RFQService'; Container = 'rfq-db'; Port = 14334; Database = 'mss_rfq_tv4_test'; Test = 'QuotationAcceptanceIntegrationTest,RfqApplicationServiceTest,RfqRequestContractTest,RfqPublicFeedIntegrationTest' },
         @{ Module = 'CommerceService'; Container = 'commerce-db'; Port = 14333; Database = 'mss_commerce_tv4_test'; Test = 'QuotationOrderIntegrationTest' }
     )
     foreach ($taskModule in $taskModules) {
