@@ -33,8 +33,8 @@ public class ShipmentController {
     public ResponseEntity<ShipmentResponse> createShipment(
             @Valid @RequestBody CreateShipmentRequest request,
             @AuthenticationPrincipal CommercePrincipal principal) {
-        Long supplierId = principal != null ? principal.userId() : null;
-        ShipmentResponse response = fulfillmentService.createShipment(request, supplierId);
+        Long userId = principal != null ? principal.userId() : null;
+        ShipmentResponse response = fulfillmentService.createShipment(request, userId);
         return ResponseEntity.created(URI.create("/api/shipments/" + response.shipmentId())).body(response);
     }
 
@@ -42,20 +42,20 @@ public class ShipmentController {
     public ResponseEntity<List<ShipmentResponse>> getShipments(
             @RequestParam Long sellerOrderId,
             @AuthenticationPrincipal CommercePrincipal principal) {
-        Long currentUserId = principal != null ? (principal.customerId() != null ? principal.customerId() : principal.userId()) : null;
-        boolean isCustomer = principal != null && principal.hasRole("ROLE_CUSTOMER");
+        Long userId = principal != null ? principal.userId() : null;
+        Long customerId = principal != null ? principal.customerId() : null;
         boolean isAdmin = principal != null && principal.hasRole("ROLE_ADMIN");
-        return ResponseEntity.ok(fulfillmentService.getShipmentsBySellerOrder(sellerOrderId, currentUserId, isCustomer, isAdmin));
+        return ResponseEntity.ok(fulfillmentService.getShipmentsBySellerOrder(sellerOrderId, userId, customerId, isAdmin));
     }
 
     @GetMapping("/{id}")
     public ResponseEntity<ShipmentResponse> getShipmentById(
             @PathVariable Long id,
             @AuthenticationPrincipal CommercePrincipal principal) {
-        Long currentUserId = principal != null ? (principal.customerId() != null ? principal.customerId() : principal.userId()) : null;
-        boolean isCustomer = principal != null && principal.hasRole("ROLE_CUSTOMER");
+        Long userId = principal != null ? principal.userId() : null;
+        Long customerId = principal != null ? principal.customerId() : null;
         boolean isAdmin = principal != null && principal.hasRole("ROLE_ADMIN");
-        return ResponseEntity.ok(fulfillmentService.getShipmentById(id, currentUserId, isCustomer, isAdmin));
+        return ResponseEntity.ok(fulfillmentService.getShipmentById(id, userId, customerId, isAdmin));
     }
 
     @PatchMapping("/{id}")
@@ -63,24 +63,24 @@ public class ShipmentController {
             @PathVariable Long id,
             @RequestBody UpdateShipmentRequest request,
             @AuthenticationPrincipal CommercePrincipal principal) {
-        Long supplierId = principal != null ? principal.userId() : null;
-        return ResponseEntity.ok(fulfillmentService.updateShipment(id, request, supplierId));
+        Long userId = principal != null ? principal.userId() : null;
+        return ResponseEntity.ok(fulfillmentService.updateShipment(id, request, userId));
     }
 
     @PostMapping("/{id}/ship")
     public ResponseEntity<ShipmentResponse> markAsShipped(
             @PathVariable Long id,
             @AuthenticationPrincipal CommercePrincipal principal) {
-        Long supplierId = principal != null ? principal.userId() : null;
-        return ResponseEntity.ok(fulfillmentService.markAsShipped(id, supplierId));
+        Long userId = principal != null ? principal.userId() : null;
+        return ResponseEntity.ok(fulfillmentService.markAsShipped(id, userId));
     }
 
     @PostMapping("/{id}/delivered")
     public ResponseEntity<ShipmentResponse> markAsDelivered(
             @PathVariable Long id,
             @AuthenticationPrincipal CommercePrincipal principal) {
-        Long actorId = principal != null ? principal.userId() : null;
+        Long userId = principal != null ? principal.userId() : null;
         boolean isAdmin = principal != null && principal.hasRole("ROLE_ADMIN");
-        return ResponseEntity.ok(fulfillmentService.markAsDelivered(id, actorId, isAdmin));
+        return ResponseEntity.ok(fulfillmentService.markAsDelivered(id, userId, isAdmin));
     }
 }

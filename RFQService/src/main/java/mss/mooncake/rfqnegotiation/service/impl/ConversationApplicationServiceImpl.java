@@ -16,12 +16,15 @@ import mss.mooncake.rfqnegotiation.dto.response.ConversationResponse;
 import mss.mooncake.rfqnegotiation.dto.response.MessagePageResponse;
 import mss.mooncake.rfqnegotiation.dto.response.MessageResponse;
 import mss.mooncake.rfqnegotiation.dto.response.PageResponse;
+import mss.mooncake.rfqnegotiation.dto.response.UnreadCountResponse;
 import mss.mooncake.rfqnegotiation.entity.ConversationEntity;
+import mss.mooncake.rfqnegotiation.entity.ConversationReadStateEntity;
 import mss.mooncake.rfqnegotiation.entity.MessageEntity;
 import mss.mooncake.rfqnegotiation.enums.ConversationStatus;
 import mss.mooncake.rfqnegotiation.enums.RfqAudience;
 import mss.mooncake.rfqnegotiation.enums.RfqStatus;
 import mss.mooncake.rfqnegotiation.exception.ApiException;
+import mss.mooncake.rfqnegotiation.repository.ConversationReadStateRepository;
 import mss.mooncake.rfqnegotiation.repository.ConversationRepository;
 import mss.mooncake.rfqnegotiation.repository.MessageRepository;
 import mss.mooncake.rfqnegotiation.repository.RfqRepository;
@@ -40,6 +43,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ConversationApplicationServiceImpl implements ConversationApplicationService {
     private final ConversationRepository conversations;
     private final MessageRepository messages;
+    private final ConversationReadStateRepository reads;
     private final RfqRepository rfqs;
     private final RfqTargetStoreRepository targets;
     private final ActorContext actor;
@@ -47,10 +51,11 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
     private final ApplicationEventPublisher events;
 
     public ConversationApplicationServiceImpl(ConversationRepository conversations, MessageRepository messages,
-            RfqRepository rfqs, RfqTargetStoreRepository targets, ActorContext actor, IdentityServiceClient identity,
-            ApplicationEventPublisher events) {
+            ConversationReadStateRepository reads, RfqRepository rfqs, RfqTargetStoreRepository targets,
+            ActorContext actor, IdentityServiceClient identity, ApplicationEventPublisher events) {
         this.conversations = conversations;
         this.messages = messages;
+        this.reads = reads;
         this.rfqs = rfqs;
         this.targets = targets;
         this.actor = actor;
@@ -178,6 +183,28 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
         var response = toResponse(messages.saveAndFlush(message));
         events.publishEvent(new MessagePersistedEvent(response));
         return response;
+    }
+
+    @Override
+    public UnreadCountResponse unreadCount() {
+        Long userId = actor.userId();
+        return new UnreadCountResponse(messages.countUnread(userId, actor.optionalCustomerId(), actor.optionalSupplierId()));
+    }
+
+    @Override
+    @Transactional
+    public void markRead(Long conversationId) {
+        Long userId = actor.userId();
+        // The conversation lock serializes several tabs of the same user creating the unique read row.
+        var conversation = conversations.findByIdForUpdate(conversationId)
+                .orElseThrow(() -> ApiException.notFound("CONVERSATION_NOT_FOUND", "Không tìm thấy hội thoại"));
+        requireParticipant(conversation, userId);
+        Long latest = messages.findLatestId(conversationId);
+        if (latest == null) return;
+        var read = reads.findByConversationIdAndUserIdRef(conversationId, userId)
+                .orElseGet(() -> new ConversationReadStateEntity(conversationId, userId));
+        read.readUpTo(latest, LocalDateTime.now(ZoneOffset.UTC).withNano(0));
+        reads.save(read);
     }
 
     private void validateMessage(SendMessageRequest request) {

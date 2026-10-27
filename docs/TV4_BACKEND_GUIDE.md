@@ -54,6 +54,8 @@ Các thay đổi không thuộc TV4 như payment provider/webhook/refund/settlem
 | POST | `/api/rfqs/{rfqId}/conversations` | Buyer chọn supplierId; supplier dùng hồ sơ của mình. |
 | GET | `/api/conversations`, `/api/conversations/{id}` | Hội thoại của participant. |
 | GET | `/api/conversations/{id}/messages` | Cursor trước/sau, limit 1..100, mặc định 50. |
+| GET | `/api/conversations/unread-count` | `{unreadCount}`: tin của bên kia sau lần đọc cuối (FE hiện badge trên thanh menu). |
+| POST | `/api/conversations/{id}/read` | Participant đánh dấu đã đọc tới tin mới nhất; không lùi; 204. |
 
 Collection dùng page từ 0, size mặc định 20/tối đa 100; response `{items,page,size,totalElements,totalPages}`. Sort có allowlist và ID làm thứ tự phụ.
 
@@ -167,7 +169,7 @@ Broker hiện là in-memory: chạy một RFQ instance. Chưa có attachment/rea
 
 ## 6. Migration và kiểm tra
 
-- RFQ V2: quotation decision/command idempotency; V3: durable conversion; V4: chat dedup; V5: acceptance key collation; V6: trạng thái conversion `FAILED`; V7: `rfq.audience` + bảng `rfq_target_store` (gửi riêng cửa hàng).
+- RFQ V2: quotation decision/command idempotency; V3: durable conversion; V4: chat dedup; V5: acceptance key collation; V6: trạng thái conversion `FAILED`; V7: `rfq.audience` + bảng `rfq_target_store` (gửi riêng cửa hàng); V8: bảng `conversation_read_state` (tin đã đọc của từng participant).
 - Commerce V5: unique quotation conversion; V6: opaque key collation (V2/V3/V4 thuộc cart uniqueness, TV5 finance và retail checkout). Order/address/items/payment tạo trong một transaction.
 - Các business service dùng Spring Boot 4 `spring-boot-starter-flyway` để migration thực sự chạy khi khởi động.
 - Catalog mapping được đối chiếu SQL Server V1: audit chỉ có ở PRODUCT; STORE/VARIANT không được truy vấn các cột audit chưa tồn tại.
