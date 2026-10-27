@@ -114,7 +114,7 @@ Content-Type: application/json
 
 Với item Catalog, truyền thêm `productId` và `variantId` dạng string. Supplier phải sở hữu cửa hàng đang ACTIVE; quy trình xác minh supplier trước tạo cửa hàng vẫn do Identity/Catalog quản lý.
 
-Mỗi báo giá cần **1–50 items**. Các field `storeId`, `depositPercent`, `validUntil`, `proposedDeliveryDate`, `shippingFee` và `items` là bắt buộc; ngày giao không được ở quá khứ, `validUntil` phải ở tương lai khi tạo phiên bản mới. Mục tùy chỉnh bỏ cả `productId`/`variantId` và cần `itemNameSnapshot`; `discountAmount` không gửi được tính là `0.00`. Mục Catalog phải có cả hai ID và store/product/variant đều `ACTIVE`.
+Mỗi báo giá cần **1–50 items**. Các field `storeId`, `depositPercent`, `validUntil`, `proposedDeliveryDate`, `shippingFee` và `items` là bắt buộc; ngày giao không được ở quá khứ, `validUntil` phải ở tương lai khi tạo phiên bản mới. Cọc nằm giữa 0% và 100% (có phần còn lại, hạn 3 ngày trước ngày giao) thì ngày giao phải cách hôm nay (giờ Việt Nam) ít nhất 4 ngày: tạo/sửa phiên bản sai → `400 DELIVERY_TOO_SOON_FOR_REMAINING`, chấp nhận báo giá đã quá sát ngày → `409 DELIVERY_TOO_SOON_FOR_REMAINING`; message nêu ngày sớm nhất được phép. Mục tùy chỉnh bỏ cả `productId`/`variantId` và cần `itemNameSnapshot`; `discountAmount` không gửi được tính là `0.00`. Mục Catalog phải có cả hai ID và store/product/variant đều `ACTIVE`.
 
 Revision gửi các field điều khoản/items như tạo báo giá, **bỏ `storeId` và thêm `expectedVersion`**; dùng `Idempotency-Key` riêng cho lần sửa. Response báo giá/danh sách dùng field **`version`**; body accept dùng **`quotationVersion`**. Khi cửa hàng đã có báo giá mới nhất `SUBMITTED`, tạo báo giá khác trả `409`; phải sửa bằng revision.
 
