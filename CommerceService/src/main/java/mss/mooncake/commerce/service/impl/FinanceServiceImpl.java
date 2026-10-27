@@ -17,6 +17,8 @@ import mss.mooncake.commerce.service.FinanceService;
 import mss.mooncake.commerce.service.FinanceIntegrationService;
 import mss.mooncake.commerce.service.PaymentDescription;
 import mss.mooncake.commerce.service.CustomerPaymentService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -27,6 +29,7 @@ import vn.payos.model.webhooks.Webhook;
 
 @Service
 public class FinanceServiceImpl implements FinanceService {
+    private static final Logger log = LoggerFactory.getLogger(FinanceServiceImpl.class);
     private final FinanceRepository repository;
     private final PaymentProvider provider;
     private final TransactionTemplate transaction;
@@ -199,16 +202,24 @@ public class FinanceServiceImpl implements FinanceService {
                 repository.lock(reserved.orderId());
                 require(link.orderCode() == reserved.orderCode() && link.amount() == reserved.amount()
                         && link.id() != null, "PROVIDER_LINK_MISMATCH");
+                // A reconciliation that ran meanwhile may have settled or cancelled the payment: never revive it.
                 repository.update("""
                         UPDATE payment SET payment_link_id=?,checkout_url=?,qr_code=?,
-                        status=CASE WHEN status='SUCCESS' THEN status ELSE 'PENDING' END WHERE payment_id=?
+                        status=CASE WHEN status IN ('RECONCILING','PENDING') THEN 'PENDING' ELSE status END WHERE payment_id=?
                         """, link.id(), link.checkoutUrl(), link.qrCode(), reserved.id());
                 repository.event(reserved.orderId(), "PAYMENT_LINK_CREATED", reserved.id(), "PAYOS", "Link ready");
                 return repository.payment(reserved.id()).response();
             });
         } catch (RuntimeException ex) {
-            // Reservation remains durable; query the same orderCode before any retry.
-            return repository.payment(reserved.id()).response();
+            log.warn("PayOS link creation failed for payment {} (orderCode {}): {}", reserved.id(),
+                    reserved.orderCode(), PaymentProvider.describe(ex), ex);
+            // PayOS may have made the link without its URL reaching us; reconcile the same orderCode now.
+            try {
+                return reconcile(reserved.id(), actor, false);
+            } catch (RuntimeException unresolved) {
+                log.warn("Payment {} stays RECONCILING after the failed create: {}", reserved.id(), unresolved.getMessage());
+                return repository.payment(reserved.id()).response();
+            }
         }
     }
 
@@ -274,12 +285,21 @@ public class FinanceServiceImpl implements FinanceService {
         if ("SUCCESS".equals(reservation.status())) {
             return paymentResponse(reservation, repository.context(reservation.orderId()), actor);
         }
-        PaymentProvider.Status remote;
+        PaymentProvider.Status fetched;
         try {
-            remote = cancel ? provider.cancel(reservation.orderCode()) : provider.get(reservation.orderCode());
+            fetched = cancel ? provider.cancel(reservation.orderCode()) : provider.get(reservation.orderCode());
+            // PayOS made this link but its URL never reached us, so the buyer cannot open it: cancel it so a
+            // new link can be issued. Re-read the row first: a create still in flight may have stored the URL.
+            if (!cancel && "PENDING".equals(fetched.status()) && fetched.paid() == 0
+                    && repository.payment(paymentId).checkoutUrl() == null) {
+                fetched = provider.cancel(reservation.orderCode());
+            }
         } catch (RuntimeException ex) {
+            log.warn("PayOS reconciliation failed for payment {} (orderCode {}): {}", paymentId,
+                    reservation.orderCode(), PaymentProvider.describe(ex), ex);
             throw new FinanceException(HttpStatus.SERVICE_UNAVAILABLE, "PAYOS_RECONCILIATION_UNAVAILABLE");
         }
+        var remote = fetched;
         return transaction.execute(status -> {
             repository.lock(reservation.orderId());
             var current = repository.payment(paymentId);

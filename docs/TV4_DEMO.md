@@ -65,5 +65,6 @@ Demo thêm nếu còn thời gian: người mua từ chối báo giá, nhà cung
 |---|---|
 | Không thấy cửa hàng để báo giá | Cửa hàng không được mời hoặc chưa `ACTIVE` |
 | `403 STORE_NOT_TARGETED` | Báo giá từ cửa hàng không nằm trong danh sách mời |
+| `DELIVERY_TOO_SOON_FOR_REMAINING` | Báo giá có cọc nhưng ngày giao cách hôm nay chưa đủ 4 ngày (phần còn lại hạn 3 ngày trước ngày giao) |
 | `403 SUPPLIER_NOT_TARGETED` | Người mua nhắn tin với nhà cung cấp không được mời |
 | Seed TV4 báo "chạy seed-demo-catalog trước" | Chưa có supplier/cửa hàng demo |

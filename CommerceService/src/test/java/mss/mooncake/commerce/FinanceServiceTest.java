@@ -6,7 +6,11 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -274,6 +278,91 @@ class FinanceServiceTest {
         assertThat(service.reconcile(id, BUYER, false).status()).isEqualTo("SUCCESS");
         collect(id, "reconciled-ref");
         assertThat(repository.count("SELECT COUNT(*) FROM finance_ledger")).isEqualTo(1);
+    }
+
+    /** PayOS makes the link, but its create response (with the checkout URL) never reaches us. */
+    private void payOsLinkMadeButResponseLost() {
+        doThrow(new RuntimeException("Read timed out")).when(provider).create(anyLong(), anyLong(), any(), anyString());
+        doAnswer(call -> new PaymentProvider.Status(call.getArgument(0), 10001, 0, "lost-link", "PENDING", null))
+                .when(provider).get(anyLong());
+        doAnswer(call -> new PaymentProvider.Status(call.getArgument(0), 10001, 0, "lost-link", "CANCELLED", null))
+                .when(provider).cancel(anyLong());
+    }
+
+    private void payOsCreatesLinks() {
+        doAnswer(call -> new PaymentProvider.Link(call.getArgument(0), call.getArgument(1),
+                "link-" + call.getArgument(0), "https://pay.payos.vn/test", "qr"))
+                .when(provider).create(anyLong(), anyLong(), any(), anyString());
+    }
+
+    @Test
+    void lostCreateResponseCancelsTheUnusableLinkAndARetryIssuesANewOne() {
+        context(true, null, 1, null);
+        long id = repository.payments(1).getFirst().id();
+        payOsLinkMadeButResponseLost();
+
+        var lost = service.initiate(id, key(), BUYER);
+        assertThat(lost.status()).isEqualTo("CANCELLED");
+        verify(provider).cancel(repository.payment(id).orderCode());
+
+        payOsCreatesLinks();
+        var retry = service.initiate(id, key(), BUYER);
+        assertThat(retry.status()).isEqualTo("PENDING");
+        assertThat(retry.checkoutUrl()).isNotNull();
+        assertThat(retry.paymentId()).isNotEqualTo(id);
+    }
+
+    @Test
+    void laterReconciliationCancelsAPendingLinkWhoseUrlNeverReachedUs() {
+        context(true, null, 1, null);
+        long id = repository.payments(1).getFirst().id();
+        doThrow(new RuntimeException("Read timed out")).when(provider).create(anyLong(), anyLong(), any(), anyString());
+        doThrow(new RuntimeException("connect timed out")).when(provider).get(anyLong());
+        assertThat(service.initiate(id, key(), BUYER).status()).isEqualTo("RECONCILING");
+
+        payOsLinkMadeButResponseLost();
+        assertThat(service.reconcile(id, BUYER, false).status()).isEqualTo("CANCELLED");
+    }
+
+    @Test
+    void reconciliationKeepsAPendingLinkWhoseUrlWeHave() {
+        context(true, null, 1, null);
+        long id = repository.payments(1).getFirst().id();
+        service.initiate(id, key(), BUYER);
+        var p = repository.payment(id);
+        doReturn(new PaymentProvider.Status(p.orderCode(), p.amount(), 0, p.linkId(), "PENDING", null))
+                .when(provider).get(p.orderCode());
+
+        assertThat(service.reconcile(id, BUYER, false).status()).isEqualTo("PENDING");
+        verify(provider, never()).cancel(anyLong());
+    }
+
+    @Test
+    void lateCreateResponseDoesNotReviveALinkCancelledMeanwhile() {
+        context(true, null, 1, null);
+        long id = repository.payments(1).getFirst().id();
+        payOsLinkMadeButResponseLost();
+        doAnswer(call -> {
+            // Another request reconciles while PayOS is still answering this create.
+            service.reconcile(id, BUYER, false);
+            return new PaymentProvider.Link(call.getArgument(0), call.getArgument(1), "lost-link",
+                    "https://pay.payos.vn/late", "qr");
+        }).when(provider).create(anyLong(), anyLong(), any(), anyString());
+
+        assertThat(service.initiate(id, key(), BUYER).status()).isEqualTo("CANCELLED");
+    }
+
+    @Test
+    void lostCustomerCreateResponseCancelsTheUnusableLinkAndARetryIssuesANewOne() {
+        context(true, null, 1, null);
+        payOsLinkMadeButResponseLost();
+
+        assertThat(customerPayments.initiate(1, key(), BUYER).payment().status()).isEqualTo("CANCELLED");
+
+        payOsCreatesLinks();
+        var retry = customerPayments.initiate(1, key(), BUYER).payment();
+        assertThat(retry.status()).isEqualTo("PENDING");
+        assertThat(retry.checkoutUrl()).isNotNull();
     }
 
     @Test
