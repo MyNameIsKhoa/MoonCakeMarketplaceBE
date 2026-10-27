@@ -19,11 +19,13 @@ import mss.mooncake.rfqnegotiation.dto.response.PageResponse;
 import mss.mooncake.rfqnegotiation.entity.ConversationEntity;
 import mss.mooncake.rfqnegotiation.entity.MessageEntity;
 import mss.mooncake.rfqnegotiation.enums.ConversationStatus;
+import mss.mooncake.rfqnegotiation.enums.RfqAudience;
 import mss.mooncake.rfqnegotiation.enums.RfqStatus;
 import mss.mooncake.rfqnegotiation.exception.ApiException;
 import mss.mooncake.rfqnegotiation.repository.ConversationRepository;
 import mss.mooncake.rfqnegotiation.repository.MessageRepository;
 import mss.mooncake.rfqnegotiation.repository.RfqRepository;
+import mss.mooncake.rfqnegotiation.repository.RfqTargetStoreRepository;
 import mss.mooncake.rfqnegotiation.security.ActorContext;
 import mss.mooncake.rfqnegotiation.service.ConversationApplicationService;
 import mss.mooncake.rfqnegotiation.util.Paging;
@@ -39,15 +41,18 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
     private final ConversationRepository conversations;
     private final MessageRepository messages;
     private final RfqRepository rfqs;
+    private final RfqTargetStoreRepository targets;
     private final ActorContext actor;
     private final IdentityServiceClient identity;
     private final ApplicationEventPublisher events;
 
     public ConversationApplicationServiceImpl(ConversationRepository conversations, MessageRepository messages,
-            RfqRepository rfqs, ActorContext actor, IdentityServiceClient identity, ApplicationEventPublisher events) {
+            RfqRepository rfqs, RfqTargetStoreRepository targets, ActorContext actor, IdentityServiceClient identity,
+            ApplicationEventPublisher events) {
         this.conversations = conversations;
         this.messages = messages;
         this.rfqs = rfqs;
+        this.targets = targets;
         this.actor = actor;
         this.identity = identity;
         this.events = events;
@@ -61,8 +66,9 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
         var rfq = rfqs.findByIdForUpdate(rfqId)
                 .orElseThrow(() -> ApiException.notFound("RFQ_NOT_FOUND", "Không tìm thấy RFQ"));
         Long customerId = actor.optionalCustomerId();
+        boolean owner = Objects.equals(customerId, rfq.getCustomerIdRef());
         Long supplierId;
-        if (Objects.equals(customerId, rfq.getCustomerIdRef())) {
+        if (owner) {
             if (request == null || request.supplierId() == null || request.supplierId() <= 0) {
                 throw ApiException.badRequest("SUPPLIER_ID_REQUIRED", "Chủ RFQ cần chọn nhà cung cấp để trao đổi");
             }
@@ -72,6 +78,11 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
             if (request != null && request.supplierId() != null && !supplierId.equals(request.supplierId())) {
                 throw ApiException.forbidden("NOT_SUPPLIER_OWNER", "Chỉ được mở hội thoại bằng hồ sơ nhà cung cấp của mình");
             }
+        }
+        if (rfq.getAudience() == RfqAudience.SELECTED_STORES && !targets.existsByRfqIdAndSupplierIdRef(rfqId, supplierId)) {
+            // The buyer learns the supplier was not invited; an uninvited supplier does not learn the RFQ exists.
+            throw owner ? ApiException.forbidden("SUPPLIER_NOT_TARGETED", "Nhà cung cấp này không được mời cho yêu cầu báo giá")
+                    : ApiException.notFound("RFQ_NOT_FOUND", "Không tìm thấy RFQ");
         }
         var supplier = requireSupplier(supplierId);
         var existing = conversations.findByRfqIdAndSupplierIdRef(rfqId, supplierId);
