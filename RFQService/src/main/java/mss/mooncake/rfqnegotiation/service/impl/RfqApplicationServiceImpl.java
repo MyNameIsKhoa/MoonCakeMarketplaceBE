@@ -1,5 +1,6 @@
 package mss.mooncake.rfqnegotiation.service.impl;
 
+import feign.FeignException;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import java.math.BigDecimal;
@@ -12,18 +13,24 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import mss.mooncake.rfqnegotiation.client.CatalogServiceClient;
+import mss.mooncake.rfqnegotiation.client.dto.catalog.StoreSummaryResponse;
 import mss.mooncake.rfqnegotiation.dto.request.CreateRfqRequest;
 import mss.mooncake.rfqnegotiation.dto.response.PageResponse;
 import mss.mooncake.rfqnegotiation.dto.response.RfqResponse;
 import mss.mooncake.rfqnegotiation.entity.RfqEntity;
+import mss.mooncake.rfqnegotiation.entity.RfqTargetStoreEntity;
+import mss.mooncake.rfqnegotiation.enums.RfqAudience;
 import mss.mooncake.rfqnegotiation.enums.RfqStatus;
 import mss.mooncake.rfqnegotiation.exception.ApiException;
 import mss.mooncake.rfqnegotiation.repository.QuotationRepository;
 import mss.mooncake.rfqnegotiation.repository.RfqRepository;
+import mss.mooncake.rfqnegotiation.repository.RfqTargetStoreRepository;
 import mss.mooncake.rfqnegotiation.security.ActorContext;
 import mss.mooncake.rfqnegotiation.service.RfqApplicationService;
 import mss.mooncake.rfqnegotiation.util.Paging;
@@ -41,13 +48,18 @@ public class RfqApplicationServiceImpl implements RfqApplicationService {
             "budgetAmount", "requestedDeliveryDate", "expiresAt");
     private final RfqRepository rfqs;
     private final QuotationRepository quotations;
+    private final RfqTargetStoreRepository targets;
+    private final CatalogServiceClient catalog;
     private final ActorContext actor;
     private final Validator validator;
 
     public RfqApplicationServiceImpl(RfqRepository rfqs, QuotationRepository quotations,
+                                     RfqTargetStoreRepository targets, CatalogServiceClient catalog,
                                      ActorContext actor, Validator validator) {
         this.rfqs = rfqs;
         this.quotations = quotations;
+        this.targets = targets;
+        this.catalog = catalog;
         this.actor = actor;
         this.validator = validator;
     }
@@ -57,13 +69,25 @@ public class RfqApplicationServiceImpl implements RfqApplicationService {
     public RfqResponse create(CreateRfqRequest request) {
         validate(request);
         Long customerId = actor.customerId();
+        // Invited stores are verified with Catalog before anything is written.
+        List<StoreSummaryResponse> stores = request.targetStoreIds() == null ? List.of()
+                : request.targetStoreIds().stream().distinct().map(this::activeStore).toList();
         RfqEntity rfq = new RfqEntity();
         rfq.setRfqCode("RFQ-" + UUID.randomUUID().toString().toUpperCase());
         rfq.setCustomerIdRef(customerId);
         apply(rfq, request);
+        rfq.setAudience(stores.isEmpty() ? RfqAudience.ALL : RfqAudience.SELECTED_STORES);
         rfq.setStatus(RfqStatus.OPEN);
         rfq.setCreatedAt(now());
-        return response(rfqs.save(rfq), true);
+        RfqEntity saved = rfqs.save(rfq);
+        List<RfqTargetStoreEntity> invited = stores.stream()
+                .map(store -> new RfqTargetStoreEntity(saved.getId(), store.storeId(), store.supplierIdRef(), store.name()))
+                .toList();
+        if (invited.isEmpty()) {
+            return response(saved, true, null);
+        }
+        targets.saveAll(invited);
+        return response(saved, true, invited);
     }
 
     @Override
@@ -76,11 +100,12 @@ public class RfqApplicationServiceImpl implements RfqApplicationService {
         Long customerId = mine ? actor.customerId() : null;
         LocalDateTime now = now();
         // Public feed hides OPEN RFQs past expiresAt: they no longer take quotations. Detail stays readable.
+        Specification<RfqEntity> listed = (root, query, cb) -> cb.or(cb.equal(root.get("status"), RfqStatus.CLOSED),
+                cb.and(cb.equal(root.get("status"), RfqStatus.OPEN),
+                        cb.or(cb.isNull(root.get("expiresAt")), cb.greaterThan(root.get("expiresAt"), now))));
         Specification<RfqEntity> filter = mine
                 ? (root, query, cb) -> cb.equal(root.get("customerIdRef"), customerId)
-                : (root, query, cb) -> cb.or(cb.equal(root.get("status"), RfqStatus.CLOSED),
-                        cb.and(cb.equal(root.get("status"), RfqStatus.OPEN),
-                                cb.or(cb.isNull(root.get("expiresAt")), cb.greaterThan(root.get("expiresAt"), now))));
+                : listed.and(visibleInFeed(invitedSupplierId()));
         if (status != null) {
             filter = filter.and((root, query, cb) -> cb.equal(root.get("status"), status));
         }
@@ -101,7 +126,21 @@ public class RfqApplicationServiceImpl implements RfqApplicationService {
         if (!owner && rfq.getStatus() != RfqStatus.OPEN && rfq.getStatus() != RfqStatus.CLOSED) {
             throw notFound();
         }
-        return response(rfq, owner);
+        if (rfq.getAudience() == RfqAudience.ALL) {
+            return response(rfq, owner, null);
+        }
+        List<RfqTargetStoreEntity> invited = targets.findByRfqIdOrderByIdAsc(rfqId);
+        if (owner) {
+            return response(rfq, true, invited);
+        }
+        // An uninvited supplier gets the same 404 as a missing RFQ; an invited one sees only its own stores.
+        Long supplierId = actor.optionalSupplierId();
+        List<RfqTargetStoreEntity> own = invited.stream()
+                .filter(target -> target.getSupplierIdRef().equals(supplierId)).toList();
+        if (own.isEmpty()) {
+            throw notFound();
+        }
+        return response(rfq, false, own);
     }
 
     @Override
@@ -125,10 +164,11 @@ public class RfqApplicationServiceImpl implements RfqApplicationService {
                 date(patch, "requestedDeliveryDate", rfq.getRequestedDeliveryDate()),
                 text(patch, "deliveryLocation", rfq.getDeliveryLocation()),
                 text(patch, "customizationRequirements", rfq.getCustomizationRequirements()),
-                timestamp(patch, "expiresAt", rfq.getExpiresAt()));
+                timestamp(patch, "expiresAt", rfq.getExpiresAt()),
+                null);
         validate(merged);
         apply(rfq, merged);
-        return response(rfq, true);
+        return ownerResponse(rfq);
     }
 
     @Override
@@ -136,13 +176,13 @@ public class RfqApplicationServiceImpl implements RfqApplicationService {
     public RfqResponse close(Long rfqId) {
         RfqEntity rfq = ownedForUpdate(rfqId);
         if (rfq.getStatus() == RfqStatus.CLOSED) {
-            return response(rfq, true);
+            return ownerResponse(rfq);
         }
         if (rfq.getStatus() != RfqStatus.OPEN) {
             throw ApiException.conflict("INVALID_RFQ_STATE", "Only an open RFQ can be closed");
         }
         rfq.setStatus(RfqStatus.CLOSED);
-        return response(rfq, true);
+        return ownerResponse(rfq);
     }
 
     @Override
@@ -150,7 +190,7 @@ public class RfqApplicationServiceImpl implements RfqApplicationService {
     public RfqResponse cancel(Long rfqId) {
         RfqEntity rfq = ownedForUpdate(rfqId);
         rfq.setStatus(RfqStatus.CANCELLED);
-        return response(rfq, true);
+        return ownerResponse(rfq);
     }
 
     private RfqEntity ownedForUpdate(Long rfqId) {
@@ -188,13 +228,66 @@ public class RfqApplicationServiceImpl implements RfqApplicationService {
                 : request.expiresAt().withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime().truncatedTo(ChronoUnit.SECONDS));
     }
 
+    private StoreSummaryResponse activeStore(Long storeId) {
+        StoreSummaryResponse store;
+        try {
+            store = catalog.getStoreSummary(storeId);
+        } catch (FeignException.NotFound ex) {
+            throw ApiException.notFound("STORE_NOT_FOUND", "Store " + storeId + " not found");
+        } catch (FeignException ex) {
+            throw ApiException.unavailable("CATALOG_UNAVAILABLE", "Cannot verify the selected stores");
+        }
+        if (store == null || !storeId.equals(store.storeId()) || store.supplierIdRef() == null) {
+            throw ApiException.unavailable("CATALOG_INVALID_RESPONSE", "Invalid store data from Catalog");
+        }
+        if (!"ACTIVE".equals(store.status())) {
+            throw ApiException.conflict("STORE_NOT_ACTIVE", "Store " + storeId + " is not active");
+        }
+        return store;
+    }
+
+    /** Caller's supplier for feed invitations. Any lookup failure only hides invitations; the public feed still works. */
+    private Long invitedSupplierId() {
+        try {
+            return actor.optionalSupplierId();
+        } catch (ApiException ex) {
+            return null;
+        }
+    }
+
+    /** Public RFQs, plus SELECTED_STORES RFQs that invite one of the caller's stores. */
+    private Specification<RfqEntity> visibleInFeed(Long supplierId) {
+        return (root, query, cb) -> {
+            var isPublic = cb.equal(root.get("audience"), RfqAudience.ALL);
+            if (supplierId == null) {
+                return isPublic;
+            }
+            var invited = query.subquery(Long.class);
+            var target = invited.from(RfqTargetStoreEntity.class);
+            invited.select(target.get("id")).where(cb.equal(target.get("rfqId"), root.get("id")),
+                    cb.equal(target.get("supplierIdRef"), supplierId));
+            return cb.or(isPublic, cb.exists(invited));
+        };
+    }
+
+    private RfqResponse ownerResponse(RfqEntity rfq) {
+        return response(rfq, true, rfq.getAudience() == RfqAudience.ALL ? null : targets.findByRfqIdOrderByIdAsc(rfq.getId()));
+    }
+
     private RfqResponse response(RfqEntity rfq, boolean owner) {
+        return response(rfq, owner, null);
+    }
+
+    private RfqResponse response(RfqEntity rfq, boolean owner, List<RfqTargetStoreEntity> invited) {
         return new RfqResponse(rfq.getId().toString(), rfq.getRfqCode(),
                 owner ? rfq.getCustomerIdRef().toString() : null, rfq.getTitle(), rfq.getDescription(),
                 rfq.getQuantity(), rfq.getBudgetAmount() == null ? null : rfq.getBudgetAmount().toPlainString(),
                 rfq.getRequestedDeliveryDate(), owner ? rfq.getDeliveryLocation() : null,
                 owner ? rfq.getCustomizationRequirements() : null, rfq.getStatus(),
-                utc(rfq.getExpiresAt()), utc(rfq.getCreatedAt()));
+                utc(rfq.getExpiresAt()), utc(rfq.getCreatedAt()), rfq.getAudience(),
+                invited == null ? null : invited.stream()
+                        .map(target -> new RfqResponse.TargetStore(target.getStoreIdRef().toString(), target.getStoreNameSnapshot()))
+                        .toList());
     }
 
     private String text(Map<String, Object> patch, String field, String previous) {

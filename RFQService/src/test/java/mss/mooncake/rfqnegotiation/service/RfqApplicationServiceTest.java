@@ -3,6 +3,10 @@ package mss.mooncake.rfqnegotiation.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -14,21 +18,29 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.LongStream;
+import mss.mooncake.rfqnegotiation.client.CatalogServiceClient;
+import mss.mooncake.rfqnegotiation.client.dto.catalog.StoreSummaryResponse;
 import mss.mooncake.rfqnegotiation.dto.request.CreateRfqRequest;
 import mss.mooncake.rfqnegotiation.dto.response.RfqResponse;
 import mss.mooncake.rfqnegotiation.entity.RfqEntity;
+import mss.mooncake.rfqnegotiation.entity.RfqTargetStoreEntity;
+import mss.mooncake.rfqnegotiation.enums.RfqAudience;
 import mss.mooncake.rfqnegotiation.enums.RfqStatus;
 import mss.mooncake.rfqnegotiation.exception.ApiException;
 import mss.mooncake.rfqnegotiation.repository.QuotationRepository;
 import mss.mooncake.rfqnegotiation.repository.RfqRepository;
+import mss.mooncake.rfqnegotiation.repository.RfqTargetStoreRepository;
 import mss.mooncake.rfqnegotiation.security.ActorContext;
 import mss.mooncake.rfqnegotiation.service.impl.RfqApplicationServiceImpl;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -37,6 +49,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 class RfqApplicationServiceTest {
     @Mock private RfqRepository rfqs;
     @Mock private QuotationRepository quotations;
+    @Mock private RfqTargetStoreRepository targets;
+    @Mock private CatalogServiceClient catalog;
     @Mock private ActorContext actor;
     private ValidatorFactory validators;
     private RfqApplicationService service;
@@ -44,7 +58,7 @@ class RfqApplicationServiceTest {
     @BeforeEach
     void setUp() {
         validators = Validation.buildDefaultValidatorFactory();
-        service = new RfqApplicationServiceImpl(rfqs, quotations, actor, validators.getValidator());
+        service = new RfqApplicationServiceImpl(rfqs, quotations, targets, catalog, actor, validators.getValidator());
     }
 
     @AfterEach
@@ -67,6 +81,75 @@ class RfqApplicationServiceTest {
         assertThat(created.budgetAmount()).isEqualTo("3500000.00");
         assertThat(created.createdAt()).endsWith("Z");
         assertThat(created.title()).isEqualTo("Mooncakes for company");
+        assertThat(created.audience()).isEqualTo(RfqAudience.ALL);
+        assertThat(created.targetStores()).isNull();
+        verifyNoInteractions(catalog, targets);
+    }
+
+    @Test
+    void createsRfqAddressedOnceToEachSelectedActiveStore() {
+        when(actor.customerId()).thenReturn(17L);
+        when(catalog.getStoreSummary(30L)).thenReturn(store(30L, 20L, "Kinh Do", "ACTIVE"));
+        when(catalog.getStoreSummary(31L)).thenReturn(store(31L, 21L, "Givral", "ACTIVE"));
+        when(rfqs.save(any())).thenAnswer(invocation -> {
+            RfqEntity rfq = invocation.getArgument(0);
+            ReflectionTestUtils.setField(rfq, "id", 91L);
+            return rfq;
+        });
+
+        RfqResponse created = service.create(request(100, null, List.of(30L, 31L, 30L)));
+
+        assertThat(created.audience()).isEqualTo(RfqAudience.SELECTED_STORES);
+        assertThat(created.targetStores()).extracting(RfqResponse.TargetStore::storeId).containsExactly("30", "31");
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<RfqTargetStoreEntity>> saved = ArgumentCaptor.forClass(List.class);
+        verify(targets).saveAll(saved.capture());
+        assertThat(saved.getValue()).extracting(RfqTargetStoreEntity::getRfqId).containsOnly(91L);
+        assertThat(saved.getValue()).extracting(RfqTargetStoreEntity::getSupplierIdRef).containsExactly(20L, 21L);
+        assertThat(saved.getValue()).extracting(RfqTargetStoreEntity::getStoreNameSnapshot).containsExactly("Kinh Do", "Givral");
+        verify(catalog, times(2)).getStoreSummary(anyLong());
+    }
+
+    @Test
+    void rejectsInactiveTargetStoreAndMoreThanTwentyStoresBeforePersisting() {
+        lenient().when(actor.customerId()).thenReturn(17L);
+        when(catalog.getStoreSummary(30L)).thenReturn(store(30L, 20L, "Closed bakery", "INACTIVE"));
+        assertThatThrownBy(() -> service.create(request(100, null, List.of(30L))))
+                .isInstanceOf(ApiException.class).extracting("code").isEqualTo("STORE_NOT_ACTIVE");
+        List<Long> tooMany = LongStream.rangeClosed(1, 21).boxed().toList();
+        assertThatThrownBy(() -> service.create(request(100, null, tooMany)))
+                .isInstanceOf(ApiException.class).extracting("code").isEqualTo("VALIDATION_FAILED");
+        verifyNoInteractions(rfqs, targets);
+    }
+
+    @Test
+    void selectedRfqIsHiddenFromUninvitedSuppliersAndShowsInvitedOnesOnlyTheirOwnStores() {
+        RfqEntity rfq = entity(RfqStatus.OPEN);
+        rfq.setAudience(RfqAudience.SELECTED_STORES);
+        when(rfqs.findById(91L)).thenReturn(Optional.of(rfq));
+        when(actor.optionalCustomerId()).thenReturn(18L);
+        when(actor.optionalSupplierId()).thenReturn(22L, 20L);
+        when(targets.findByRfqIdOrderByIdAsc(91L)).thenReturn(List.of(
+                new RfqTargetStoreEntity(91L, 30L, 20L, "Kinh Do"), new RfqTargetStoreEntity(91L, 31L, 21L, "Givral")));
+
+        assertThatThrownBy(() -> service.get(91L)).isInstanceOf(ApiException.class)
+                .extracting("code").isEqualTo("RFQ_NOT_FOUND");
+        RfqResponse invited = service.get(91L);
+        assertThat(invited.targetStores()).extracting(RfqResponse.TargetStore::storeName).containsExactly("Kinh Do");
+        assertThat(invited.customerId()).isNull();
+    }
+
+    @Test
+    void ownerSeesEveryInvitedStore() {
+        RfqEntity rfq = entity(RfqStatus.OPEN);
+        rfq.setAudience(RfqAudience.SELECTED_STORES);
+        when(rfqs.findById(91L)).thenReturn(Optional.of(rfq));
+        when(actor.optionalCustomerId()).thenReturn(17L);
+        when(targets.findByRfqIdOrderByIdAsc(91L)).thenReturn(List.of(
+                new RfqTargetStoreEntity(91L, 30L, 20L, "Kinh Do"), new RfqTargetStoreEntity(91L, 31L, 21L, "Givral")));
+
+        assertThat(service.get(91L).targetStores()).extracting(RfqResponse.TargetStore::storeName)
+                .containsExactly("Kinh Do", "Givral");
     }
 
     @Test
@@ -175,9 +258,17 @@ class RfqApplicationServiceTest {
     }
 
     private CreateRfqRequest request(int quantity, BigDecimal budget) {
+        return request(quantity, budget, null);
+    }
+
+    private CreateRfqRequest request(int quantity, BigDecimal budget, List<Long> targetStoreIds) {
         return new CreateRfqRequest("  Mooncakes for company  ", "Public product requirements", quantity,
                 budget, LocalDate.now(ZoneOffset.UTC).plusDays(15), "Private company address",
-                "Private design requirements", OffsetDateTime.now(ZoneOffset.UTC).plusDays(7));
+                "Private design requirements", OffsetDateTime.now(ZoneOffset.UTC).plusDays(7), targetStoreIds);
+    }
+
+    private StoreSummaryResponse store(Long storeId, Long supplierId, String name, String status) {
+        return new StoreSummaryResponse(storeId, supplierId, "STORE-" + storeId, name, "store-" + storeId, null, status);
     }
 
     private RfqEntity entity(RfqStatus status) {

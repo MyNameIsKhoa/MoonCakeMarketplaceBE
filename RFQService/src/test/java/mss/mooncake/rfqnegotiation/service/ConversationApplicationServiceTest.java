@@ -16,11 +16,14 @@ import mss.mooncake.rfqnegotiation.client.dto.identity.UserSummaryResponse;
 import mss.mooncake.rfqnegotiation.dto.request.CreateConversationRequest;
 import mss.mooncake.rfqnegotiation.dto.request.SendMessageRequest;
 import mss.mooncake.rfqnegotiation.entity.RfqEntity;
+import mss.mooncake.rfqnegotiation.entity.RfqTargetStoreEntity;
+import mss.mooncake.rfqnegotiation.enums.RfqAudience;
 import mss.mooncake.rfqnegotiation.enums.RfqStatus;
 import mss.mooncake.rfqnegotiation.exception.ApiException;
 import mss.mooncake.rfqnegotiation.repository.ConversationRepository;
 import mss.mooncake.rfqnegotiation.repository.MessageRepository;
 import mss.mooncake.rfqnegotiation.repository.RfqRepository;
+import mss.mooncake.rfqnegotiation.repository.RfqTargetStoreRepository;
 import mss.mooncake.rfqnegotiation.security.ActorContext;
 import mss.mooncake.rfqnegotiation.security.UserPrincipal;
 import mss.mooncake.rfqnegotiation.service.impl.ConversationApplicationServiceImpl;
@@ -70,6 +73,7 @@ class ConversationApplicationServiceTest {
     @Autowired RfqRepository rfqs;
     @Autowired ConversationRepository conversations;
     @Autowired MessageRepository messages;
+    @Autowired RfqTargetStoreRepository targets;
     @MockitoBean IdentityServiceClient identity;
     @Autowired BroadcastProbe broadcast;
     @Autowired PlatformTransactionManager transactionManager;
@@ -80,6 +84,7 @@ class ConversationApplicationServiceTest {
         broadcast.delivered.clear();
         messages.deleteAll();
         conversations.deleteAll();
+        targets.deleteAll();
         rfqs.deleteAll();
         when(identity.getUserSummary(101L)).thenReturn(new UserSummaryResponse(101L, 11L, "Buyer", "buyer@test", null));
         when(identity.getUserSummary(202L)).thenReturn(new UserSummaryResponse(202L, 22L, "Supplier", "supplier@test", null));
@@ -108,6 +113,23 @@ class ConversationApplicationServiceTest {
         assertThat(retry.conversation().conversationId()).isEqualTo(first.conversation().conversationId());
         assertThat(first.conversation().customerId()).isEqualTo("11");
         assertThat(conversations.count()).isEqualTo(1);
+    }
+
+    @Test
+    void selectedStoreRfqConversationsAreLimitedToInvitedSuppliers() {
+        RfqEntity rfq = rfqs.findById(rfqId).orElseThrow();
+        rfq.setAudience(RfqAudience.SELECTED_STORES);
+        rfqs.save(rfq);
+
+        assertThatThrownBy(() -> service.create(rfqId, new CreateConversationRequest(77L)))
+                .isInstanceOf(ApiException.class).extracting("code").isEqualTo("SUPPLIER_NOT_TARGETED");
+        login(202L);
+        assertThatThrownBy(() -> service.create(rfqId, null))
+                .isInstanceOf(ApiException.class).extracting("code").isEqualTo("RFQ_NOT_FOUND");
+        assertThat(conversations.count()).isZero();
+
+        targets.save(new RfqTargetStoreEntity(rfqId, 30L, 77L, "Bakery"));
+        assertThat(service.create(rfqId, null).created()).isTrue();
     }
 
     @Test
