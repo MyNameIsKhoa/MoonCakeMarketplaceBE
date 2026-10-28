@@ -7,6 +7,7 @@ import mss.mooncake.rfqnegotiation.dto.request.CreateConversationRequest;
 import mss.mooncake.rfqnegotiation.dto.response.ConversationResponse;
 import mss.mooncake.rfqnegotiation.dto.response.MessagePageResponse;
 import mss.mooncake.rfqnegotiation.dto.response.PageResponse;
+import mss.mooncake.rfqnegotiation.dto.response.UnreadCountResponse;
 import mss.mooncake.rfqnegotiation.service.ConversationApplicationService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -40,6 +41,17 @@ public class ConversationController {
 
     @GetMapping("/api/conversations/{conversationId}")
     public ConversationResponse get(@PathVariable Long conversationId) { return conversations.get(conversationId); }
+
+    @GetMapping("/api/conversations/unread-count")
+    @Operation(summary = "Số tin nhắn chưa đọc của tài khoản", description = "Tin do bên kia gửi sau lần đọc cuối, trên mọi hội thoại")
+    public UnreadCountResponse unreadCount() { return conversations.unreadCount(); }
+
+    @PostMapping("/api/conversations/{conversationId}/read")
+    @Operation(summary = "Đánh dấu đã đọc tới tin mới nhất của hội thoại")
+    public ResponseEntity<Void> markRead(@PathVariable Long conversationId) {
+        conversations.markRead(conversationId);
+        return ResponseEntity.noContent().build();
+    }
 
     @GetMapping("/api/conversations/{conversationId}/messages")
     @Operation(summary = "Lịch sử tin nhắn theo cursor", description = "Mặc định lấy 50 tin mới nhất; items tăng dần theo messageId. "

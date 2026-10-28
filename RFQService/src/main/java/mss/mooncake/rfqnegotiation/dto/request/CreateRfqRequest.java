@@ -13,7 +13,9 @@ import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.List;
 import mss.mooncake.rfqnegotiation.util.json.DecimalStringDeserializer;
+import mss.mooncake.rfqnegotiation.util.json.IdStringDeserializer;
 import mss.mooncake.rfqnegotiation.util.json.StrictIntegerDeserializer;
 import tools.jackson.databind.annotation.JsonDeserialize;
 
@@ -27,7 +29,10 @@ public record CreateRfqRequest(
         @FutureOrPresent LocalDate requestedDeliveryDate,
         @Size(max = 500) String deliveryLocation,
         @Size(max = 20000) String customizationRequirements,
-        @Future OffsetDateTime expiresAt) {
+        @Future OffsetDateTime expiresAt,
+        @Schema(description = "Omit or leave empty to publish to every store; otherwise only these stores see and quote")
+        @Size(max = 20) @JsonDeserialize(contentUsing = IdStringDeserializer.class)
+        List<@NotNull @Positive Long> targetStoreIds) {
     @JsonAnySetter
     public void rejectUnknownField(String field, Object value) {
         throw new IllegalArgumentException("Unsupported RFQ field: " + field);

@@ -4,8 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
+import feign.FeignException;
+import feign.Request;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -16,11 +20,15 @@ import mss.mooncake.rfqnegotiation.client.dto.identity.UserSummaryResponse;
 import mss.mooncake.rfqnegotiation.dto.request.CreateConversationRequest;
 import mss.mooncake.rfqnegotiation.dto.request.SendMessageRequest;
 import mss.mooncake.rfqnegotiation.entity.RfqEntity;
+import mss.mooncake.rfqnegotiation.entity.RfqTargetStoreEntity;
+import mss.mooncake.rfqnegotiation.enums.RfqAudience;
 import mss.mooncake.rfqnegotiation.enums.RfqStatus;
 import mss.mooncake.rfqnegotiation.exception.ApiException;
+import mss.mooncake.rfqnegotiation.repository.ConversationReadStateRepository;
 import mss.mooncake.rfqnegotiation.repository.ConversationRepository;
 import mss.mooncake.rfqnegotiation.repository.MessageRepository;
 import mss.mooncake.rfqnegotiation.repository.RfqRepository;
+import mss.mooncake.rfqnegotiation.repository.RfqTargetStoreRepository;
 import mss.mooncake.rfqnegotiation.security.ActorContext;
 import mss.mooncake.rfqnegotiation.security.UserPrincipal;
 import mss.mooncake.rfqnegotiation.service.impl.ConversationApplicationServiceImpl;
@@ -70,6 +78,8 @@ class ConversationApplicationServiceTest {
     @Autowired RfqRepository rfqs;
     @Autowired ConversationRepository conversations;
     @Autowired MessageRepository messages;
+    @Autowired ConversationReadStateRepository reads;
+    @Autowired RfqTargetStoreRepository targets;
     @MockitoBean IdentityServiceClient identity;
     @Autowired BroadcastProbe broadcast;
     @Autowired PlatformTransactionManager transactionManager;
@@ -78,14 +88,19 @@ class ConversationApplicationServiceTest {
     @BeforeEach
     void setup() {
         broadcast.delivered.clear();
+        reads.deleteAll();
         messages.deleteAll();
         conversations.deleteAll();
+        targets.deleteAll();
         rfqs.deleteAll();
         when(identity.getUserSummary(101L)).thenReturn(new UserSummaryResponse(101L, 11L, "Buyer", "buyer@test", null));
         when(identity.getUserSummary(202L)).thenReturn(new UserSummaryResponse(202L, 22L, "Supplier", "supplier@test", null));
         when(identity.getUserSummary(303L)).thenReturn(new UserSummaryResponse(303L, 33L, "Other", "other@test", null));
         when(identity.getSupplierSummary(77L)).thenReturn(new SupplierSummaryResponse(77L, 202L, "Bakery", null, "VERIFIED"));
         when(identity.getSupplierByUser(202L)).thenReturn(new SupplierSummaryResponse(77L, 202L, "Bakery", null, "VERIFIED"));
+        // Identity answers 404 for accounts without a supplier profile.
+        when(identity.getSupplierByUser(101L)).thenThrow(notFound());
+        when(identity.getSupplierByUser(303L)).thenThrow(notFound());
         RfqEntity rfq = new RfqEntity();
         rfq.setRfqCode("CHAT-TEST");
         rfq.setCustomerIdRef(11L);
@@ -108,6 +123,23 @@ class ConversationApplicationServiceTest {
         assertThat(retry.conversation().conversationId()).isEqualTo(first.conversation().conversationId());
         assertThat(first.conversation().customerId()).isEqualTo("11");
         assertThat(conversations.count()).isEqualTo(1);
+    }
+
+    @Test
+    void selectedStoreRfqConversationsAreLimitedToInvitedSuppliers() {
+        RfqEntity rfq = rfqs.findById(rfqId).orElseThrow();
+        rfq.setAudience(RfqAudience.SELECTED_STORES);
+        rfqs.save(rfq);
+
+        assertThatThrownBy(() -> service.create(rfqId, new CreateConversationRequest(77L)))
+                .isInstanceOf(ApiException.class).extracting("code").isEqualTo("SUPPLIER_NOT_TARGETED");
+        login(202L);
+        assertThatThrownBy(() -> service.create(rfqId, null))
+                .isInstanceOf(ApiException.class).extracting("code").isEqualTo("RFQ_NOT_FOUND");
+        assertThat(conversations.count()).isZero();
+
+        targets.save(new RfqTargetStoreEntity(rfqId, 30L, 77L, "Bakery"));
+        assertThat(service.create(rfqId, null).created()).isTrue();
     }
 
     @Test
@@ -203,8 +235,55 @@ class ConversationApplicationServiceTest {
         assertThat(messages.count()).isEqualTo(1);
     }
 
+    @Test
+    void unreadCountsOnlyTheOtherPartysMessagesAfterLastRead() {
+        Long id = createConversation();
+        service.send(id, 101L, message("b1", "Hi"));
+        service.send(id, 202L, message("s1", "Reply 1"));
+        service.send(id, 202L, message("s2", "Reply 2"));
+
+        assertThat(service.unreadCount().unreadCount()).isEqualTo(2);
+        login(202L);
+        assertThat(service.unreadCount().unreadCount()).isEqualTo(1);
+        login(303L);
+        assertThat(service.unreadCount().unreadCount()).isZero();
+
+        login(101L);
+        service.markRead(id);
+        assertThat(service.unreadCount().unreadCount()).isZero();
+        service.send(id, 202L, message("s3", "Reply 3"));
+        assertThat(service.unreadCount().unreadCount()).isEqualTo(1);
+        login(202L);
+        assertThat(service.unreadCount().unreadCount()).isEqualTo(1);
+    }
+
+    @Test
+    void markReadKeepsOneRowAtTheLatestMessageAndRejectsOutsiders() {
+        Long id = createConversation();
+        service.markRead(id);
+        assertThat(reads.count()).isZero();
+
+        service.send(id, 202L, message("s1", "One"));
+        var latest = service.send(id, 202L, message("s2", "Two"));
+        service.markRead(id);
+        service.markRead(id);
+        assertThat(reads.findAll()).singleElement()
+                .satisfies(read -> assertThat(read.getLastReadMessageId()).isEqualTo(Long.valueOf(latest.messageId())));
+
+        login(303L);
+        assertThatThrownBy(() -> service.markRead(id))
+                .isInstanceOf(ApiException.class).extracting("code").isEqualTo("NOT_CONVERSATION_PARTICIPANT");
+        assertThat(reads.count()).isEqualTo(1);
+    }
+
     private Long createConversation() {
         return Long.valueOf(service.create(rfqId, new CreateConversationRequest(77L)).conversation().conversationId());
+    }
+
+    private static FeignException.NotFound notFound() {
+        var request = Request.create(Request.HttpMethod.GET, "/internal/v1/suppliers/by-user", Map.of(), null,
+                StandardCharsets.UTF_8, null);
+        return new FeignException.NotFound("not found", request, null, Map.of());
     }
 
     private SendMessageRequest message(String clientId, String content) {
