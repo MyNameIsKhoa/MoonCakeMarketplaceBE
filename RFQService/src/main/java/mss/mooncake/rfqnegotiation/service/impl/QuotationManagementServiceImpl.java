@@ -34,6 +34,7 @@ import mss.mooncake.rfqnegotiation.entity.QuotationEntity;
 import mss.mooncake.rfqnegotiation.entity.QuotationItemEntity;
 import mss.mooncake.rfqnegotiation.entity.RfqEntity;
 import mss.mooncake.rfqnegotiation.enums.QuotationStatus;
+import mss.mooncake.rfqnegotiation.enums.RfqAudience;
 import mss.mooncake.rfqnegotiation.enums.RfqStatus;
 import mss.mooncake.rfqnegotiation.exception.ApiException;
 import mss.mooncake.rfqnegotiation.repository.QuotationCommandRepository;
@@ -41,8 +42,10 @@ import mss.mooncake.rfqnegotiation.repository.QuotationConversionRepository;
 import mss.mooncake.rfqnegotiation.repository.QuotationItemRepository;
 import mss.mooncake.rfqnegotiation.repository.QuotationRepository;
 import mss.mooncake.rfqnegotiation.repository.RfqRepository;
+import mss.mooncake.rfqnegotiation.repository.RfqTargetStoreRepository;
 import mss.mooncake.rfqnegotiation.security.ActorContext;
 import mss.mooncake.rfqnegotiation.service.QuotationManagementService;
+import mss.mooncake.rfqnegotiation.util.DeliveryDateRule;
 import mss.mooncake.rfqnegotiation.util.Paging;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
@@ -59,19 +62,21 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
     private final QuotationItemRepository items;
     private final QuotationCommandRepository commands;
     private final QuotationConversionRepository conversions;
+    private final RfqTargetStoreRepository targets;
     private final CatalogServiceClient catalog;
     private final ActorContext actor;
     private final TransactionTemplate transaction;
 
     public QuotationManagementServiceImpl(RfqRepository rfqs, QuotationRepository quotations,
             QuotationItemRepository items, QuotationCommandRepository commands,
-            QuotationConversionRepository conversions, CatalogServiceClient catalog,
-            ActorContext actor, PlatformTransactionManager transactionManager) {
+            QuotationConversionRepository conversions, RfqTargetStoreRepository targets,
+            CatalogServiceClient catalog, ActorContext actor, PlatformTransactionManager transactionManager) {
         this.rfqs = rfqs;
         this.quotations = quotations;
         this.items = items;
         this.commands = commands;
         this.conversions = conversions;
+        this.targets = targets;
         this.catalog = catalog;
         this.actor = actor;
         this.transaction = new TransactionTemplate(transactionManager);
@@ -92,6 +97,10 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
             RfqEntity rfq = lockedRfq(rfqId);
             Optional<QuotationResponse> concurrentReplay = replay(userId, "CREATE", rfqId, key, hash);
             if (concurrentReplay.isPresent()) return concurrentReplay.get();
+            ensureInvited(rfq, rfqId, supplierId);
+            if (rfq.getAudience() == RfqAudience.SELECTED_STORES && !targets.existsByRfqIdAndStoreIdRef(rfqId, request.storeId())) {
+                throw ApiException.forbidden("STORE_NOT_TARGETED", "Cửa hàng này không được mời báo giá cho yêu cầu");
+            }
             ensureOpen(rfq);
             var latest = quotations.findFirstByRfqIdAndStoreIdRefOrderByVersionNoDesc(rfqId, request.storeId());
             if (latest.isPresent() && latest.get().getStatus() == QuotationStatus.SUBMITTED) {
@@ -146,6 +155,7 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
         Specification<QuotationEntity> spec = (root, query, cb) -> cb.equal(root.get("rfqId"), rfqId);
         if (!Objects.equals(actor.optionalCustomerId(), rfq.getCustomerIdRef())) {
             Long supplierId = actor.supplierId();
+            ensureInvited(rfq, rfqId, supplierId);
             spec = spec.and((root, query, cb) -> cb.equal(root.get("supplierIdRef"), supplierId));
         }
         return PageResponse.from(quotations.findAll(spec, Paging.page(page, size, sort, SORT_FIELDS, "submittedAt"))
@@ -353,6 +363,11 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
         if (quotation.getProposedDeliveryDate().isBefore(LocalDate.now(ZoneOffset.UTC))) {
             throw ApiException.badRequest("INVALID_DELIVERY_DATE", "Ngày giao dự kiến không được ở quá khứ");
         }
+        if (DeliveryDateRule.tooSoon(quotation.getDepositPercent(), quotation.getProposedDeliveryDate(), now)) {
+            throw ApiException.badRequest("DELIVERY_TOO_SOON_FOR_REMAINING", "Báo giá có tiền cọc cần ngày giao từ "
+                    + DeliveryDateRule.format(DeliveryDateRule.earliestWithRemaining(now)) + " trở đi: phần còn lại "
+                    + "phải thanh toán trước ngày giao 3 ngày, nên ngày giao cần cách hôm nay ít nhất 4 ngày.");
+        }
         quotation.setRfqId(rfqId);
         quotation.setSupplierIdRef(supplierId);
         quotation.setPreviousQuotationId(previousId);
@@ -393,6 +408,13 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
     private RfqEntity lockedRfq(Long id) {
         return rfqs.findByIdForUpdate(id)
                 .orElseThrow(() -> ApiException.notFound("RFQ_NOT_FOUND", "Không tìm thấy yêu cầu báo giá"));
+    }
+
+    /** A SELECTED_STORES RFQ does not exist for suppliers it did not invite. */
+    private void ensureInvited(RfqEntity rfq, Long rfqId, Long supplierId) {
+        if (rfq.getAudience() == RfqAudience.SELECTED_STORES && !targets.existsByRfqIdAndSupplierIdRef(rfqId, supplierId)) {
+            throw ApiException.notFound("RFQ_NOT_FOUND", "Không tìm thấy yêu cầu báo giá");
+        }
     }
 
     private void ensureOpen(RfqEntity rfq) {

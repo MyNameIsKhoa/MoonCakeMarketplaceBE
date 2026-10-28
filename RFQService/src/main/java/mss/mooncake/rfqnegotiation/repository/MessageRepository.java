@@ -21,4 +21,16 @@ public interface MessageRepository extends JpaRepository<MessageEntity, Long> {
             + "and m.id > :afterId order by m.id asc")
     List<MessageEntity> findAfter(@Param("conversationId") Long conversationId,
             @Param("afterId") Long afterId, Pageable pageable);
+
+    @Query("select max(m.id) from MessageEntity m where m.conversationId = :conversationId")
+    Long findLatestId(@Param("conversationId") Long conversationId);
+
+    /** Same participant rule as ConversationRepository.findForParticipant; null IDs match nothing. */
+    @Query("select count(m) from MessageEntity m, ConversationEntity c where m.conversationId = c.id "
+            + "and (c.customerIdRef = :customerId or c.supplierIdRef = :supplierId) "
+            + "and m.senderUserIdRef <> :userId "
+            + "and not exists (select r.id from ConversationReadStateEntity r where r.conversationId = c.id "
+            + "and r.userIdRef = :userId and r.lastReadMessageId >= m.id)")
+    long countUnread(@Param("userId") Long userId, @Param("customerId") Long customerId,
+            @Param("supplierId") Long supplierId);
 }

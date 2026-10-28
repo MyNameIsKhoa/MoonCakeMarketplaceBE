@@ -30,6 +30,7 @@ import mss.mooncake.rfqnegotiation.entity.QuotationEntity;
 import mss.mooncake.rfqnegotiation.entity.QuotationItemEntity;
 import mss.mooncake.rfqnegotiation.entity.RfqEntity;
 import mss.mooncake.rfqnegotiation.enums.QuotationStatus;
+import mss.mooncake.rfqnegotiation.enums.RfqAudience;
 import mss.mooncake.rfqnegotiation.enums.RfqStatus;
 import mss.mooncake.rfqnegotiation.exception.ApiException;
 import mss.mooncake.rfqnegotiation.repository.QuotationCommandRepository;
@@ -37,6 +38,7 @@ import mss.mooncake.rfqnegotiation.repository.QuotationConversionRepository;
 import mss.mooncake.rfqnegotiation.repository.QuotationItemRepository;
 import mss.mooncake.rfqnegotiation.repository.QuotationRepository;
 import mss.mooncake.rfqnegotiation.repository.RfqRepository;
+import mss.mooncake.rfqnegotiation.repository.RfqTargetStoreRepository;
 import mss.mooncake.rfqnegotiation.security.ActorContext;
 import mss.mooncake.rfqnegotiation.service.impl.QuotationManagementServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
@@ -56,6 +58,7 @@ class QuotationManagementServiceTest {
     @Mock private QuotationItemRepository items;
     @Mock private QuotationCommandRepository commands;
     @Mock private QuotationConversionRepository conversions;
+    @Mock private RfqTargetStoreRepository targets;
     @Mock private CatalogServiceClient catalog;
     @Mock private ActorContext actor;
     @Mock private PlatformTransactionManager transactionManager;
@@ -63,11 +66,12 @@ class QuotationManagementServiceTest {
     private RfqEntity rfq;
     private final OffsetDateTime validity = OffsetDateTime.now(ZoneOffset.UTC).plusDays(2).withNano(0);
     private final LocalDate deliveryDate = LocalDate.now(ZoneOffset.UTC).plusDays(7);
+    private final LocalDate todayInVietnam = LocalDate.now(java.time.ZoneId.of("Asia/Ho_Chi_Minh"));
 
     @BeforeEach
     void setUp() {
         service = new QuotationManagementServiceImpl(rfqs, quotations, items, commands, conversions,
-                catalog, actor, transactionManager);
+                targets, catalog, actor, transactionManager);
         rfq = new RfqEntity();
         rfq.setStatus(RfqStatus.OPEN);
         rfq.setCustomerIdRef(2L);
@@ -96,6 +100,37 @@ class QuotationManagementServiceTest {
         assertThat(result.submittedAt()).endsWith("Z");
         verify(commands).save(any(QuotationCommandEntity.class));
         verify(transactionManager).commit(any());
+    }
+
+    @Test
+    void uninvitedSupplierCannotSeeOrQuoteSelectedStoreRfq() {
+        rfq.setAudience(RfqAudience.SELECTED_STORES);
+        when(targets.existsByRfqIdAndSupplierIdRef(1L, 20L)).thenReturn(false);
+
+        assertCode(() -> service.create(1L, "create-1", request(customItem("100.00", "0"))), "RFQ_NOT_FOUND");
+        verify(quotations, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void invitedSupplierMustQuoteFromAnInvitedStore() {
+        rfq.setAudience(RfqAudience.SELECTED_STORES);
+        when(targets.existsByRfqIdAndSupplierIdRef(1L, 20L)).thenReturn(true);
+        when(targets.existsByRfqIdAndStoreIdRef(1L, 30L)).thenReturn(false, true);
+
+        assertCode(() -> service.create(1L, "create-1", request(customItem("100.00", "0"))), "STORE_NOT_TARGETED");
+        verify(quotations, never()).saveAndFlush(any());
+        assertThat(service.create(1L, "create-2", request(customItem("100.00", "0"))).status())
+                .isEqualTo(QuotationStatus.SUBMITTED);
+    }
+
+    @Test
+    void uninvitedSupplierCannotListQuotationsOfSelectedStoreRfq() {
+        rfq.setAudience(RfqAudience.SELECTED_STORES);
+        when(rfqs.findById(1L)).thenReturn(Optional.of(rfq));
+        when(actor.optionalCustomerId()).thenReturn(99L);
+        when(targets.existsByRfqIdAndSupplierIdRef(1L, 20L)).thenReturn(false);
+
+        assertCode(() -> service.listForRfq(1L, 0, 20, null), "RFQ_NOT_FOUND");
     }
 
     @Test
@@ -256,6 +291,34 @@ class QuotationManagementServiceTest {
         assertThat(quotation.getStatus()).isEqualTo(QuotationStatus.ACCEPTED);
     }
 
+    @Test
+    void depositQuotationNeedsDeliveryAtLeastFourDaysAheadInVietnam() {
+        assertCode(() -> service.create(1L, "create-1", request("30.00", todayInVietnam.plusDays(3))),
+                "DELIVERY_TOO_SOON_FOR_REMAINING");
+        verify(quotations, never()).saveAndFlush(any());
+
+        assertThat(service.create(1L, "create-2", request("30.00", todayInVietnam.plusDays(4))).status())
+                .isEqualTo(QuotationStatus.SUBMITTED);
+    }
+
+    @Test
+    void quotationWithoutRemainingBalanceMayDeliverSoon() {
+        assertThat(service.create(1L, "create-0", request("0.00", todayInVietnam.plusDays(1))).status())
+                .isEqualTo(QuotationStatus.SUBMITTED);
+        assertThat(service.create(1L, "create-100", request("100.00", todayInVietnam.plusDays(1))).status())
+                .isEqualTo(QuotationStatus.SUBMITTED);
+    }
+
+    @Test
+    void depositRevisionNeedsDeliveryAtLeastFourDaysAhead() {
+        prepareRevision();
+
+        assertCode(() -> service.revise(90L, "revision-1", new ReviseQuotationRequest(3, new BigDecimal("30.00"),
+                validity, 3, todayInVietnam.plusDays(2), "EXPRESS", new BigDecimal("10000.00"), "Chuyển khoản",
+                List.of(customItem("100.00", "0")))), "DELIVERY_TOO_SOON_FOR_REMAINING");
+        verify(quotations, never()).saveAndFlush(any());
+    }
+
     private QuotationEntity prepareRevision() {
         QuotationEntity previous = previousQuotation();
         when(quotations.findById(90L)).thenReturn(Optional.of(previous));
@@ -285,6 +348,11 @@ class QuotationManagementServiceTest {
     private CreateQuotationRequest request(QuotationItemRequest item) {
         return new CreateQuotationRequest(30L, new BigDecimal("30.00"), validity, 3,
                 deliveryDate, "EXPRESS", new BigDecimal("10000.00"), "Chuyển khoản", List.of(item));
+    }
+
+    private CreateQuotationRequest request(String depositPercent, LocalDate delivery) {
+        return new CreateQuotationRequest(30L, new BigDecimal(depositPercent), validity, 3,
+                delivery, "EXPRESS", new BigDecimal("10000.00"), "Chuyển khoản", List.of(customItem("100.00", "0")));
     }
 
     private QuotationItemRequest customItem(String price, String discount) {
