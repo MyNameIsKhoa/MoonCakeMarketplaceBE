@@ -12,7 +12,7 @@ import mss.mooncake.commerce.repository.FinanceRepository.CustomerPayment;
 import mss.mooncake.commerce.repository.FinanceRepository.CustomerPaymentItem;
 import mss.mooncake.commerce.service.CustomerPaymentService;
 import mss.mooncake.commerce.service.FinanceService;
-import mss.mooncake.commerce.service.PaymentDescription;
+import mss.mooncake.commerce.util.PaymentDescription;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -270,14 +270,25 @@ public class CustomerPaymentServiceImpl implements CustomerPaymentService {
             for (var payment : repository.payments(id)) {
                 if (payment.orderCode() != null && List.of("CREATING", "RECONCILING", "PENDING", "CANCELLING")
                         .contains(payment.status())) {
-                    require(finance != null, "PAYOS_RECONCILIATION_UNAVAILABLE");
-                    finance.getObject().reconcile(payment.id(), actor, true);
+                    if (payment.expiresAt() != null && !payment.expiresAt().isAfter(Instant.now())) {
+                        repository.update("UPDATE payment SET status='EXPIRED' WHERE payment_id=?", payment.id());
+                    } else {
+                        require(finance != null, "PAYOS_RECONCILIATION_UNAVAILABLE");
+                        finance.getObject().reconcile(payment.id(), actor, true);
+                    }
                 }
             }
         }
         var group = repository.customerPayments(orderId).stream().findFirst().orElse(null);
         if (group != null && List.of("CREATING", "RECONCILING", "PENDING", "CANCELLING")
-                .contains(group.status())) { reconcile(orderId, actor, true); }
+                .contains(group.status())) {
+            if (group.expiresAt() != null && !group.expiresAt().isAfter(Instant.now())) {
+                repository.update("UPDATE customer_payment SET status='EXPIRED' WHERE customer_payment_id=?",
+                        group.id());
+            } else {
+                reconcile(orderId, actor, true);
+            }
+        }
 
         String reservationKey = repository.stockReservationKey(orderId);
         if (reservationKey != null) {
