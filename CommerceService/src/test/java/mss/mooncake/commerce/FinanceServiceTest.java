@@ -149,6 +149,24 @@ class FinanceServiceTest {
     }
 
     @Test
+    void cancellingUnpaidRetailOrderDoesNotCallPayOsForExpiredLink() {
+        var jdbc = new JdbcTemplate(datasource);
+        jdbc.update("UPDATE seller_order SET status='AWAITING_PAYMENT' WHERE seller_order_id=1");
+        context(true, null, 1, null);
+        var link = customerPayments.initiate(1, key(), BUYER).payment();
+        jdbc.update("UPDATE customer_payment SET expires_at=? WHERE customer_payment_id=?",
+                FinanceRepository.utc(Instant.now().minusSeconds(60)), link.id());
+
+        customerPayments.cancelUnpaidOrder(1, "Đổi ý trước khi thanh toán", BUYER);
+
+        assertThat(repository.count("SELECT COUNT(*) FROM customer_order WHERE order_id=1 AND status='CANCELLED'"))
+                .isEqualTo(1);
+        assertThat(repository.count("SELECT COUNT(*) FROM customer_payment " +
+                "WHERE customer_payment_id=? AND status='EXPIRED'", link.id())).isEqualTo(1);
+        verify(provider, never()).cancel(anyLong());
+    }
+
+    @Test
     void oneCustomerCheckoutSplitsVerifiedPaymentAcrossSellersExactlyOnce() {
         var jdbc = new JdbcTemplate(datasource);
         jdbc.update("UPDATE customer_order SET grand_total=20002 WHERE order_id=1");

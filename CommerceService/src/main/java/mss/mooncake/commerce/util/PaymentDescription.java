@@ -1,4 +1,4 @@
-package mss.mooncake.commerce.service;
+package mss.mooncake.commerce.util;
 
 /** A short merchant reference for the payOS description, distinct from its numeric order code. */
 public final class PaymentDescription {
