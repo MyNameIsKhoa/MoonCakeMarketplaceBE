@@ -13,6 +13,8 @@ import vn.payos.model.webhooks.Webhook;
 
 @Component
 public class PayOsPaymentProvider implements PaymentProvider {
+    /** Per PayOS call; the frontend's payment requests allow for create + reconcile + cancel at this limit. */
+    static final int TIMEOUT_MS = 30_000;
     private final PayOS client;
     private final String returnUrl;
     private final String cancelUrl;
@@ -22,9 +24,10 @@ public class PayOsPaymentProvider implements PaymentProvider {
             @Value("${payos.checksum-key:}") String checksumKey,
             @Value("${payos.return-url:http://localhost:5173/?finance=return}") String returnUrl,
             @Value("${payos.cancel-url:http://localhost:5173/?finance=cancel}") String cancelUrl) {
+        // PayOS has taken ~9 s to create a link; 10 s timed out while the link was still made.
         this.client = clientId.isBlank() || apiKey.isBlank() || checksumKey.isBlank() ? null
                 : new PayOS(ClientOptions.builder().clientId(clientId).apiKey(apiKey)
-                        .checksumKey(checksumKey).maxRetries(0).timeoutMs(10000).build());
+                        .checksumKey(checksumKey).maxRetries(0).timeoutMs(TIMEOUT_MS).build());
         this.returnUrl = returnUrl;
         this.cancelUrl = cancelUrl;
     }

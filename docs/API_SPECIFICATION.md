@@ -249,9 +249,9 @@ Thời điểm dự kiến và thực tế được lưu riêng. Một phần đ
 
 | Mã | Phương thức và endpoint | Chức năng | Quyền |
 |---|---|---|---|
-| RQ01 | `GET /api/rfqs` | Tìm yêu cầu báo giá công khai; hỗ trợ `mine` | Công khai; khách hàng khi `mine=true` |
-| RQ02 | `GET /api/rfqs/{rfqId}` | Xem nội dung yêu cầu báo giá | Công khai hoặc chủ yêu cầu |
-| RQ03 | `POST /api/rfqs` | Tạo yêu cầu báo giá | Khách hàng |
+| RQ01 | `GET /api/rfqs` | Tìm yêu cầu báo giá công khai và yêu cầu gửi riêng cho cửa hàng của người gọi; hỗ trợ `mine` | Công khai; khách hàng khi `mine=true` |
+| RQ02 | `GET /api/rfqs/{rfqId}` | Xem nội dung yêu cầu báo giá | Công khai hoặc chủ yêu cầu; yêu cầu gửi riêng chỉ chủ yêu cầu và nhà cung cấp được mời |
+| RQ03 | `POST /api/rfqs` | Tạo yêu cầu báo giá; `targetStoreIds` (1–20) để chỉ gửi cho cửa hàng chọn | Khách hàng |
 | RQ04* | `PATCH /api/rfqs/{rfqId}` | Cập nhật nội dung khi được phép | Khách hàng |
 | RQ05* | `POST /api/rfqs/{rfqId}/publish` | Công bố yêu cầu đang ở bản nháp | Khách hàng |
 | RQ06* | `POST /api/rfqs/{rfqId}/close` | Đóng nhận báo giá | Khách hàng |
@@ -288,6 +288,8 @@ Contract TV4 hiện tại: create/revision có 1–50 mục hàng, yêu cầu `I
 | CH02 | `GET /api/conversations` | Xem danh sách hội thoại của tài khoản | Bên tham gia |
 | CH03 | `GET /api/conversations/{conversationId}` | Xem thông tin hội thoại | Bên tham gia |
 | CH04 | `GET /api/conversations/{conversationId}/messages` | Xem lịch sử tin nhắn | Bên tham gia |
+| CH05 | `GET /api/conversations/unread-count` | Đếm tin bên kia gửi sau lần đọc cuối, trên mọi hội thoại | Người dùng đã đăng nhập |
+| CH06 | `POST /api/conversations/{conversationId}/read` | Đánh dấu đã đọc tới tin mới nhất (204) | Bên tham gia |
 
 Lịch sử tin nhắn sử dụng `beforeMessageId` hoặc `afterMessageId` và `limit` (mặc định 50, tối đa 100). Phản hồi gồm `items`, `nextCursor`, `hasMore`.
 
