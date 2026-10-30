@@ -14,6 +14,9 @@ public interface IdentityServiceClient {
     @GetMapping("/api/supplier/by-user/{userId}/summary")
     SupplierSummaryResponse getSupplierSummaryByUser(@PathVariable Long userId);
 
+    @GetMapping("/api/supplier/{supplierId}/summary")
+    SupplierSummaryResponse getSupplierSummary(@PathVariable Long supplierId);
+
     @GetMapping("/api/address/{addressId}/summary")
     AddressSummaryResponse getAddressSummary(@PathVariable Long addressId);
 }

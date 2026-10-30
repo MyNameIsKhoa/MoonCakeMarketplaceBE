@@ -15,15 +15,19 @@ import mss.mooncake.identity.dto.response.UserProfileResponse;
 import mss.mooncake.identity.dto.response.UserSummaryResponse;
 import mss.mooncake.identity.entity.CustomerProfileEntity;
 import mss.mooncake.identity.entity.UserEntity;
+import mss.mooncake.identity.enums.SupplierVerificationStatus;
 import mss.mooncake.identity.enums.UserStatus;
 import mss.mooncake.identity.exception.DuplicateResourceException;
 import mss.mooncake.identity.exception.ForbiddenException;
 import mss.mooncake.identity.exception.ResourceNotFoundException;
 import mss.mooncake.identity.exception.UnauthorizedException;
 import mss.mooncake.identity.repository.CustomerProfileRepository;
+import mss.mooncake.identity.repository.SupplierProfileRepository;
 import mss.mooncake.identity.repository.UserRepository;
 import mss.mooncake.identity.security.JwtTokenProvider;
 import mss.mooncake.identity.service.AccountApplicationService;
+import mss.mooncake.identity.service.AuthEmailFlowService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -34,11 +38,28 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
 
     private final UserRepository userRepository;
     private final CustomerProfileRepository customerProfileRepository;
+    private final SupplierProfileRepository supplierProfileRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
+    private final AuthEmailFlowService authEmailFlowService;
     @Value("${security.admin.user-ids:}")
     private String configuredAdminUserIds;
     private Set<Long> adminUserIds = Set.of();
+
+    @Autowired
+    public AccountApplicationServiceImpl(UserRepository userRepository,
+                                          CustomerProfileRepository customerProfileRepository,
+                                          SupplierProfileRepository supplierProfileRepository,
+                                          PasswordEncoder passwordEncoder,
+                                          JwtTokenProvider jwtTokenProvider,
+                                          AuthEmailFlowService authEmailFlowService) {
+        this.userRepository = userRepository;
+        this.customerProfileRepository = customerProfileRepository;
+        this.supplierProfileRepository = supplierProfileRepository;
+        this.passwordEncoder = passwordEncoder;
+        this.jwtTokenProvider = jwtTokenProvider;
+        this.authEmailFlowService = authEmailFlowService;
+    }
 
     public AccountApplicationServiceImpl(UserRepository userRepository,
                                           CustomerProfileRepository customerProfileRepository,
@@ -46,8 +67,10 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
                                           JwtTokenProvider jwtTokenProvider) {
         this.userRepository = userRepository;
         this.customerProfileRepository = customerProfileRepository;
+        this.supplierProfileRepository = null;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
+        this.authEmailFlowService = null;
     }
 
     @PostConstruct
@@ -81,6 +104,7 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
                 now,
                 now
         );
+        user.setEmailVerified(false);
         UserEntity savedUser = userRepository.save(user);
 
         CustomerProfileEntity profile = new CustomerProfileEntity(
@@ -91,6 +115,7 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
                 now
         );
         CustomerProfileEntity savedProfile = customerProfileRepository.save(profile);
+        if (authEmailFlowService != null) authEmailFlowService.sendVerification(savedUser);
 
         return new UserSummaryResponse(
                 savedUser.getId(),
@@ -116,16 +141,48 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
             throw new ForbiddenException("Account is not active. Current status: " + user.getStatus());
         }
 
+        if (!user.isEmailVerified()) {
+            throw new ForbiddenException("Email address must be verified before login");
+        }
+
         CustomerProfileEntity profile = customerProfileRepository.findByUserId(user.getId())
                 .orElse(null);
 
+        return createAuthResponse(user, profile);
+    }
+
+    @Override
+    @Transactional
+    public AuthResponse loginWithGoogle(String email, String fullName) {
+        String normalizedEmail = email.trim().toLowerCase();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+        UserEntity user = userRepository.findByEmail(normalizedEmail).orElseGet(() -> {
+            UserEntity created = userRepository.save(new UserEntity(
+                    normalizedEmail, null, UserStatus.ACTIVE, now, now));
+            created.setEmailVerified(true);
+            customerProfileRepository.save(new CustomerProfileEntity(
+                    created.getId(), (fullName == null || fullName.isBlank())
+                    ? normalizedEmail.substring(0, normalizedEmail.indexOf('@')) : fullName.trim(), null, now, now));
+            return created;
+        });
+
+        if (!user.isEmailVerified()) {
+            user.setEmailVerified(true);
+            user.setUpdatedAt(now);
+        }
+
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new ForbiddenException("Account is not active. Current status: " + user.getStatus());
+        }
+        CustomerProfileEntity profile = customerProfileRepository.findByUserId(user.getId()).orElse(null);
+        return createAuthResponse(user, profile);
+    }
+
+    private AuthResponse createAuthResponse(UserEntity user, CustomerProfileEntity profile) {
         Long customerId = profile != null ? profile.getId() : null;
         String fullName = profile != null ? profile.getFullName() : null;
         String phone = profile != null ? profile.getPhone() : null;
-
-        List<String> roles = adminUserIds.contains(user.getId())
-                ? List.of("ROLE_CUSTOMER", "ROLE_ADMIN")
-                : List.of("ROLE_CUSTOMER");
+        List<String> roles = resolveRoles(user.getId());
         String token = jwtTokenProvider.generateToken(user.getId(), customerId, user.getEmail(), roles);
 
         UserSummaryResponse userSummary = new UserSummaryResponse(
@@ -142,6 +199,18 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
                 jwtTokenProvider.getExpirationSeconds(),
                 userSummary
         );
+    }
+
+    private List<String> resolveRoles(Long userId) {
+        List<String> roles = new java.util.ArrayList<>();
+        roles.add("ROLE_CUSTOMER");
+        if (supplierProfileRepository != null && supplierProfileRepository.findByUserId(userId)
+                .map(supplier -> SupplierVerificationStatus.VERIFIED.name().equals(supplier.getVerificationStatus()))
+                .orElse(false)) {
+            roles.add("ROLE_SUPPLIER");
+        }
+        if (adminUserIds.contains(userId)) roles.add("ROLE_ADMIN");
+        return List.copyOf(roles);
     }
 
     @Override

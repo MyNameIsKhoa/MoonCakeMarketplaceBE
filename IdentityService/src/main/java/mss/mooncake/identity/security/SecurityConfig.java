@@ -40,7 +40,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/supplier/**").hasAnyAuthority("ROLE_INTERNAL_CATALOG", "ROLE_INTERNAL_COMMERCE", "ROLE_INTERNAL_RFQ")
                         .requestMatchers("/api/user/**").hasAnyAuthority("ROLE_INTERNAL_COMMERCE", "ROLE_INTERNAL_RFQ")
-                        .requestMatchers("/api/address/**").hasAuthority("ROLE_INTERNAL_COMMERCE")
+                        .requestMatchers("/api/address/**").hasAnyAuthority("ROLE_INTERNAL_COMMERCE", "ROLE_INTERNAL_RFQ")
                         .requestMatchers("/internal/**").denyAll()
                         .anyRequest().hasAnyAuthority("ROLE_CUSTOMER", "ROLE_SUPPLIER", "ROLE_ADMIN")
                 )

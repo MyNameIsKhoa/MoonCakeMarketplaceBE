@@ -161,7 +161,7 @@
 - [ ] FE: cart, checkout nhiều store, order history/detail đọc snapshot; không để FE gọi trực tiếp nhiều service để tự ghép một quyết định checkout.
 - [ ] Test: hai store → một customer order + đúng seller orders; thay product sau mua không thay order detail; order khác owner bị `403/404`; retry RFQ không tạo đơn trùng; migration SQL Server.
 - [ ] Handoff: nhận summary TV1 và snapshot/promotion TV2; cung cấp order response cho TV4, seller-order state/context qua Java service cho TV5/TV6.
-- [ ] TV4/TV1: RFQ lấy address summary tin cậy khi accept để dựng IN09; Identity hiện chỉ cho `ROLE_INTERNAL_COMMERCE` gọi `/api/address/**`, nên cần thống nhất mở đúng quyền RFQ hoặc để Commerce tự fetch/verify snapshot. Không copy address/customer/store từ body FE.
+- [ ] TV4/TV1: RFQ lấy address summary tin cậy khi accept để dựng IN09; Identity cho `ROLE_INTERNAL_COMMERCE` và `ROLE_INTERNAL_RFQ` gọi `/api/address/**`. Caller phải xác minh buyer ownership, không copy address/customer/store từ body FE.
 - [ ] TV5/TV3: chốt và triển khai Java service tạo `FULL`/`DEPOSIT` obligation cùng transaction lưu đơn; payment callback đã xác minh mới confirm IN12, failure/cancel/15 phút timeout thì release và cập nhật state bền vững; retry các bước mạng. Xác nhận xử lý tổng 0 đồng/deposit 0% trước khi bật checkout.
 - [ ] **CHỐT:** mã order, inventory reservation/oversell, transaction & lỗi Feign, idempotency retail checkout, payload accepted quotation từ TV4.
 

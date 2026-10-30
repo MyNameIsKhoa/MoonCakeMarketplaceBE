@@ -258,10 +258,12 @@ Auth đã có native JWT + password hash; repo chưa có refresh/session/revocat
 | AU01 T | `POST /api/auth/refresh` | Refresh credential | Session/refresh credential theo thiết kế | 200 `AuthResponse` | Chốt token storage, rotation/reuse detection và migration; không dùng access token hết hạn làm refresh token. |
 | AU02 T | `POST /api/auth/logout` | Session credential | Session hiện tại | 204 | Chỉ hứa revoke khi server có revoke/session mechanism; xóa token FE không vô hiệu JWT đã bị lấy cắp. |
 | AU03 T | `POST /api/auth/password-change` | USER | oldPassword, newPassword | 204 | Xác thực lại, policy password và revoke-session strategy. |
-| AU04 T | `POST /api/auth/password-reset-requests` | PUBLIC | email | 202 generic | Cần email provider + token reset một lần có expiry; không tiết lộ email tồn tại. |
-| AU05 T | `POST /api/auth/password-resets` | Reset credential | resetToken, newPassword | 204 | Token một lần, không nhận userId làm quyền reset. |
+| AU04 I | `POST /api/auth/password-reset-requests` | PUBLIC | email | 202 generic | Email delivery failures do not reveal whether the address exists. |
+| AU05 I | `POST /api/auth/password-resets` | Reset credential | token, newPassword | 204 | Hashed, expiring, single-use token; no userId accepted. |
+| AU06 I | `POST /api/auth/email/verification-requests` | PUBLIC | email | 202 generic | Resend verification mail for an unverified account. |
+| AU07 I | `POST /api/auth/email/verify` | PUBLIC | token | 204 | Hashed, expiring, single-use token; native password login requires verified email. |
 
-AU01–AU05 là phần mở rộng cần chốt cơ chế, không phải các API đã có hoặc yêu cầu MVP được tự động thêm vào.
+AU01-AU03 remain future session-management enhancements; AU04-AU07 are implemented as expiring email flows.
 
 ## 7. API TV2 — Catalog, Search, Promotion
 

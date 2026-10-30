@@ -20,6 +20,10 @@ public class UserEntity extends BaseIdentityEntity {
     @Column(name = "password_hash", length = 255)
     private String passwordHash;
 
+    @Column(name = "email_verified", nullable = false)
+    private boolean emailVerified;
+
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 30)
     private UserStatus status;
@@ -39,6 +43,7 @@ public class UserEntity extends BaseIdentityEntity {
         this.status = status;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
+        this.emailVerified = true;
     }
 
     public String getEmail() {
@@ -53,9 +58,14 @@ public class UserEntity extends BaseIdentityEntity {
         return passwordHash;
     }
 
+
     public void setPasswordHash(String passwordHash) {
         this.passwordHash = passwordHash;
     }
+
+    public boolean isEmailVerified() { return emailVerified; }
+
+    public void setEmailVerified(boolean emailVerified) { this.emailVerified = emailVerified; }
 
     public UserStatus getStatus() {
         return status;

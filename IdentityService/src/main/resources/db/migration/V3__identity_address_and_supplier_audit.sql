@@ -7,19 +7,37 @@ WITH ranked AS (
 UPDATE a SET is_default = CASE WHEN r.rn = 1 THEN 1 ELSE 0 END
 FROM dbo.address a JOIN ranked r ON r.address_id = a.address_id;
 
-CREATE UNIQUE INDEX UQ_address_one_default_per_customer
-    ON dbo.address(customer_id) WHERE is_default = 1;
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'dbo.address')
+      AND name = N'UQ_address_one_default_per_customer'
+)
+BEGIN
+    CREATE UNIQUE INDEX UQ_address_one_default_per_customer
+        ON dbo.address(customer_id) WHERE is_default = 1;
+END
 
-CREATE TABLE dbo.supplier_verification_audit (
-    audit_id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_supplier_verification_audit PRIMARY KEY,
-    supplier_id BIGINT NOT NULL,
-    actor_user_id BIGINT NOT NULL,
-    previous_status NVARCHAR(30) NULL,
-    new_status NVARCHAR(30) NOT NULL,
-    reason NVARCHAR(1000) NOT NULL,
-    acted_at DATETIME2(0) NOT NULL CONSTRAINT DF_supplier_verification_audit_acted_at DEFAULT SYSUTCDATETIME(),
-    CONSTRAINT FK_supplier_verification_audit_supplier FOREIGN KEY (supplier_id) REFERENCES dbo.supplier_profile(supplier_id),
-    CONSTRAINT FK_supplier_verification_audit_actor FOREIGN KEY (actor_user_id) REFERENCES dbo.app_user(user_id)
-);
-CREATE INDEX IX_supplier_verification_audit_supplier_time
-    ON dbo.supplier_verification_audit(supplier_id, acted_at DESC, audit_id DESC);
+IF OBJECT_ID(N'dbo.supplier_verification_audit', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.supplier_verification_audit (
+        audit_id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_supplier_verification_audit PRIMARY KEY,
+        supplier_id BIGINT NOT NULL,
+        actor_user_id BIGINT NOT NULL,
+        previous_status NVARCHAR(30) NULL,
+        new_status NVARCHAR(30) NOT NULL,
+        reason NVARCHAR(1000) NOT NULL,
+        acted_at DATETIME2(0) NOT NULL CONSTRAINT DF_supplier_verification_audit_acted_at DEFAULT SYSUTCDATETIME(),
+        CONSTRAINT FK_supplier_verification_audit_supplier FOREIGN KEY (supplier_id) REFERENCES dbo.supplier_profile(supplier_id),
+        CONSTRAINT FK_supplier_verification_audit_actor FOREIGN KEY (actor_user_id) REFERENCES dbo.app_user(user_id)
+    );
+END
+
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'dbo.supplier_verification_audit')
+      AND name = N'IX_supplier_verification_audit_supplier_time'
+)
+BEGIN
+    CREATE INDEX IX_supplier_verification_audit_supplier_time
+        ON dbo.supplier_verification_audit(supplier_id, acted_at DESC, audit_id DESC);
+END

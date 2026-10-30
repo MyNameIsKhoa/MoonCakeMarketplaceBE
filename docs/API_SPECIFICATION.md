@@ -22,7 +22,7 @@ Mỗi dịch vụ sở hữu cơ sở dữ liệu riêng. Giao tiếp đồng b�
 
 | Dịch vụ | Public API có controller hiện tại | API còn ở mức thiết kế hoặc skeleton |
 |---|---|---|
-| Identity | ID01–ID12, AD03–AD04 và lịch sử xác minh supplier | AD01–AD02, AU01–AU05 |
+| Identity | ID01–ID12, AD03–AD04 và lịch sử xác minh supplier | AD01–AD02, AU01–AU07 |
 | Catalog & Store | ST01–ST04; CA01–CA04, CA06–CA09, CA11–CA14, CA16–CA20 | Thao tác xóa CA05, CA10, CA15, CA21 (chờ chốt chính sách) và kiểm duyệt AD05–AD06 trong mục 4 |
 | Commerce | OR01–OR06, OR08–OR11 đã có controller/backend đọc-ghi cơ bản | OR07, OR12 và các API TV5/TV6 trong mục 5 chưa triển khai đầy đủ |
 | RFQ & Negotiation | `POST /api/quotations/{quotationId}/accept` nhận version/addressId và buyer principal, nhưng conversion vẫn trả 501 | Các API RFQ, báo giá còn lại và hội thoại/WebSocket trong mục 6 |
@@ -92,6 +92,7 @@ Kết quả thành công hiện trả dữ liệu trực tiếp. `application/pr
 | ID07 | `POST /api/addresses` | Thêm địa chỉ | Khách hàng |
 | ID08 | `PATCH /api/addresses/{addressId}` | Cập nhật địa chỉ, lựa chọn mặc định | Khách hàng |
 | ID09 | `DELETE /api/addresses/{addressId}` | Xóa địa chỉ đã lưu | Khách hàng |
+
 
 ### 3.2. Hồ sơ nhà cung cấp và quản trị
 
@@ -383,8 +384,10 @@ Các API sau được đề xuất bổ sung; chưa mặc định thuộc phạm
 | AU01* | `POST /api/auth/refresh` | Cấp access token mới bằng thông tin làm mới hợp lệ | Chủ phiên đăng nhập |
 | AU02* | `POST /api/auth/logout` | Kết thúc phiên theo cơ chế thu hồi được lựa chọn | Chủ phiên đăng nhập |
 | AU03* | `POST /api/auth/password-change` | Đổi mật khẩu sau khi xác thực lại | Người dùng |
-| AU04* | `POST /api/auth/password-reset-requests` | Yêu cầu khôi phục mật khẩu | Công khai |
-| AU05* | `POST /api/auth/password-resets` | Đặt mật khẩu mới bằng mã khôi phục hợp lệ | Chủ mã khôi phục |
+| AU04 | `POST /api/auth/password-reset-requests` | Request password reset email; returns generic 202 | Public |
+| AU05 | `POST /api/auth/password-resets` | Set new password using a one-time token; returns 204 | Reset token holder |
+
+Email lifecycle endpoints: `POST /api/auth/email/verification-requests` requests or resends a verification email (generic 202); `POST /api/auth/email/verify` consumes its one-time token (204). Native registration requires email verification before password login. Details: [Google auth and email flows](GOOGLE_AUTH_AND_EMAIL.md).
 
 ## 11. Cơ sở tài liệu
 
