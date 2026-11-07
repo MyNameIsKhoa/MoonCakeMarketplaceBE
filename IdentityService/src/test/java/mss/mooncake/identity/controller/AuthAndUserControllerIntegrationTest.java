@@ -11,6 +11,9 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.mail.javamail.JavaMailSender;
+import mss.mooncake.identity.repository.UserRepository;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
@@ -34,6 +37,8 @@ class AuthAndUserControllerIntegrationTest {
 
     @Autowired
     private WebApplicationContext context;
+    @Autowired private UserRepository users;
+    @MockitoBean private JavaMailSender mailSender;
 
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
@@ -62,6 +67,10 @@ class AuthAndUserControllerIntegrationTest {
                 .andExpect(jsonPath("$.fullName").value("Le Van C"))
                 .andExpect(jsonPath("$.email").value("levanc@example.com"))
                 .andExpect(jsonPath("$.phone").value("0912345678"));
+        var user = users.findByEmail("levanc@example.com").orElseThrow();
+        org.junit.jupiter.api.Assertions.assertFalse(user.isEmailVerified());
+        user.setEmailVerified(true); // Existing profile tests start after verification has completed.
+        users.save(user);
     }
 
     @Test

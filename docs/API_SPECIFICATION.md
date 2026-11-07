@@ -22,7 +22,7 @@ Mỗi dịch vụ sở hữu cơ sở dữ liệu riêng. Giao tiếp đồng b�
 
 | Dịch vụ | Public API có controller hiện tại | API còn ở mức thiết kế hoặc skeleton |
 |---|---|---|
-| Identity | ID01–ID12, AD03–AD04 và lịch sử xác minh supplier | AD01–AD02, AU01–AU05 |
+| Identity | ID01–ID17, AD03–AD04 và lịch sử xác minh supplier | AD01–AD02, AU01–AU05 |
 | Catalog & Store | ST01–ST04; CA01–CA04, CA06–CA09, CA11–CA14, CA16–CA20 | Thao tác xóa CA05, CA10, CA15, CA21 (chờ chốt chính sách) và kiểm duyệt AD05–AD06 trong mục 4 |
 | Commerce | OR01–OR06, OR08–OR11 đã có controller/backend đọc-ghi cơ bản | OR07, OR12 và các API TV5/TV6 trong mục 5 chưa triển khai đầy đủ |
 | RFQ & Negotiation | `POST /api/quotations/{quotationId}/accept` nhận version/addressId và buyer principal, nhưng conversion vẫn trả 501 | Các API RFQ, báo giá còn lại và hội thoại/WebSocket trong mục 6 |
@@ -85,6 +85,11 @@ Kết quả thành công hiện trả dữ liệu trực tiếp. `application/pr
 |---|---|---|---|
 | ID01 | `POST /api/auth/register` | Đăng ký tài khoản | Công khai |
 | ID02 | `POST /api/auth/login` | Đăng nhập, nhận access token | Công khai |
+| ID13 | `POST /api/auth/google` | Đăng nhập bằng Google ID token; yêu cầu `GOOGLE_CLIENT_IDS` | Công khai |
+| ID14 | `POST /api/auth/email/verification-requests` | Gửi lại email xác minh; trả 202 | Công khai |
+| ID15 | `POST /api/auth/email/verify` | Xác minh email bằng token một lần; trả 204 | Công khai |
+| ID16 | `POST /api/auth/password-reset-requests` | Yêu cầu email đặt lại mật khẩu; trả 202 | Công khai |
+| ID17 | `POST /api/auth/password-resets` | Đặt mật khẩu mới bằng token một lần; trả 204 | Công khai |
 | ID03 | `GET /api/users/me` | Xem hồ sơ cá nhân | Người dùng |
 | ID04 | `PATCH /api/users/me` | Cập nhật hồ sơ cá nhân | Người dùng |
 | ID05 | `GET /api/addresses` | Xem danh sách địa chỉ | Khách hàng |

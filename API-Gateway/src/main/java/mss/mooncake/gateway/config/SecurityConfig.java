@@ -33,7 +33,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/payments/payos/callback").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login", "/api/auth/google",
+                                "/api/auth/email/verification-requests", "/api/auth/email/verify",
+                                "/api/auth/password-reset-requests", "/api/auth/password-resets").permitAll()
                         .requestMatchers(HttpMethod.GET, "/ws/chat", "/api/rfqs", "/api/rfqs/{rfqId}").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/stores", "/api/stores/**").permitAll()
                         // Catalog public read (CA01, CA02, CA06, CA07, CA11, CA12, CA16, CA17); Catalog tự lọc dữ liệu chưa công bố.
