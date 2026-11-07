@@ -134,6 +134,8 @@ class FulfillmentApplicationServiceImplTest {
         orderItem = new OrderItemEntity();
         orderItem.setSellerOrderId(SELLER_ORDER_ID);
         orderItem.setVariantIdRef(1001L);
+        orderItem.setProductNameSnapshot("Hộp Trăng Vàng Hoàng Kim");
+        orderItem.setVariantNameSnapshot("Hộp 4 bánh - Ít ngọt");
         orderItem.setQuantity(2);
         orderItem.setUnitPrice(BigDecimal.valueOf(150000));
         orderItem.setSubtotal(BigDecimal.valueOf(300000));
@@ -207,6 +209,26 @@ class FulfillmentApplicationServiceImplTest {
                     .isInstanceOf(BadRequestException.class)
                     .hasMessageContaining("AWAITING_PAYMENT");
         }
+
+        @Test
+        @DisplayName("Should allow creating additional shipment when order is already SHIPPING (multi-batch B2B)")
+        void shouldAllowAdditionalShipmentWhileShipping() {
+            sellerOrder.setStatus(OrderStatus.SHIPPING.name());
+            CreateShipmentRequest request = new CreateShipmentRequest(
+                    SELLER_ORDER_ID, "EXPRESS", "GHN", "GHN998877",
+                    LocalDateTime.now().plusHours(4), LocalDateTime.now().plusDays(1),
+                    BigDecimal.ZERO
+            );
+
+            when(sellerOrderRepository.findById(SELLER_ORDER_ID)).thenReturn(Optional.of(sellerOrder));
+            when(shipmentRepository.save(any(ShipmentEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+            ShipmentResponse response = fulfillmentService.createShipment(request, SUPPLIER_ID);
+
+            assertThat(response).isNotNull();
+            assertThat(response.status()).isEqualTo(ShipmentStatus.PLANNED);
+            assertThat(sellerOrder.getStatus()).isEqualTo(OrderStatus.SHIPPING.name());
+        }
     }
 
     @Nested
@@ -242,6 +264,26 @@ class FulfillmentApplicationServiceImplTest {
             assertThat(shipment.getDeliveredAt()).isNotNull();
             assertThat(sellerOrder.getStatus()).isEqualTo(OrderStatus.DELIVERED.name());
             verify(sellerOrderRepository).saveAndFlush(sellerOrder);
+        }
+
+        @Test
+        @DisplayName("Should keep sellerOrder in SHIPPING when only 1 of 2 shipments is delivered")
+        void shouldNotMarkOrderDeliveredUntilAllShipmentsDelivered() {
+            sellerOrder.setStatus(OrderStatus.SHIPPING.name());
+            shipment.setStatus(ShipmentStatus.SHIPPED);
+            ShipmentEntity secondShipment = new ShipmentEntity(
+                    SELLER_ORDER_ID, "STANDARD", "GHN", "GHN-BATCH-2",
+                    null, null, BigDecimal.ZERO, ShipmentStatus.SHIPPED
+            );
+            when(shipmentRepository.findById(SHIPMENT_ID)).thenReturn(Optional.of(shipment));
+            when(sellerOrderRepository.findById(SELLER_ORDER_ID)).thenReturn(Optional.of(sellerOrder));
+            when(shipmentRepository.save(any(ShipmentEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+            when(shipmentRepository.findBySellerOrderId(SELLER_ORDER_ID)).thenReturn(List.of(shipment, secondShipment));
+
+            ShipmentResponse response = fulfillmentService.markAsDelivered(SHIPMENT_ID, SUPPLIER_ID, false);
+
+            assertThat(response.status()).isEqualTo(ShipmentStatus.DELIVERED);
+            assertThat(sellerOrder.getStatus()).isEqualTo(OrderStatus.SHIPPING.name());
         }
     }
 
@@ -311,6 +353,9 @@ class FulfillmentApplicationServiceImplTest {
             assertThat(response.orderItemId()).isEqualTo(ORDER_ITEM_ID);
             assertThat(response.rating()).isEqualTo(5);
             assertThat(response.comment()).isEqualTo("Bánh rất ngon, đóng gói đẹp!");
+            assertThat(response.productNameSnapshot()).isEqualTo("Hộp Trăng Vàng Hoàng Kim");
+            assertThat(response.variantNameSnapshot()).isEqualTo("Hộp 4 bánh - Ít ngọt");
+            assertThat(response.displayName()).isEqualTo("Khách hàng #701");
             verify(reviewRepository).save(any(ReviewEntity.class));
         }
 

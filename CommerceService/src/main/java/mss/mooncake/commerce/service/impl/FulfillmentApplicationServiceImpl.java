@@ -68,7 +68,7 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
         }
 
         String orderStatus = sellerOrder.getStatus();
-        if (!List.of("READY_FOR_FULFILLMENT", "PREPARING").contains(orderStatus)) {
+        if (!List.of("READY_FOR_FULFILLMENT", "PREPARING", "SHIPPING").contains(orderStatus)) {
             throw new BadRequestException("Cannot create shipment for seller order in status: " + orderStatus);
         }
         requirePreparationPayment(request.sellerOrderId(), false);
@@ -277,7 +277,7 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
                 customerId,
                 request.rating(),
                 request.comment(),
-                LocalDateTime.now()
+                LocalDateTime.now(java.time.ZoneOffset.UTC)
         );
 
         ReviewEntity saved = reviewRepository.save(review);
@@ -329,7 +329,7 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
     public void assertEligibleForShipment(Long sellerOrderId) {
         SellerOrderEntity sellerOrder = findSellerOrderOrThrow(sellerOrderId);
         String status = sellerOrder.getStatus();
-        if (!List.of("READY_FOR_FULFILLMENT", "PREPARING").contains(status)) {
+        if (!List.of("READY_FOR_FULFILLMENT", "PREPARING", "SHIPPING").contains(status)) {
             throw new BadRequestException("Seller order is not eligible for shipment in status: " + status);
         }
         requirePreparationPayment(sellerOrderId, false);
@@ -400,13 +400,24 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
     }
 
     private ReviewResponse mapToReviewResponse(ReviewEntity entity) {
+        OrderItemEntity item = orderItemRepository != null && entity.getOrderItemId() != null
+                ? orderItemRepository.findById(entity.getOrderItemId()).orElse(null)
+                : null;
+        String productName = item != null ? item.getProductNameSnapshot() : null;
+        String variantName = item != null ? item.getVariantNameSnapshot() : null;
+        String displayName = entity.getCustomerIdRef() != null
+                ? "Khách hàng #" + entity.getCustomerIdRef()
+                : "Khách hàng ẩn danh";
         return new ReviewResponse(
                 entity.getId(),
                 entity.getOrderItemId(),
                 entity.getCustomerIdRef(),
                 entity.getRating(),
                 entity.getComment(),
-                entity.getCreatedAt()
+                entity.getCreatedAt(),
+                productName,
+                variantName,
+                displayName
         );
     }
 }
