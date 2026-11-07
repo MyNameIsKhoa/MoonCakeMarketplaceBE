@@ -5,6 +5,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import mss.mooncake.rfqnegotiation.client.IdentityServiceClient;
@@ -20,6 +22,7 @@ import mss.mooncake.rfqnegotiation.dto.response.UnreadCountResponse;
 import mss.mooncake.rfqnegotiation.entity.ConversationEntity;
 import mss.mooncake.rfqnegotiation.entity.ConversationReadStateEntity;
 import mss.mooncake.rfqnegotiation.entity.MessageEntity;
+import mss.mooncake.rfqnegotiation.entity.RfqEntity;
 import mss.mooncake.rfqnegotiation.enums.ConversationStatus;
 import mss.mooncake.rfqnegotiation.enums.RfqAudience;
 import mss.mooncake.rfqnegotiation.enums.RfqStatus;
@@ -91,7 +94,9 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
         }
         var supplier = requireSupplier(supplierId);
         var existing = conversations.findByRfqIdAndSupplierIdRef(rfqId, supplierId);
-        if (existing.isPresent()) return new ConversationCreatedResponse(toResponse(existing.get()), false);
+        if (existing.isPresent()) {
+            return new ConversationCreatedResponse(toResponse(existing.get(), rfq.getCustomerNameSnapshot()), false);
+        }
         if (!"VERIFIED".equals(supplier.verificationStatus())) {
             throw ApiException.conflict("SUPPLIER_NOT_VERIFIED", "Nhà cung cấp chưa được xác minh nên chưa thể mở hội thoại");
         }
@@ -105,22 +110,28 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
         conversation.setSupplierIdRef(supplierId);
         conversation.setStatus(ConversationStatus.OPEN);
         conversation.setCreatedAt(LocalDateTime.now(ZoneOffset.UTC).withNano(0));
-        return new ConversationCreatedResponse(toResponse(conversations.saveAndFlush(conversation)), true);
+        return new ConversationCreatedResponse(
+                toResponse(conversations.saveAndFlush(conversation), rfq.getCustomerNameSnapshot()), true);
     }
 
     @Override
     public PageResponse<ConversationResponse> list(Long rfqId, int page, int size, String sort) {
         actor.userId();
         var pageable = Paging.page(page, size, sort, Set.of("id", "createdAt", "status"), "createdAt");
-        return PageResponse.from(conversations.findForParticipant(actor.optionalCustomerId(),
-                actor.optionalSupplierId(), rfqId, pageable).map(this::toResponse));
+        var found = conversations.findForParticipant(actor.optionalCustomerId(), actor.optionalSupplierId(), rfqId, pageable);
+        // One query for the buyer names of the whole page.
+        Map<Long, String> buyerNames = new HashMap<>();
+        rfqs.findAllById(found.map(ConversationEntity::getRfqId).toSet())
+                .forEach(rfq -> buyerNames.put(rfq.getId(), rfq.getCustomerNameSnapshot()));
+        return PageResponse.from(found.map(c -> toResponse(c, buyerNames.get(c.getRfqId()))));
     }
 
     @Override
     public ConversationResponse get(Long conversationId) {
         var conversation = requireConversation(conversationId);
         requireParticipant(conversation, actor.userId());
-        return toResponse(conversation);
+        String buyerName = rfqs.findById(conversation.getRfqId()).map(RfqEntity::getCustomerNameSnapshot).orElse(null);
+        return toResponse(conversation, buyerName);
     }
 
     @Override
@@ -249,10 +260,10 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
         }
     }
 
-    private ConversationResponse toResponse(ConversationEntity entity) {
+    private ConversationResponse toResponse(ConversationEntity entity, String buyerName) {
         return new ConversationResponse(entity.getId().toString(), entity.getRfqId().toString(),
                 entity.getCustomerIdRef().toString(), entity.getSupplierIdRef().toString(),
-                entity.getStatus(), entity.getCreatedAt().toInstant(ZoneOffset.UTC));
+                entity.getStatus(), entity.getCreatedAt().toInstant(ZoneOffset.UTC), buyerName);
     }
 
     private MessageResponse toResponse(MessageEntity entity) {

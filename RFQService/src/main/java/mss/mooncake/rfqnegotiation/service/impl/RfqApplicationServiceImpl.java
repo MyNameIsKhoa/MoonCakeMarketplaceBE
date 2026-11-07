@@ -75,6 +75,7 @@ public class RfqApplicationServiceImpl implements RfqApplicationService {
         RfqEntity rfq = new RfqEntity();
         rfq.setRfqCode("RFQ-" + UUID.randomUUID().toString().toUpperCase());
         rfq.setCustomerIdRef(customerId);
+        rfq.setCustomerNameSnapshot(actor.fullName());
         apply(rfq, request);
         rfq.setAudience(stores.isEmpty() ? RfqAudience.ALL : RfqAudience.SELECTED_STORES);
         rfq.setStatus(RfqStatus.OPEN);
