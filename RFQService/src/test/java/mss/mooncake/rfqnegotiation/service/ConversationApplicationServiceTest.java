@@ -32,6 +32,7 @@ import mss.mooncake.rfqnegotiation.repository.RfqTargetStoreRepository;
 import mss.mooncake.rfqnegotiation.security.ActorContext;
 import mss.mooncake.rfqnegotiation.security.UserPrincipal;
 import mss.mooncake.rfqnegotiation.service.impl.ConversationApplicationServiceImpl;
+import mss.mooncake.rfqnegotiation.dto.response.ConversationResponse;
 import mss.mooncake.rfqnegotiation.dto.response.MessageResponse;
 import mss.mooncake.rfqnegotiation.websocket.MessagePersistedEvent;
 import org.junit.jupiter.api.AfterEach;
@@ -274,6 +275,25 @@ class ConversationApplicationServiceTest {
         assertThatThrownBy(() -> service.markRead(id))
                 .isInstanceOf(ApiException.class).extracting("code").isEqualTo("NOT_CONVERSATION_PARTICIPANT");
         assertThat(reads.count()).isEqualTo(1);
+    }
+
+    @Test
+    void supplierSeesTheBuyerNameKeptOnTheRfq() {
+        RfqEntity rfq = rfqs.findById(rfqId).orElseThrow();
+        rfq.setCustomerNameSnapshot("Công ty Demo B2B");
+        rfqs.save(rfq);
+        Long id = createConversation();
+
+        login(202L);
+        assertThat(service.get(id).customerName()).isEqualTo("Công ty Demo B2B");
+        assertThat(service.list(null, 0, 20, null).items()).extracting(ConversationResponse::customerName)
+                .containsExactly("Công ty Demo B2B");
+    }
+
+    @Test
+    void buyerNameIsAbsentForRfqsCreatedBeforeNamesWereKept() {
+        Long id = createConversation();
+        assertThat(service.get(id).customerName()).isNull();
     }
 
     private Long createConversation() {

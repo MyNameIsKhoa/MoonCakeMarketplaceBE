@@ -36,6 +36,16 @@ public class ActorContext {
         }
     }
 
+    /** Display name of the signed-in user; null when Identity cannot tell, since the name is display-only. */
+    public String fullName() {
+        try {
+            var summary = identity.getUserSummary(userId());
+            return summary == null ? null : summary.fullName();
+        } catch (FeignException ex) {
+            return null;
+        }
+    }
+
     public Long customerId() {
         userId();
         Long id = optionalCustomerId();
