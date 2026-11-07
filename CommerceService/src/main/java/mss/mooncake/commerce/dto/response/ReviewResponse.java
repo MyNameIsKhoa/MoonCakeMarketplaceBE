@@ -8,5 +8,19 @@ public record ReviewResponse(
         Long customerId,
         Integer rating,
         String comment,
-        LocalDateTime createdAt
-) {}
+        LocalDateTime createdAt,
+        String productNameSnapshot,
+        String variantNameSnapshot,
+        String displayName
+) {
+    public ReviewResponse(
+            Long reviewId,
+            Long orderItemId,
+            Long customerId,
+            Integer rating,
+            String comment,
+            LocalDateTime createdAt
+    ) {
+        this(reviewId, orderItemId, customerId, rating, comment, createdAt, null, null, null);
+    }
+}
