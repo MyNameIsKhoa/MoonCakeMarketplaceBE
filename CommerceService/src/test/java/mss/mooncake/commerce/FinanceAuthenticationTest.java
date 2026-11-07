@@ -78,10 +78,30 @@ class FinanceAuthenticationTest {
     }
 
     @Test
+    void shipmentControllerPassesSupplierProfileIdInsteadOfUserId() {
+        when(identity.getSupplierSummaryByUser(101L)).thenReturn(
+                new SupplierSummaryResponse(20L, 101L, "Supplier", null, "VERIFIED"));
+        var fulfillment = mock(mss.mooncake.commerce.service.FulfillmentApplicationService.class);
+        var controller = new mss.mooncake.commerce.controller.ShipmentController(fulfillment, resolver);
+        controller.markAsShipped(7L, authentication(10L, "ROLE_CUSTOMER", "ROLE_SUPPLIER"));
+        verify(fulfillment).markAsShipped(7L, 20L);
+        assertThatThrownBy(() -> controller.markAsShipped(7L, authentication(10L, "ROLE_CUSTOMER")))
+                .isInstanceOf(mss.mooncake.commerce.exception.ForbiddenException.class);
+    }
+
+    @Test
     void anotherUsersSupplierProfileIsRejected() {
         when(identity.getSupplierSummaryByUser(101L)).thenReturn(
                 new SupplierSummaryResponse(20L, 999L, "Supplier", null, "VERIFIED"));
         assertThatThrownBy(() -> resolver.resolve(authentication(null, "ROLE_SUPPLIER")))
+                .hasMessage("SUPPLIER_CONTEXT_INVALID");
+    }
+
+    @Test
+    void suspendedSupplierCannotUseAnOldSupplierJwt() {
+        when(identity.getSupplierSummaryByUser(101L)).thenReturn(
+                new SupplierSummaryResponse(20L, 101L, "Supplier", null, "SUSPENDED"));
+        assertThatThrownBy(() -> resolver.resolve(authentication(10L, "ROLE_CUSTOMER", "ROLE_SUPPLIER")))
                 .hasMessage("SUPPLIER_CONTEXT_INVALID");
     }
 

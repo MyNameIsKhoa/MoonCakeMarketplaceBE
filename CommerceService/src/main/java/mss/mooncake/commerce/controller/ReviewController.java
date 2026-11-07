@@ -33,7 +33,7 @@ public class ReviewController {
             @AuthenticationPrincipal CommercePrincipal principal) {
         Long customerId = principal != null && principal.customerId() != null
                 ? principal.customerId()
-                : (principal != null ? principal.userId() : null);
+                : null;
         ReviewResponse response = fulfillmentService.createReview(request, customerId);
         return ResponseEntity.created(URI.create("/api/reviews/" + response.reviewId())).body(response);
     }
@@ -47,7 +47,7 @@ public class ReviewController {
         if (mine) {
             Long customerId = principal != null && principal.customerId() != null
                     ? principal.customerId()
-                    : (principal != null ? principal.userId() : null);
+                    : null;
             return ResponseEntity.ok(fulfillmentService.getMyReviews(customerId));
         }
         if (storeId != null) {

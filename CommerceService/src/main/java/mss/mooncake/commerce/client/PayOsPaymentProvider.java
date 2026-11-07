@@ -22,8 +22,8 @@ public class PayOsPaymentProvider implements PaymentProvider {
     public PayOsPaymentProvider(@Value("${payos.client-id:}") String clientId,
             @Value("${payos.api-key:}") String apiKey,
             @Value("${payos.checksum-key:}") String checksumKey,
-            @Value("${payos.return-url:http://localhost:5173/?finance=return}") String returnUrl,
-            @Value("${payos.cancel-url:http://localhost:5173/?finance=cancel}") String cancelUrl) {
+            @Value("${payos.return-url:http://localhost:3000/?finance=return}") String returnUrl,
+            @Value("${payos.cancel-url:http://localhost:3000/?finance=cancel}") String cancelUrl) {
         // PayOS has taken ~9 s to create a link; 10 s timed out while the link was still made.
         this.client = clientId.isBlank() || apiKey.isBlank() || checksumKey.isBlank() ? null
                 : new PayOS(ClientOptions.builder().clientId(clientId).apiKey(apiKey)

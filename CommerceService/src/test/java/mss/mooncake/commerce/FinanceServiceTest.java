@@ -64,7 +64,7 @@ class FinanceServiceTest {
         var jdbc = new JdbcTemplate(datasource);
         // Execute the real migrations, adapting only SQL Server syntax unsupported by H2.
         for (String file : new String[]{"V1__commerce_physical_schema.sql", "V3__tv5_finance.sql",
-                "V7__customer_order_payment.sql"}) {
+                "V7__customer_order_payment.sql", "V8__seller_order_acceptance_timestamp.sql"}) {
             var resource = new ClassPathResource("db/migration/" + file);
             String sql = resource.getContentAsString(StandardCharsets.UTF_8)
                     .replace("dbo.", "").replace("SYSUTCDATETIME()", "CURRENT_TIMESTAMP")
@@ -85,7 +85,7 @@ class FinanceServiceTest {
                 } else { jdbc.execute(clean); }
             }
         }
-        jdbc.execute("CREATE TABLE checkout_attempt (order_id BIGINT, status VARCHAR(30), reservation_key VARCHAR(100))");
+        jdbc.execute("ALTER TABLE customer_order ADD stock_reservation_key VARCHAR(100) NULL");
         jdbc.update("""
                 INSERT INTO customer_order(order_no,customer_id_ref,source_type,subtotal,grand_total,status)
                 VALUES('TEST',10,'RETAIL',10001,10001,'ACCEPTED')
@@ -101,7 +101,7 @@ class FinanceServiceTest {
         integration = new FinanceIntegrationServiceImpl(repository);
         provider = mock(PaymentProvider.class);
         customerPayments = new CustomerPaymentServiceImpl(repository, provider, manager);
-        service = new FinanceServiceImpl(repository, provider, manager, "TOTAL_COLLECTED", "HALF_UP", true, customerPayments);
+        service = new FinanceServiceImpl(repository, provider, manager, "TOTAL_COLLECTED", "HALF_UP", true, customerPayments, integration);
         when(provider.create(anyLong(), anyLong(), any(), anyString())).thenAnswer(call -> new PaymentProvider.Link(
                 call.getArgument(0), call.getArgument(1), "link-" + call.getArgument(0), "https://pay.payos.vn/test", "qr"));
     }
@@ -130,14 +130,21 @@ class FinanceServiceTest {
     @Test
     void cancellingUnpaidRetailOrderCancelsPayOsLinkAndClosesOrder() {
         var jdbc = new JdbcTemplate(datasource);
+        var catalog = mock(mss.mooncake.commerce.client.CatalogServiceClient.class);
+        var cancellation = new CustomerPaymentServiceImpl(repository, provider,
+                new DataSourceTransactionManager(datasource), catalog, null, integration);
         jdbc.update("UPDATE seller_order SET status='AWAITING_PAYMENT' WHERE seller_order_id=1");
+        jdbc.update("UPDATE customer_order SET stock_reservation_key='checkout-stock' WHERE order_id=1");
         context(true, null, 1, null);
-        var link = customerPayments.initiate(1, key(), BUYER).payment();
+        var link = cancellation.initiate(1, key(), BUYER).payment();
         when(provider.cancel(link.orderCode())).thenReturn(new PaymentProvider.Status(
                 link.orderCode(), link.amount(), 0, link.linkId(), "CANCELLED", null));
+        when(catalog.cancelConfirmedStockReservation("checkout-stock"))
+                .thenReturn(new mss.mooncake.commerce.client.dto.catalog.StockReservationResponse(
+                        "checkout-stock", "CANCELLED", null, java.util.List.of()));
 
-        customerPayments.cancelUnpaidOrder(1, "Đổi ý trước khi thanh toán", BUYER);
-        customerPayments.cancelUnpaidOrder(1, "Đổi ý trước khi thanh toán", BUYER);
+        cancellation.cancelUnpaidOrder(1, "Đổi ý trước khi thanh toán", BUYER);
+        cancellation.cancelUnpaidOrder(1, "Đổi ý trước khi thanh toán", BUYER);
 
         assertThat(repository.count("SELECT COUNT(*) FROM customer_order WHERE order_id=1 AND status='CANCELLED'"))
                 .isEqualTo(1);
@@ -146,24 +153,163 @@ class FinanceServiceTest {
         assertThat(repository.cancellations(1).getFirst().status()).isEqualTo("APPROVED");
         assertThat(repository.paid(1)).isZero();
         verify(provider, times(1)).cancel(link.orderCode());
+        verify(catalog, times(1)).cancelConfirmedStockReservation("checkout-stock");
     }
 
     @Test
-    void cancellingUnpaidRetailOrderDoesNotCallPayOsForExpiredLink() {
+    void legacyRetailOrderWithoutReservationKeyCannotBeCancelledWithoutRestoringStock() {
+        repository.update("UPDATE seller_order SET status='AWAITING_PAYMENT' WHERE seller_order_id=1");
+        repository.update("UPDATE customer_order SET status='AWAITING_PAYMENT' WHERE order_id=1");
+        context(true, null, 1, null);
+
+        assertThatThrownBy(() -> customerPayments.cancelUnpaidOrder(1, "Đổi ý", BUYER))
+                .hasMessage("STOCK_RESERVATION_RECONCILIATION_REQUIRED");
+
+        assertThat(repository.count("SELECT COUNT(*) FROM customer_order WHERE order_id=1 AND status='AWAITING_PAYMENT'"))
+                .isEqualTo(1);
+        assertThat(repository.cancellations(1)).isEmpty();
+        org.mockito.Mockito.verifyNoInteractions(provider);
+    }
+
+    @Test
+    void expiredLocalLinkStillReconcilesBeforeCancellation() {
         var jdbc = new JdbcTemplate(datasource);
         jdbc.update("UPDATE seller_order SET status='AWAITING_PAYMENT' WHERE seller_order_id=1");
+        jdbc.update("UPDATE customer_order SET stock_reservation_key='checkout-stock' WHERE order_id=1");
         context(true, null, 1, null);
         var link = customerPayments.initiate(1, key(), BUYER).payment();
         jdbc.update("UPDATE customer_payment SET expires_at=? WHERE customer_payment_id=?",
                 FinanceRepository.utc(Instant.now().minusSeconds(60)), link.id());
+        when(provider.cancel(link.orderCode())).thenReturn(new PaymentProvider.Status(
+                link.orderCode(), link.amount(), link.amount(), link.linkId(), "PAID", "late-paid"));
 
-        customerPayments.cancelUnpaidOrder(1, "Đổi ý trước khi thanh toán", BUYER);
+        assertThatThrownBy(() -> customerPayments.cancelUnpaidOrder(1, "Đổi ý trước khi thanh toán", BUYER))
+                .hasMessage("PAYMENT_RECONCILIATION_REQUIRED");
 
-        assertThat(repository.count("SELECT COUNT(*) FROM customer_order WHERE order_id=1 AND status='CANCELLED'"))
+        assertThat(repository.paid(1)).isEqualTo(10001);
+        assertThat(repository.count("SELECT COUNT(*) FROM customer_order WHERE status='CANCELLED'")).isZero();
+        verify(provider).cancel(link.orderCode());
+    }
+
+    @Test
+    void fullCollectionUnlocksFulfillmentAndNeverRewindsShipping() {
+        repository.update("UPDATE seller_order SET status='AWAITING_PAYMENT' WHERE seller_order_id=1");
+        long id = fullPayment();
+        assertThat(repository.count("SELECT COUNT(*) FROM seller_order WHERE status='READY_FOR_FULFILLMENT'"))
                 .isEqualTo(1);
-        assertThat(repository.count("SELECT COUNT(*) FROM customer_payment " +
-                "WHERE customer_payment_id=? AND status='EXPIRED'", link.id())).isEqualTo(1);
-        verify(provider, never()).cancel(anyLong());
+        assertThat(repository.count("SELECT COUNT(*) FROM customer_order WHERE status='READY_FOR_FULFILLMENT'"))
+                .isEqualTo(1);
+        repository.update("UPDATE seller_order SET status='SHIPPING' WHERE seller_order_id=1");
+        collect(id, "reference-" + id);
+        assertThat(repository.count("SELECT COUNT(*) FROM seller_order WHERE status='SHIPPING'")).isEqualTo(1);
+    }
+
+    @Test
+    void failedPayOsReconciliationNeverRestoresStockEvenAfterExpiry() {
+        var catalog = mock(mss.mooncake.commerce.client.CatalogServiceClient.class);
+        var cancellation = new CustomerPaymentServiceImpl(repository, provider,
+                new DataSourceTransactionManager(datasource), catalog, null, integration);
+        repository.update("UPDATE seller_order SET status='AWAITING_PAYMENT' WHERE seller_order_id=1");
+        context(true, null, 1, null);
+        var link = cancellation.initiate(1, key(), BUYER).payment();
+        repository.update("UPDATE customer_order SET stock_reservation_key='checkout-stock' WHERE order_id=1");
+        repository.update("UPDATE customer_payment SET expires_at=?", FinanceRepository.utc(Instant.now().minusSeconds(60)));
+        when(provider.cancel(link.orderCode())).thenThrow(new IllegalStateException("provider unavailable"));
+        assertThatThrownBy(() -> cancellation.cancelUnpaidOrder(1, "Test", BUYER))
+                .hasMessage("PAYOS_RECONCILIATION_UNAVAILABLE");
+        org.mockito.Mockito.verifyNoInteractions(catalog);
+        assertThat(repository.customerPayments(1).getFirst().status()).isEqualTo("PENDING");
+        assertThat(repository.pendingCancellationOrderIds()).containsExactly(1L);
+    }
+
+    @Test
+    void cancellationRecoversLostCatalogResponseWithTheSameReservationKey() {
+        var catalog = mock(mss.mooncake.commerce.client.CatalogServiceClient.class);
+        var cancellation = new CustomerPaymentServiceImpl(repository, provider,
+                new DataSourceTransactionManager(datasource), catalog, null, integration);
+        repository.update("UPDATE seller_order SET status='AWAITING_PAYMENT' WHERE seller_order_id=1");
+        context(true, null, 1, null);
+        repository.update("UPDATE customer_order SET stock_reservation_key='checkout-stock' WHERE order_id=1");
+        when(catalog.cancelConfirmedStockReservation("checkout-stock"))
+                .thenThrow(new IllegalStateException("response lost"))
+                .thenReturn(new mss.mooncake.commerce.client.dto.catalog.StockReservationResponse(
+                        "checkout-stock", "CANCELLED", null, java.util.List.of()));
+        assertThatThrownBy(() -> cancellation.cancelUnpaidOrder(1, "Test", BUYER)).hasMessage("response lost");
+        cancellation.recoverUnpaidCancellations();
+        assertThat(repository.pendingCancellationOrderIds()).isEmpty();
+        assertThat(repository.count("SELECT COUNT(*) FROM customer_order WHERE status='CANCELLED'")).isEqualTo(1);
+        verify(catalog, times(2)).cancelConfirmedStockReservation("checkout-stock");
+    }
+
+    @Test
+    void depositAllowsPreparationAndRemainingDoesNotUndoPreparation() {
+        repository.update("UPDATE seller_order SET status='AWAITING_DEPOSIT' WHERE seller_order_id=1");
+        context(true, 3000L, 1, LocalDate.now().plusDays(30));
+        long id = repository.payments(1).getFirst().id();
+        service.initiate(id, key(), BUYER);
+        collect(id, "deposit-paid");
+        assertThat(repository.count("SELECT COUNT(*) FROM seller_order WHERE status='READY_FOR_FULFILLMENT'"))
+                .isEqualTo(1);
+        repository.update("UPDATE seller_order SET status='PREPARING' WHERE seller_order_id=1");
+        long remaining = repository.payments(1).get(1).id();
+        service.initiate(remaining, key(), BUYER);
+        collect(remaining, "remaining-paid");
+        assertThat(repository.count("SELECT COUNT(*) FROM seller_order WHERE status='PREPARING'")).isEqualTo(1);
+    }
+
+    @Test
+    void realJpaFulfillmentUsesPaymentFactsAndUpdatesSettlementFacts() {
+        var factory = new org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean();
+        factory.setDataSource(datasource);
+        factory.setPackagesToScan("mss.mooncake.commerce.entity");
+        factory.setJpaVendorAdapter(new org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter());
+        factory.setJpaPropertyMap(java.util.Map.of("hibernate.hbm2ddl.auto", "none"));
+        factory.afterPropertiesSet();
+        try {
+            var manager = new org.springframework.orm.jpa.JpaTransactionManager(factory.getObject());
+            var tx = new TransactionTemplate(manager);
+            var em = org.springframework.orm.jpa.SharedEntityManagerCreator.createSharedEntityManager(factory.getObject());
+            var repos = new org.springframework.data.jpa.repository.support.JpaRepositoryFactory(em);
+            var fulfillment = new mss.mooncake.commerce.service.impl.FulfillmentApplicationServiceImpl(
+                    repos.getRepository(mss.mooncake.commerce.repository.ShipmentRepository.class),
+                    repos.getRepository(mss.mooncake.commerce.repository.ReviewRepository.class),
+                    repos.getRepository(mss.mooncake.commerce.repository.SellerOrderRepository.class),
+                    repos.getRepository(mss.mooncake.commerce.repository.CustomerOrderRepository.class),
+                    repos.getRepository(mss.mooncake.commerce.repository.OrderItemRepository.class), repository, integration);
+            repository.update("UPDATE seller_order SET status='AWAITING_DEPOSIT' WHERE seller_order_id=1");
+            context(true, 3000L, 1, LocalDate.now().plusDays(30));
+            long deposit = repository.payments(1).getFirst().id();
+            service.initiate(deposit, key(), BUYER);
+            collect(deposit, "jpa-deposit");
+            var shipment = tx.execute(s -> fulfillment.createShipment(
+                    new mss.mooncake.commerce.dto.request.CreateShipmentRequest(1L, "STANDARD", "TEST", "TRACK",
+                            null, null, java.math.BigDecimal.ZERO), 20L));
+            assertThat(repository.count("SELECT COUNT(*) FROM seller_order WHERE status='PREPARING'")).isEqualTo(1);
+            assertThatThrownBy(() -> tx.execute(s -> fulfillment.markAsShipped(shipment.shipmentId(), 20L)))
+                    .hasMessageContaining("Insufficient payment");
+            long remaining = repository.payments(1).get(1).id();
+            service.initiate(remaining, key(), BUYER);
+            collect(remaining, "jpa-remaining");
+            tx.execute(s -> fulfillment.markAsShipped(shipment.shipmentId(), 20L));
+            tx.execute(s -> fulfillment.markAsDelivered(shipment.shipmentId(), 20L, false));
+            assertThat(repository.context(1).delivered()).isTrue();
+            assertThat(repository.context(1).received()).isFalse();
+            var accepted = tx.execute(s -> fulfillment.acceptSellerOrder(1L, 10L));
+            var repeated = tx.execute(s -> fulfillment.acceptSellerOrder(1L, 10L));
+            assertThat(repeated.acceptedAt()).isEqualTo(accepted.acceptedAt());
+            assertThat(accepted.acceptedAt()).isNotNull();
+            assertThat(repository.context(1).received()).isTrue();
+            assertThat(repository.context(1).fulfillmentVersion()).isEqualTo(2);
+            assertThat(service.summary(1, BUYER).eligibility().eligible()).isTrue();
+            assertThat(repository.count("SELECT COUNT(*) FROM customer_order WHERE status='ACCEPTED'")).isEqualTo(1);
+            // JPA must read every state emitted by the JDBC finance writer.
+            for (String state : java.util.List.of("CREATING", "RECONCILING", "CANCELLING", "CANCELLED", "EXPIRED")) {
+                repository.update("UPDATE payment SET status=? WHERE payment_id=?", state, deposit);
+                String persisted = tx.execute(s -> em.find(mss.mooncake.commerce.entity.PaymentEntity.class, deposit)
+                        .getStatus().name());
+                assertThat(persisted).isEqualTo(state);
+            }
+        } finally { factory.destroy(); }
     }
 
     @Test

@@ -152,7 +152,8 @@ public class CheckoutRepositoryImpl implements CheckoutRepository {
                     seller[2], null, null, true, 1));
         }
         db.update("UPDATE seller_order SET status='AWAITING_PAYMENT' WHERE order_id=?", attempt.orderId());
-        db.update("UPDATE customer_order SET status='AWAITING_PAYMENT' WHERE order_id=?", attempt.orderId());
+        db.update("UPDATE customer_order SET status='AWAITING_PAYMENT',stock_reservation_key=? WHERE order_id=?",
+                attempt.reservationKey(), attempt.orderId());
         db.update("UPDATE cart SET status='CHECKED_OUT' WHERE cart_id=?", attempt.cartId());
         db.update("UPDATE checkout_attempt SET status='COMPLETED',updated_at=SYSUTCDATETIME() WHERE attempt_id=?",
                 attempt.id());

@@ -145,11 +145,11 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
         }
 
         if (user.getStatus() != UserStatus.ACTIVE) {
-            throw new ForbiddenException("Account is not active. Current status: " + user.getStatus());
+            throw new ForbiddenException("ACCOUNT_NOT_ACTIVE");
         }
 
         if (!user.isEmailVerified()) {
-            throw new ForbiddenException("Email address must be verified before login");
+            throw new ForbiddenException("EMAIL_NOT_VERIFIED");
         }
 
         CustomerProfileEntity profile = customerProfileRepository.findByUserId(user.getId())
