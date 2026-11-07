@@ -87,6 +87,23 @@ class RfqApplicationServiceTest {
     }
 
     @Test
+    void createKeepsTheBuyerNameForConversations() {
+        when(actor.customerId()).thenReturn(17L);
+        when(actor.fullName()).thenReturn("Công ty Demo B2B");
+        when(rfqs.save(any())).thenAnswer(invocation -> {
+            RfqEntity rfq = invocation.getArgument(0);
+            ReflectionTestUtils.setField(rfq, "id", 91L);
+            return rfq;
+        });
+
+        service.create(request(100, null));
+
+        ArgumentCaptor<RfqEntity> saved = ArgumentCaptor.forClass(RfqEntity.class);
+        verify(rfqs).save(saved.capture());
+        assertThat(saved.getValue().getCustomerNameSnapshot()).isEqualTo("Công ty Demo B2B");
+    }
+
+    @Test
     void createsRfqAddressedOnceToEachSelectedActiveStore() {
         when(actor.customerId()).thenReturn(17L);
         when(catalog.getStoreSummary(30L)).thenReturn(store(30L, 20L, "Kinh Do", "ACTIVE"));

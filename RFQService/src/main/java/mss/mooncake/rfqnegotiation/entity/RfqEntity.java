@@ -22,6 +22,8 @@ import mss.mooncake.rfqnegotiation.enums.RfqStatus;
 public class RfqEntity extends BaseRfqEntity {
     @Column(name = "rfq_code", nullable = false, length = 100, unique = true) private String rfqCode;
     @Column(name = "customer_id_ref", nullable = false) private Long customerIdRef;
+    /** Buyer's name at creation, shown to suppliers in conversations; null for older RFQs. */
+    @Column(name = "customer_name_snapshot", length = 255) private String customerNameSnapshot;
     @Column(name = "title", nullable = false, length = 255) private String title;
     @Column(name = "description", columnDefinition = "NVARCHAR(MAX)") private String description;
     @Column(name = "quantity", nullable = false) private Integer quantity;
