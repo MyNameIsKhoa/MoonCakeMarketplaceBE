@@ -163,6 +163,8 @@ SEND: /app/conversations/{conversationId}/messages
 
 Không gửi token trong query URL. Gateway/RFQ giới hạn origin; `CHAT_ALLOWED_ORIGINS` và `CORS_ALLOWED_ORIGINS` phải khớp với địa chỉ frontend. Sender lấy từ principal, khác với customerId/supplierId.
 
+Hội thoại trả thêm `customerName`: tên người mua lưu vào RFQ lúc tạo (`rfq.customer_name_snapshot`, Flyway V9) để nhà cung cấp biết đang trao đổi với ai. RFQ tạo trước V9 trả `null`; FE hiện "Người mua".
+
 History trả `{items,nextCursor,hasMore}`; items tăng dần theo messageId. Request không có cursor lấy nhóm tin mới nhất; beforeMessageId tải tin cũ, afterMessageId tải tin mới. Reconnect lấy history và dedup messageId. Retry cùng clientMessageId/nội dung trả và phát lại tin đã lưu; khác nội dung trả conflict.
 
 Broker hiện là in-memory: chạy một RFQ instance. Chưa có attachment/read receipt/broker cluster.
