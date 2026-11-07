@@ -31,21 +31,23 @@ public class CustomerPaymentServiceImpl implements CustomerPaymentService {
     private final TransactionTemplate transaction;
     private final CatalogServiceClient catalog;
     private final ObjectProvider<FinanceService> finance;
+    private final mss.mooncake.commerce.service.FinanceIntegrationService integration;
 
     @Autowired
     public CustomerPaymentServiceImpl(FinanceRepository repository, PaymentProvider provider,
             PlatformTransactionManager manager, CatalogServiceClient catalog,
-            ObjectProvider<FinanceService> finance) {
+            ObjectProvider<FinanceService> finance, mss.mooncake.commerce.service.FinanceIntegrationService integration) {
         this.repository = repository;
         this.provider = provider;
         this.transaction = new TransactionTemplate(manager);
         this.catalog = catalog;
         this.finance = finance;
+        this.integration = integration;
     }
 
     public CustomerPaymentServiceImpl(FinanceRepository repository, PaymentProvider provider,
             PlatformTransactionManager manager) {
-        this(repository, provider, manager, null, null);
+        this(repository, provider, manager, null, null, new FinanceIntegrationServiceImpl(repository));
     }
 
     private static void require(boolean value, String code) {
@@ -242,6 +244,9 @@ public class CustomerPaymentServiceImpl implements CustomerPaymentService {
             require(repository.retailOrder(orderId), "CUSTOMER_PAYMENT_RETAIL_ONLY");
             if (repository.count("SELECT COUNT(*) FROM customer_order WHERE order_id=? AND status='CANCELLED'",
                     orderId) == 1) { return false; }
+            String reservationKey = repository.stockReservationKey(orderId);
+            require(reservationKey != null && !reservationKey.isBlank(),
+                    "STOCK_RESERVATION_RECONCILIATION_REQUIRED");
             for (long id : ids) {
                 require(repository.paid(id) == 0, "ORDER_ALREADY_PAID");
                 require(repository.count("""
@@ -270,34 +275,34 @@ public class CustomerPaymentServiceImpl implements CustomerPaymentService {
             for (var payment : repository.payments(id)) {
                 if (payment.orderCode() != null && List.of("CREATING", "RECONCILING", "PENDING", "CANCELLING")
                         .contains(payment.status())) {
-                    if (payment.expiresAt() != null && !payment.expiresAt().isAfter(Instant.now())) {
-                        repository.update("UPDATE payment SET status='EXPIRED' WHERE payment_id=?", payment.id());
-                    } else {
-                        require(finance != null, "PAYOS_RECONCILIATION_UNAVAILABLE");
-                        finance.getObject().reconcile(payment.id(), actor, true);
-                    }
+                    require(finance != null, "PAYOS_RECONCILIATION_UNAVAILABLE");
+                    finance.getObject().reconcile(payment.id(), actor, true);
                 }
             }
         }
         var group = repository.customerPayments(orderId).stream().findFirst().orElse(null);
         if (group != null && List.of("CREATING", "RECONCILING", "PENDING", "CANCELLING")
                 .contains(group.status())) {
-            if (group.expiresAt() != null && !group.expiresAt().isAfter(Instant.now())) {
-                repository.update("UPDATE customer_payment SET status='EXPIRED' WHERE customer_payment_id=?",
-                        group.id());
-            } else {
-                reconcile(orderId, actor, true);
-            }
+            reconcile(orderId, actor, true);
         }
 
+        transaction.executeWithoutResult(status -> {
+            for (long id : lockOrder(orderId)) {
+                require(repository.paid(id) == 0 && !repository.active(id)
+                        && !repository.activeCustomerPayment(id), "PAYMENT_RECONCILIATION_REQUIRED");
+            }
+        });
+
         String reservationKey = repository.stockReservationKey(orderId);
-        if (reservationKey != null) {
-            var restored = catalog == null ? null : catalog.cancelConfirmedStockReservation(reservationKey);
-            require(restored != null && "CANCELLED".equals(restored.status()), "STOCK_RESTORE_REQUIRED");
-        }
+        require(reservationKey != null && !reservationKey.isBlank(),
+                "STOCK_RESERVATION_RECONCILIATION_REQUIRED");
+        var restored = catalog == null ? null : catalog.cancelConfirmedStockReservation(reservationKey);
+        require(restored != null && "CANCELLED".equals(restored.status()), "STOCK_RESTORE_REQUIRED");
         transaction.executeWithoutResult(status -> {
             var ids = lockOrder(orderId);
             buyer(orderId, actor);
+            if (repository.count("SELECT COUNT(*) FROM customer_order WHERE order_id=? AND status='CANCELLED'",
+                    orderId) == 1) return;
             for (long id : ids) {
                 require(repository.paid(id) == 0 && !repository.active(id)
                         && !repository.activeCustomerPayment(id), "PAYMENT_RECONCILIATION_REQUIRED");
@@ -352,10 +357,23 @@ public class CustomerPaymentServiceImpl implements CustomerPaymentService {
                     """, childReference, FinanceRepository.utc(Instant.now()), item.paymentId());
             repository.ledger(item.sellerOrderId(), "payment:" + item.paymentId(), "HELD", item.amount());
             repository.event(item.sellerOrderId(), "PAYMENT_SUCCESS", item.paymentId(), "PAYOS", "HELD internal ledger");
+            integration.syncCollectedPayment(item.sellerOrderId());
         }
         repository.update("""
                 UPDATE customer_payment SET status='SUCCESS',payment_link_id=?,transaction_ref=?,paid_at=?
                 WHERE customer_payment_id=?
                 """, linkId, reference, FinanceRepository.utc(Instant.now()), payment.id());
+    }
+
+    @org.springframework.scheduling.annotation.Scheduled(cron = "${commerce.cancellation.recovery-cron:*/30 * * * * *}")
+    public void recoverUnpaidCancellations() {
+        for (long orderId : repository.pendingCancellationOrderIds()) {
+            try {
+                cancelUnpaidOrder(orderId, "Khôi phục yêu cầu hủy chưa thanh toán",
+                        new FinanceService.Actor(0, repository.customerOrderOwner(orderId), null, false));
+            } catch (RuntimeException failure) {
+                log.warn("Cancellation {} still requires reconciliation: {}", orderId, failure.getClass().getSimpleName());
+            }
+        }
     }
 }

@@ -8,6 +8,9 @@ import mss.mooncake.commerce.dto.request.UpdateShipmentRequest;
 import mss.mooncake.commerce.dto.response.ShipmentResponse;
 import mss.mooncake.commerce.security.CommercePrincipal;
 import mss.mooncake.commerce.service.FulfillmentApplicationService;
+import mss.mooncake.commerce.service.FinanceActorResolver;
+import mss.mooncake.commerce.exception.ForbiddenException;
+import org.springframework.security.core.Authentication;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,16 +27,24 @@ import org.springframework.web.bind.annotation.RestController;
 public class ShipmentController {
 
     private final FulfillmentApplicationService fulfillmentService;
+    private final FinanceActorResolver actors;
 
-    public ShipmentController(FulfillmentApplicationService fulfillmentService) {
+    public ShipmentController(FulfillmentApplicationService fulfillmentService, FinanceActorResolver actors) {
         this.fulfillmentService = fulfillmentService;
+        this.actors = actors;
+    }
+
+    private Long supplier(Authentication authentication) {
+        Long id = actors.resolve(authentication).supplierId();
+        if (id == null) throw new ForbiddenException("Verified supplier required");
+        return id;
     }
 
     @PostMapping
     public ResponseEntity<ShipmentResponse> createShipment(
             @Valid @RequestBody CreateShipmentRequest request,
-            @AuthenticationPrincipal CommercePrincipal principal) {
-        Long supplierId = principal != null ? principal.userId() : null;
+            Authentication authentication) {
+        Long supplierId = supplier(authentication);
         ShipmentResponse response = fulfillmentService.createShipment(request, supplierId);
         return ResponseEntity.created(URI.create("/api/shipments/" + response.shipmentId())).body(response);
     }
@@ -41,46 +52,39 @@ public class ShipmentController {
     @GetMapping
     public ResponseEntity<List<ShipmentResponse>> getShipments(
             @RequestParam Long sellerOrderId,
-            @AuthenticationPrincipal CommercePrincipal principal) {
-        Long currentUserId = principal != null ? (principal.customerId() != null ? principal.customerId() : principal.userId()) : null;
-        boolean isCustomer = principal != null && principal.hasRole("ROLE_CUSTOMER");
-        boolean isAdmin = principal != null && principal.hasRole("ROLE_ADMIN");
-        return ResponseEntity.ok(fulfillmentService.getShipmentsBySellerOrder(sellerOrderId, currentUserId, isCustomer, isAdmin));
+            Authentication authentication) {
+        return ResponseEntity.ok(fulfillmentService.getShipmentsBySellerOrder(sellerOrderId, actors.resolve(authentication)));
     }
 
     @GetMapping("/{id}")
     public ResponseEntity<ShipmentResponse> getShipmentById(
             @PathVariable Long id,
-            @AuthenticationPrincipal CommercePrincipal principal) {
-        Long currentUserId = principal != null ? (principal.customerId() != null ? principal.customerId() : principal.userId()) : null;
-        boolean isCustomer = principal != null && principal.hasRole("ROLE_CUSTOMER");
-        boolean isAdmin = principal != null && principal.hasRole("ROLE_ADMIN");
-        return ResponseEntity.ok(fulfillmentService.getShipmentById(id, currentUserId, isCustomer, isAdmin));
+            Authentication authentication) {
+        return ResponseEntity.ok(fulfillmentService.getShipmentById(id, actors.resolve(authentication)));
     }
 
     @PatchMapping("/{id}")
     public ResponseEntity<ShipmentResponse> updateShipment(
             @PathVariable Long id,
             @RequestBody UpdateShipmentRequest request,
-            @AuthenticationPrincipal CommercePrincipal principal) {
-        Long supplierId = principal != null ? principal.userId() : null;
+            Authentication authentication) {
+        Long supplierId = supplier(authentication);
         return ResponseEntity.ok(fulfillmentService.updateShipment(id, request, supplierId));
     }
 
     @PostMapping("/{id}/ship")
     public ResponseEntity<ShipmentResponse> markAsShipped(
             @PathVariable Long id,
-            @AuthenticationPrincipal CommercePrincipal principal) {
-        Long supplierId = principal != null ? principal.userId() : null;
+            Authentication authentication) {
+        Long supplierId = supplier(authentication);
         return ResponseEntity.ok(fulfillmentService.markAsShipped(id, supplierId));
     }
 
     @PostMapping("/{id}/delivered")
     public ResponseEntity<ShipmentResponse> markAsDelivered(
             @PathVariable Long id,
-            @AuthenticationPrincipal CommercePrincipal principal) {
-        Long actorId = principal != null ? principal.userId() : null;
-        boolean isAdmin = principal != null && principal.hasRole("ROLE_ADMIN");
-        return ResponseEntity.ok(fulfillmentService.markAsDelivered(id, actorId, isAdmin));
+            Authentication authentication) {
+        var actor = actors.resolve(authentication);
+        return ResponseEntity.ok(fulfillmentService.markAsDelivered(id, actor.supplierId(), actor.admin()));
     }
 }

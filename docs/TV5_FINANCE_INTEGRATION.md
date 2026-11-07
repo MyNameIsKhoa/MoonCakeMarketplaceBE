@@ -65,6 +65,8 @@ display-only derivation; the exact agreed deposit amount remains authoritative.
 
 ## Connect TV6
 
+The approved preparation and shipping gates, cancellation recovery and smoke test are documented in [Luồng nghiệp vụ và quy tắc TV1–TV6](TV1_TV6_FLOWS_AND_RULES.md).
+
 After persisting delivery/acceptance in the Commerce transaction, call:
 
 ```java

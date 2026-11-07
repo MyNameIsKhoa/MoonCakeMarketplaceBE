@@ -68,6 +68,9 @@ public class SellerOrderEntity extends BaseCommerceEntity {
     @Column(name = "status", nullable = false, length = 30)
     private String status;
 
+    @Column(name = "accepted_at")
+    private LocalDateTime acceptedAt;
+
     public SellerOrderEntity() {}
 
     public Long getOrderId() { return orderId; }

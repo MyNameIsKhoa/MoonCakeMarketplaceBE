@@ -10,6 +10,9 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface ShipmentRepository extends JpaRepository<ShipmentEntity, Long> {
 
+    @org.springframework.data.jpa.repository.Query("select s.sellerOrderId from ShipmentEntity s where s.id=:id")
+    Optional<Long> findSellerOrderIdById(@org.springframework.data.repository.query.Param("id") Long id);
+
     List<ShipmentEntity> findBySellerOrderId(Long sellerOrderId);
 
     Optional<ShipmentEntity> findBySellerOrderIdAndStatus(Long sellerOrderId, ShipmentStatus status);

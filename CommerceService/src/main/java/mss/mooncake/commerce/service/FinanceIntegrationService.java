@@ -13,4 +13,6 @@ public interface FinanceIntegrationService {
 
     void syncOrder(FinanceOrderContext input);
     void syncFulfillment(long sellerOrderId, long version, boolean delivered, boolean acceptedByBuyer);
+    void syncCollectedPayment(long sellerOrderId);
+    void syncCustomerOrder(long sellerOrderId);
 }

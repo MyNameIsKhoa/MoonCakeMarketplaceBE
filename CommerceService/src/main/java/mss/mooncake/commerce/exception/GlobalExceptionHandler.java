@@ -14,6 +14,11 @@ import org.springframework.web.server.ResponseStatusException;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    @ExceptionHandler(FinanceException.class)
+    public ResponseEntity<Map<String, String>> handleFinance(FinanceException ex) {
+        return ResponseEntity.status(ex.getStatus()).body(Map.of("code", ex.getCode(), "message", ex.getCode()));
+    }
+
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<ErrorResponse> handleResponseStatus(ResponseStatusException ex) {
         return ResponseEntity.status(ex.getStatusCode())

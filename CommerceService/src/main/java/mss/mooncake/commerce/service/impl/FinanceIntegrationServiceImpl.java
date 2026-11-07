@@ -27,6 +27,7 @@ public class FinanceIntegrationServiceImpl implements FinanceIntegrationService 
             throw new FinanceException(HttpStatus.BAD_REQUEST, "INVALID_PAYMENT_CONTEXT");
         }
         // Serialize initial registration and subsequent snapshots with TV3's persisted local order.
+        repository.lockCustomerOrder(repository.parentOrderId(input.sellerOrderId()));
         repository.update("UPDATE seller_order SET status=status WHERE seller_order_id=?", input.sellerOrderId());
         if (!repository.matchesPersistedOrder(input)) {
             throw new FinanceException(HttpStatus.CONFLICT, "CONTEXT_DOES_NOT_MATCH_ORDER");
@@ -99,5 +100,42 @@ public class FinanceIntegrationServiceImpl implements FinanceIntegrationService 
                 UPDATE finance_context SET fulfillment_version=?,delivered=?,received=? WHERE seller_order_id=?
                 """, version, delivered, acceptedByBuyer, sellerOrderId);
         repository.event(sellerOrderId, "FULFILLMENT_CONTEXT_UPDATED", sellerOrderId, "TV6", "version=" + version);
+    }
+
+    @Override
+    @Transactional
+    public void syncCollectedPayment(long sellerOrderId) {
+        var context = repository.lock(sellerOrderId);
+        long paid = repository.paid(sellerOrderId);
+        long preparationMinimum = context.deposit() == null ? context.total() : context.deposit();
+        if (paid >= preparationMinimum) {
+            repository.update("""
+                    UPDATE seller_order SET status='READY_FOR_FULFILLMENT'
+                    WHERE seller_order_id=? AND status IN ('AWAITING_PAYMENT','AWAITING_DEPOSIT')
+                    """, sellerOrderId);
+        }
+        if (repository.count("SELECT COUNT(*) FROM seller_order WHERE seller_order_id=? AND status='CANCELLED'",
+                sellerOrderId) == 1) {
+            repository.event(sellerOrderId, "LATE_PAYMENT_REVIEW_REQUIRED", sellerOrderId, "SYSTEM",
+                    "Collection received after cancellation; order remains cancelled");
+        }
+        syncCustomerOrder(sellerOrderId);
+    }
+
+    @Override
+    @Transactional
+    public void syncCustomerOrder(long sellerOrderId) {
+        long orderId = repository.parentOrderId(sellerOrderId);
+        repository.lockCustomerOrder(orderId);
+        var statuses = repository.sellerStatuses(orderId);
+        if (statuses.isEmpty()) return;
+        var active = statuses.stream().filter(s -> !"CANCELLED".equals(s)).toList();
+        // A mixed-store order exposes its least progressed active seller; cancellation intent stays durable.
+        var progression = java.util.List.of("PENDING_STOCK", "PENDING_CONFIRMATION", "AWAITING_DEPOSIT",
+                "AWAITING_PAYMENT", "READY_FOR_FULFILLMENT", "PREPARING", "SHIPPING", "DELIVERED", "ACCEPTED", "SETTLED");
+        String next = active.isEmpty() ? "CANCELLED" : active.contains("DISPUTED") ? "DISPUTED"
+                : progression.stream().filter(active::contains).findFirst().orElse(null);
+        if (next != null) repository.update("UPDATE customer_order SET status=? WHERE order_id=? AND status<>'CANCEL_REQUESTED'",
+                next, orderId);
     }
 }

@@ -76,8 +76,24 @@ public class FinanceRepositoryImpl implements FinanceRepository {
 
     /** Update obtains an exclusive aggregate row lock on SQL Server and in integration tests. */
     public Context lock(long orderId) {
+        lockCustomerOrder(parentOrderId(orderId));
+        update("UPDATE seller_order SET status=status WHERE seller_order_id=?", orderId);
         update("UPDATE finance_context SET version=version WHERE seller_order_id=?", orderId);
         return context(orderId);
+    }
+
+    public long parentOrderId(long sellerOrderId) {
+        return count("SELECT order_id FROM seller_order WHERE seller_order_id=?", sellerOrderId);
+    }
+
+    public List<String> sellerStatuses(long orderId) {
+        return jdbc.queryForList("SELECT status FROM seller_order WHERE order_id=? ORDER BY seller_order_id",
+                String.class, orderId);
+    }
+
+    public List<Long> pendingCancellationOrderIds() {
+        return jdbc.queryForList("SELECT TOP 50 order_id FROM customer_order WHERE status='CANCEL_REQUESTED' ORDER BY order_id",
+                Long.class);
     }
 
     public boolean hasContext(long orderId) {
@@ -156,9 +172,7 @@ public class FinanceRepositoryImpl implements FinanceRepository {
     }
 
     public String stockReservationKey(long orderId) {
-        var keys = jdbc.queryForList("SELECT reservation_key FROM checkout_attempt WHERE order_id=? AND status='COMPLETED'",
-                String.class, orderId);
-        return keys.isEmpty() ? null : keys.getFirst();
+        return jdbc.queryForObject("SELECT stock_reservation_key FROM customer_order WHERE order_id=?", String.class, orderId);
     }
 
     public boolean retailOrder(long orderId) {

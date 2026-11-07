@@ -26,7 +26,7 @@ public class OrderAcceptanceController {
             @AuthenticationPrincipal CommercePrincipal principal) {
         Long customerId = principal != null && principal.customerId() != null
                 ? principal.customerId()
-                : (principal != null ? principal.userId() : null);
+                : null;
         return ResponseEntity.ok(fulfillmentService.acceptSellerOrder(sellerOrderId, customerId));
     }
 }

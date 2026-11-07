@@ -34,7 +34,8 @@ public class FinanceActorResolverImpl implements FinanceActorResolver {
             try {
                 var summary = identity.getSupplierSummaryByUser(principal.userId());
                 if (summary == null || !principal.userId().equals(summary.userId())
-                        || summary.supplierId() == null || summary.supplierId() <= 0) {
+                        || summary.supplierId() == null || summary.supplierId() <= 0
+                        || !"VERIFIED".equals(summary.verificationStatus())) {
                     throw new FinanceException(HttpStatus.FORBIDDEN, "SUPPLIER_CONTEXT_INVALID");
                 }
                 supplierId = summary.supplierId();

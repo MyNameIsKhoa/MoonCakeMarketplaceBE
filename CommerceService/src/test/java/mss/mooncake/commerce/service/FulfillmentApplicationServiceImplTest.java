@@ -60,6 +60,8 @@ class FulfillmentApplicationServiceImplTest {
 
     @Mock
     private OrderItemRepository orderItemRepository;
+    @Mock private mss.mooncake.commerce.repository.FinanceRepository finance;
+    @Mock private FinanceIntegrationService integration;
 
     @InjectMocks
     private FulfillmentApplicationServiceImpl fulfillmentService;
@@ -78,8 +80,48 @@ class FulfillmentApplicationServiceImplTest {
     private OrderItemEntity orderItem;
     private ShipmentEntity shipment;
 
+    @Test
+    void plannedShipmentCannotJumpToDelivered() {
+        when(shipmentRepository.findById(SHIPMENT_ID)).thenReturn(Optional.of(shipment));
+        when(sellerOrderRepository.findById(SELLER_ORDER_ID)).thenReturn(Optional.of(sellerOrder));
+        assertThatThrownBy(() -> fulfillmentService.markAsDelivered(SHIPMENT_ID, SUPPLIER_ID, false))
+                .isInstanceOf(BadRequestException.class);
+    }
+
+    @Test
+    void missingSupplierNeverBypassesOwnership() {
+        when(sellerOrderRepository.findById(SELLER_ORDER_ID)).thenReturn(Optional.of(sellerOrder));
+        var request = new CreateShipmentRequest(SELLER_ORDER_ID, "STANDARD", "GHTK", "VN123456789",
+                LocalDateTime.now().plusDays(1), LocalDateTime.now().plusDays(3), BigDecimal.valueOf(30000));
+        assertThatThrownBy(() -> fulfillmentService.createShipment(request, null))
+                .isInstanceOf(ForbiddenException.class);
+    }
+
+    @Test
+    void dualRoleSupplierReadsOwnShipmentRegardlessOfCustomerId() {
+        when(sellerOrderRepository.findById(SELLER_ORDER_ID)).thenReturn(Optional.of(sellerOrder));
+        when(shipmentRepository.findBySellerOrderId(SELLER_ORDER_ID)).thenReturn(List.of(shipment));
+        assertThat(fulfillmentService.getShipmentsBySellerOrder(SELLER_ORDER_ID,
+                new FinanceService.Actor(999, OTHER_CUSTOMER_ID, SUPPLIER_ID, false))).hasSize(1);
+    }
+
+    @Test
+    void cancelledOrderCannotBeShipped() {
+        sellerOrder.setStatus("CANCELLED");
+        when(shipmentRepository.findById(SHIPMENT_ID)).thenReturn(Optional.of(shipment));
+        when(sellerOrderRepository.findById(SELLER_ORDER_ID)).thenReturn(Optional.of(sellerOrder));
+        assertThatThrownBy(() -> fulfillmentService.markAsShipped(SHIPMENT_ID, SUPPLIER_ID))
+                .isInstanceOf(BadRequestException.class);
+    }
+
     @BeforeEach
     void setUp() {
+        org.mockito.Mockito.lenient().when(finance.context(SELLER_ORDER_ID)).thenReturn(
+                new mss.mooncake.commerce.repository.FinanceRepository.Context(
+                        SELLER_ORDER_ID, CUSTOMER_ID, SUPPLIER_ID, 300000, null, null, true, 1, 0, false, false));
+        org.mockito.Mockito.lenient().when(finance.paid(SELLER_ORDER_ID)).thenReturn(300000L);
+        org.mockito.Mockito.lenient().when(shipmentRepository.findSellerOrderIdById(SHIPMENT_ID))
+                .thenReturn(Optional.of(SELLER_ORDER_ID));
         sellerOrder = new SellerOrderEntity();
         sellerOrder.setOrderId(CUSTOMER_ORDER_ID);
         sellerOrder.setSupplierIdRef(SUPPLIER_ID);
@@ -131,7 +173,7 @@ class FulfillmentApplicationServiceImplTest {
             assertThat(response.status()).isEqualTo(ShipmentStatus.PLANNED);
             assertThat(response.shippingMethod()).isEqualTo("STANDARD");
             assertThat(sellerOrder.getStatus()).isEqualTo(OrderStatus.PREPARING.name());
-            verify(sellerOrderRepository).save(sellerOrder);
+            verify(sellerOrderRepository).saveAndFlush(sellerOrder);
             verify(shipmentRepository).save(any(ShipmentEntity.class));
         }
 
@@ -183,12 +225,13 @@ class FulfillmentApplicationServiceImplTest {
             assertThat(response.status()).isEqualTo(ShipmentStatus.SHIPPED);
             assertThat(shipment.getShippedAt()).isNotNull();
             assertThat(sellerOrder.getStatus()).isEqualTo(OrderStatus.SHIPPING.name());
-            verify(sellerOrderRepository).save(sellerOrder);
+            verify(sellerOrderRepository).saveAndFlush(sellerOrder);
         }
 
         @Test
         @DisplayName("Should mark shipment as delivered and update order to DELIVERED")
         void shouldMarkShipmentAsDelivered() {
+            shipment.setStatus(ShipmentStatus.SHIPPED);
             when(shipmentRepository.findById(SHIPMENT_ID)).thenReturn(Optional.of(shipment));
             when(sellerOrderRepository.findById(SELLER_ORDER_ID)).thenReturn(Optional.of(sellerOrder));
             when(shipmentRepository.save(any(ShipmentEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -198,7 +241,7 @@ class FulfillmentApplicationServiceImplTest {
             assertThat(response.status()).isEqualTo(ShipmentStatus.DELIVERED);
             assertThat(shipment.getDeliveredAt()).isNotNull();
             assertThat(sellerOrder.getStatus()).isEqualTo(OrderStatus.DELIVERED.name());
-            verify(sellerOrderRepository).save(sellerOrder);
+            verify(sellerOrderRepository).saveAndFlush(sellerOrder);
         }
     }
 
@@ -212,7 +255,7 @@ class FulfillmentApplicationServiceImplTest {
             sellerOrder.setStatus(OrderStatus.DELIVERED.name());
             when(sellerOrderRepository.findById(SELLER_ORDER_ID)).thenReturn(Optional.of(sellerOrder));
             when(customerOrderRepository.findById(CUSTOMER_ORDER_ID)).thenReturn(Optional.of(customerOrder));
-            when(sellerOrderRepository.save(any(SellerOrderEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+            when(sellerOrderRepository.saveAndFlush(any(SellerOrderEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
             SellerOrderAcceptanceResponse response = fulfillmentService.acceptSellerOrder(SELLER_ORDER_ID, CUSTOMER_ID);
 

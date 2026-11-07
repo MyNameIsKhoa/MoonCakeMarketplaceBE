@@ -19,9 +19,9 @@ public interface FulfillmentApplicationService {
 
     ShipmentResponse markAsDelivered(Long shipmentId, Long actorId, boolean isAdmin);
 
-    List<ShipmentResponse> getShipmentsBySellerOrder(Long sellerOrderId, Long currentUserId, boolean isCustomer, boolean isAdmin);
+    List<ShipmentResponse> getShipmentsBySellerOrder(Long sellerOrderId, FinanceService.Actor actor);
 
-    ShipmentResponse getShipmentById(Long shipmentId, Long currentUserId, boolean isCustomer, boolean isAdmin);
+    ShipmentResponse getShipmentById(Long shipmentId, FinanceService.Actor actor);
 
     // --- Order Acceptance Operations ---
     SellerOrderAcceptanceResponse acceptSellerOrder(Long sellerOrderId, Long customerId);

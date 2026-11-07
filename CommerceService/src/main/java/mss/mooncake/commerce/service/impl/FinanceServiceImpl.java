@@ -37,6 +37,7 @@ public class FinanceServiceImpl implements FinanceService {
     private final String rounding;
     private final boolean adjudicationEnabled;
     private final CustomerPaymentService customerPayments;
+    private final FinanceIntegrationService integration;
 
     @Autowired
     public FinanceServiceImpl(FinanceRepository repository, PaymentProvider provider,
@@ -44,7 +45,7 @@ public class FinanceServiceImpl implements FinanceService {
             @Value("${finance.settlement.fee-basis:}") String feeBasis,
             @Value("${finance.settlement.rounding:}") String rounding,
             @Value("${finance.dispute.admin-adjudication-enabled:false}") boolean adjudicationEnabled,
-            CustomerPaymentService customerPayments) {
+            CustomerPaymentService customerPayments, FinanceIntegrationService integration) {
         this.repository = repository;
         this.provider = provider;
         this.transaction = new TransactionTemplate(manager);
@@ -52,12 +53,14 @@ public class FinanceServiceImpl implements FinanceService {
         this.rounding = rounding;
         this.adjudicationEnabled = adjudicationEnabled;
         this.customerPayments = customerPayments;
+        this.integration = integration;
     }
 
     // Direct construction remains useful for the isolated finance unit tests.
     public FinanceServiceImpl(FinanceRepository repository, PaymentProvider provider,
             PlatformTransactionManager manager, String feeBasis, String rounding, boolean adjudicationEnabled) {
-        this(repository, provider, manager, feeBasis, rounding, adjudicationEnabled, null);
+        this(repository, provider, manager, feeBasis, rounding, adjudicationEnabled, null,
+                new FinanceIntegrationServiceImpl(repository));
     }
 
     private static void require(boolean condition, String code) {
@@ -272,6 +275,7 @@ public class FinanceServiceImpl implements FinanceService {
                 """, reference, linkId, FinanceRepository.utc(Instant.now()), p.id());
         repository.ledger(p.orderId(), "payment:" + p.id(), "HELD", amount);
         repository.event(p.orderId(), "PAYMENT_SUCCESS", p.id(), "PAYOS", "HELD internal ledger");
+        integration.syncCollectedPayment(p.orderId());
     }
 
     public FinanceResponse.Payment reconcile(long paymentId, Actor actor, boolean cancel) {
@@ -355,7 +359,9 @@ public class FinanceServiceImpl implements FinanceService {
         command(orderId, commandKey, "cancel-decision:" + id + ":" + approve + ":" + reason, actor, () -> {
             noPayout(orderId);
             require(repository.cancellations(orderId).stream().anyMatch(c -> c.id() == id && "REQUESTED".equals(c.status())), "CANCELLATION_NOT_PENDING");
-            require(!approve || !repository.active(orderId), "CANCEL_UNPAID_LINKS_FIRST");
+            require(!approve || (!repository.active(orderId) && !repository.activeCustomerPayment(orderId)), "CANCEL_UNPAID_LINKS_FIRST");
+            require(repository.count("SELECT COUNT(*) FROM customer_order WHERE order_id=? AND status='CANCEL_REQUESTED'",
+                    repository.parentOrderId(orderId)) == 0, "CANCELLATION_IN_PROGRESS");
             repository.update("UPDATE cancellation SET status=?,decision_reason=?,cancelled_at=? WHERE cancellation_id=?",
                     approve ? "APPROVED" : "REJECTED", reason, approve ? FinanceRepository.utc(Instant.now()) : null, id);
             repository.event(orderId, "CANCELLATION_DECIDED", id, Long.toString(actor.userId()), reason);
@@ -477,6 +483,8 @@ public class FinanceServiceImpl implements FinanceService {
             repository.ledger(orderId, "payout:" + id, "RELEASED", settlement.supplierPayoutAmount());
             if (settlement.feeAmount() > 0) { repository.ledger(orderId, "fee:" + id, "PLATFORM_FEE", settlement.feeAmount()); }
             repository.event(orderId, "SETTLEMENT_SUCCESS", id, Long.toString(actor.userId()), reference);
+            repository.update("UPDATE seller_order SET status='SETTLED' WHERE seller_order_id=? AND status='ACCEPTED'", orderId);
+            integration.syncCustomerOrder(orderId);
         });
     }
 }

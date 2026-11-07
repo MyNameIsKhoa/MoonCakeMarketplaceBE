@@ -44,6 +44,9 @@ public interface FinanceRepository {
     String customerOrderNumber(long orderId);
     String sellerOrderNumber(long sellerOrderId);
     boolean active(long orderId);
+    long parentOrderId(long sellerOrderId);
+    List<String> sellerStatuses(long orderId);
+    List<Long> pendingCancellationOrderIds();
     void lockCustomerOrder(long orderId);
     long customerOrderOwner(long orderId);
     long customerOrderTotal(long orderId);
