@@ -12,6 +12,9 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.mail.javamail.JavaMailSender;
+import mss.mooncake.identity.repository.UserRepository;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
@@ -35,6 +38,8 @@ class SupplierProfileControllerIntegrationTest {
 
     @Autowired
     private WebApplicationContext context;
+    @Autowired private UserRepository users;
+    @MockitoBean private JavaMailSender mailSender;
 
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
@@ -64,6 +69,7 @@ class SupplierProfileControllerIntegrationTest {
                 .andReturn();
         Map<?, ?> mapReg1 = objectMapper.readValue(resReg1.getResponse().getContentAsString(), Map.class);
         user1Id = ((Number) mapReg1.get("userId")).longValue();
+        verifyTestAccount("supp1@example.com");
 
         // Login User 1
         MvcResult res1 = mockMvc.perform(post("/api/auth/login")
@@ -80,6 +86,7 @@ class SupplierProfileControllerIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(reg2)))
                 .andExpect(status().isCreated());
+        verifyTestAccount("supp2@example.com");
 
         // Login User 2
         MvcResult res2 = mockMvc.perform(post("/api/auth/login")
@@ -89,6 +96,12 @@ class SupplierProfileControllerIntegrationTest {
                 .andReturn();
         Map<?, ?> map2 = objectMapper.readValue(res2.getResponse().getContentAsString(), Map.class);
         tokenUser2 = (String) map2.get("accessToken");
+    }
+
+    private void verifyTestAccount(String email) {
+        var user = users.findByEmail(email).orElseThrow();
+        user.setEmailVerified(true);
+        users.save(user);
     }
 
     @Test

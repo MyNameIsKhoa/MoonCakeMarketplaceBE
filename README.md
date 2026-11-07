@@ -124,7 +124,7 @@ Chạy Identity, Catalog, Commerce và Gateway cùng lúc (`docker compose up -d
 
 ## Demo Docker: Gateway + Identity + JWT
 
-[`compose.auth-demo.yml`](compose.auth-demo.yml) chỉ khởi động SQL Server cho Identity, một bước tạo database `mss_identity`, Identity Service và API Gateway. Demo dùng project/volume riêng, không thay đổi Compose đầy đủ. Dockerfiles hiện có build hai Spring Boot JAR thành image. Chỉ Gateway mở `http://localhost:8080`; Identity nghe `8081` và SQL Server nghe `1433` **bên trong** Docker, không publish hai port đó ra host.
+[`compose.auth-demo.yml`](compose.auth-demo.yml) khởi động SQL Server cho Identity, bước tạo database `mss_identity`, Identity Service, API Gateway và Mailpit để nhận email xác minh trong môi trường demo. Demo dùng project/volume riêng. Gateway mở `http://localhost:8080`, Identity mở `http://localhost:8081` để xem Swagger, Mailpit mở `http://localhost:8025`; SQL Server chỉ nghe `1433` **bên trong** Docker.
 
 Tạo file `.env` tại root (đã được gitignore) và đặt ít nhất các biến sau; thay mỗi giá trị bằng secret riêng, không commit hoặc gửi secret cho người khác:
 
@@ -145,7 +145,7 @@ docker compose -f compose.auth-demo.yml ps
 .\scripts\auth-demo-smoke.ps1
 ```
 
-Smoke test đăng ký/đăng nhập qua Gateway, sau đó kiểm tra `GET /api/users/me` với JWT hợp lệ, thiếu JWT và JWT giả. Xem lỗi khởi động bằng `docker compose -f compose.auth-demo.yml logs identity-db identity-db-init identity-service api-gateway`. Dừng bằng `docker compose -f compose.auth-demo.yml down` (không thêm `-v`; volume demo giữ dữ liệu). Nếu port host `8080` đang bị chiếm, dừng app khác trước khi chạy demo. `ADMIN_USER_IDS` được để trống trong demo để không vô tình cấp quyền admin cho tài khoản đăng ký mới.
+Smoke test đăng ký qua Gateway, lấy email xác minh từ Mailpit, xác minh rồi mới đăng nhập; sau đó kiểm tra `GET /api/users/me` với JWT hợp lệ, thiếu JWT và JWT giả. Xem lỗi bằng `docker compose -f compose.auth-demo.yml logs identity-db identity-db-init mailpit identity-service api-gateway`. Dừng bằng `docker compose -f compose.auth-demo.yml down` (không thêm `-v`; volume demo giữ dữ liệu). Nếu port host `8080`, `8081` hoặc `8025` đang bị chiếm, dừng app khác trước khi chạy demo. `ADMIN_USER_IDS` được để trống trong demo.
 
 ## Chạy từng service
 

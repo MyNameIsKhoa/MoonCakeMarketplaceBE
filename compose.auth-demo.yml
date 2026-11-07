@@ -1,6 +1,11 @@
 name: mooncake-auth-demo
 
 services:
+  mailpit:
+    image: axllent/mailpit:v1.27
+    ports:
+      - "127.0.0.1:8025:8025"
+
   identity-db:
     image: mcr.microsoft.com/mssql/server:2022-latest
     environment:
@@ -38,12 +43,20 @@ services:
       COMMERCE_TO_IDENTITY_TOKEN: ${COMMERCE_TO_IDENTITY_TOKEN:?Set a unique 32+ character token in .env}
       RFQ_TO_IDENTITY_TOKEN: ${RFQ_TO_IDENTITY_TOKEN:?Set a unique 32+ character token in .env}
       ADMIN_USER_IDS: ""
+      APP_FRONTEND_URL: http://localhost:3000
+      MAIL_HOST: mailpit
+      MAIL_PORT: 1025
+      MAIL_FROM: auth-demo@mooncake.local
+      MAIL_SMTP_AUTH: "false"
+      MAIL_SMTP_STARTTLS: "false"
       IDENTITY_DB_URL: jdbc:sqlserver://identity-db:1433;databaseName=mss_identity;encrypt=false;trustServerCertificate=true
       IDENTITY_DB_USERNAME: sa
       IDENTITY_DB_PASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
     depends_on:
       identity-db-init:
         condition: service_completed_successfully
+      mailpit:
+        condition: service_started
     ports:
       - "127.0.0.1:8081:8081"
 

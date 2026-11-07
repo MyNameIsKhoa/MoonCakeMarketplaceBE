@@ -12,6 +12,9 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.mail.javamail.JavaMailSender;
+import mss.mooncake.identity.repository.UserRepository;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
@@ -36,6 +39,8 @@ class AddressControllerIntegrationTest {
 
     @Autowired
     private WebApplicationContext context;
+    @Autowired private UserRepository users;
+    @MockitoBean private JavaMailSender mailSender;
 
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
@@ -62,6 +67,7 @@ class AddressControllerIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(regA)))
                 .andExpect(status().isCreated());
+        verifyTestAccount("usera_addr@example.com");
 
         // Login User A
         MvcResult resA = mockMvc.perform(post("/api/auth/login")
@@ -78,6 +84,7 @@ class AddressControllerIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(regB)))
                 .andExpect(status().isCreated());
+        verifyTestAccount("userb_addr@example.com");
 
         // Login User B
         MvcResult resB = mockMvc.perform(post("/api/auth/login")
@@ -87,6 +94,12 @@ class AddressControllerIntegrationTest {
                 .andReturn();
         Map<?, ?> mapB = objectMapper.readValue(resB.getResponse().getContentAsString(), Map.class);
         tokenUserB = (String) mapB.get("accessToken");
+    }
+
+    private void verifyTestAccount(String email) {
+        var user = users.findByEmail(email).orElseThrow();
+        user.setEmailVerified(true);
+        users.save(user);
     }
 
     @Test
