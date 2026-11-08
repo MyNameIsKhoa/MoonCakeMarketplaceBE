@@ -4,8 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import mss.mooncake.catalogstore.entity.CategoryEntity;
 import mss.mooncake.catalogstore.entity.ProductEntity;
 import mss.mooncake.catalogstore.entity.StoreEntity;
+import mss.mooncake.catalogstore.enums.CategoryStatus;
 import mss.mooncake.catalogstore.enums.ProductStatus;
 import mss.mooncake.catalogstore.enums.StoreStatus;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,22 +26,27 @@ class ProductRepositorySearchTest {
 
     @Autowired ProductRepository productRepository;
     @Autowired StoreRepository storeRepository;
+    @Autowired CategoryRepository categoryRepository;
 
     private static final PageRequest PAGE = PageRequest.of(0, 20, Sort.by("id"));
 
     private Long activeStoreId;
     private Long inactiveStoreId;
+    private Long nuongCategoryId;
+    private Long deoCategoryId;
 
     @BeforeEach
     void seed() {
         activeStoreId = store("STR-AAAAAAAAAAAA", "store-a", StoreStatus.ACTIVE);
         inactiveStoreId = store("STR-BBBBBBBBBBBB", "store-b", StoreStatus.INACTIVE);
+        nuongCategoryId = category("search-banh-nuong", CategoryStatus.ACTIVE);
+        deoCategoryId = category("search-banh-deo", CategoryStatus.ACTIVE);
 
-        product(activeStoreId, 1L, "PRD-1", "Bánh nướng thập cẩm", ProductStatus.ACTIVE);
-        product(activeStoreId, 2L, "PRD-2", "Bánh dẻo hạt sen", ProductStatus.ACTIVE);
-        product(activeStoreId, 1L, "PRD-3", "Bánh nướng đậu xanh", ProductStatus.DRAFT);
-        product(inactiveStoreId, 1L, "PRD-4", "Bánh nướng trà xanh", ProductStatus.ACTIVE);
-        product(activeStoreId, 1L, "PRD-5", "Hộp quà 100% handmade", ProductStatus.ACTIVE);
+        product(activeStoreId, nuongCategoryId, "PRD-1", "Bánh nướng thập cẩm", ProductStatus.ACTIVE);
+        product(activeStoreId, deoCategoryId, "PRD-2", "Bánh dẻo hạt sen", ProductStatus.ACTIVE);
+        product(activeStoreId, nuongCategoryId, "PRD-3", "Bánh nướng đậu xanh", ProductStatus.DRAFT);
+        product(inactiveStoreId, nuongCategoryId, "PRD-4", "Bánh nướng trà xanh", ProductStatus.ACTIVE);
+        product(activeStoreId, nuongCategoryId, "PRD-5", "Hộp quà 100% handmade", ProductStatus.ACTIVE);
     }
 
     private Long store(String code, String slug, StoreStatus status) {
@@ -50,6 +57,14 @@ class ProductRepositorySearchTest {
         s.setSlug(slug);
         s.setStatus(status);
         return storeRepository.save(s).getId();
+    }
+
+    private Long category(String slug, CategoryStatus status) {
+        CategoryEntity c = new CategoryEntity();
+        c.setName(slug);
+        c.setSlug(slug);
+        c.setStatus(status);
+        return categoryRepository.save(c).getId();
     }
 
     private void product(Long storeId, Long categoryId, String code, String name, ProductStatus status) {
@@ -75,14 +90,14 @@ class ProductRepositorySearchTest {
     @Test
     @DisplayName("public: q không phân biệt hoa thường, kết hợp categoryId")
     void publicSearchByNameAndCategory() {
-        assertEquals(List.of("PRD-1"), codes(ProductRepository.publicSearch("  BÁNH NƯỚNG ", null, 1L)));
+        assertEquals(List.of("PRD-1"), codes(ProductRepository.publicSearch("  BÁNH NƯỚNG ", null, nuongCategoryId)));
     }
 
     @Test
     @DisplayName("public: ký tự % trong q được hiểu là ký tự thường")
     void publicSearchEscapesWildcards() {
         assertEquals(List.of("PRD-5"), codes(ProductRepository.publicSearch("100%", null, null)));
-        assertTrue(codes(ProductRepository.publicSearch("%", null, 2L)).isEmpty());
+        assertTrue(codes(ProductRepository.publicSearch("%", null, deoCategoryId)).isEmpty());
     }
 
     @Test
@@ -92,6 +107,18 @@ class ProductRepositorySearchTest {
                 codes(ProductRepository.ownerSearch(List.of(activeStoreId), null, null, null)));
         assertEquals(List.of("PRD-4"),
                 codes(ProductRepository.ownerSearch(List.of(inactiveStoreId), "nướng", null, null)));
+    }
+
+    @Test
+    @DisplayName("public: ẩn product thuộc danh mục INACTIVE; owner vẫn thấy")
+    void publicSearchHidesProductsOfInactiveCategory() {
+        Long hiddenCategoryId = category("search-banh-ngung-ban", CategoryStatus.INACTIVE);
+        product(activeStoreId, hiddenCategoryId, "PRD-6", "Bánh nướng ngừng bán", ProductStatus.ACTIVE);
+
+        assertEquals(List.of("PRD-1", "PRD-2", "PRD-5"), codes(ProductRepository.publicSearch(null, null, null)));
+        assertTrue(codes(ProductRepository.publicSearch(null, null, hiddenCategoryId)).isEmpty());
+        assertEquals(List.of("PRD-6"),
+                codes(ProductRepository.ownerSearch(List.of(activeStoreId), null, null, hiddenCategoryId)));
     }
 
     @Test

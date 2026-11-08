@@ -3,6 +3,7 @@ package mss.mooncake.catalogstore.service.impl;
 import feign.FeignException;
 import java.text.Normalizer;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import mss.mooncake.catalogstore.client.IdentityClient;
@@ -27,6 +28,9 @@ import org.springframework.util.StringUtils;
 @Transactional(readOnly = true)
 public class StoreServiceImpl implements StoreService {
 
+    /** Mã lỗi 409 khi chuyển store sang ACTIVE mà chưa có phí vận chuyển. */
+    public static final String SHIPPING_FEE_REQUIRED = "STORE_SHIPPING_FEE_REQUIRED";
+
     private final StoreRepository storeRepository;
     private final IdentityClient identityClient;
 
@@ -40,12 +44,12 @@ public class StoreServiceImpl implements StoreService {
 
     /**
      * Chuyển tên store thành slug: lowercase, thay khoảng trắng thành '-', bỏ ký tự
-     * đặc biệt.
+     * đặc biệt. Đ/đ không phải dấu kết hợp (NFD không tách được) nên đổi tay sang d.
      */
     private String generateSlug(String name) {
-        String normalized = Normalizer.normalize(name, Normalizer.Form.NFD);
+        String normalized = Normalizer.normalize(name.replace('Đ', 'D').replace('đ', 'd'), Normalizer.Form.NFD);
         String ascii = Pattern.compile("\\p{InCombiningDiacriticalMarks}+").matcher(normalized).replaceAll("");
-        return ascii.toLowerCase()
+        return ascii.toLowerCase(Locale.ROOT)
                 .replaceAll("[^a-z0-9\\s-]", "")
                 .replaceAll("\\s+", "-")
                 .replaceAll("-+", "-")
@@ -124,9 +128,10 @@ public class StoreServiceImpl implements StoreService {
         // khi ghi DB
         SupplierSummaryDto supplier = requireActiveSupplier(userId);
 
-        // 2. Sinh store_code và slug duy nhất
+        // 2. Sinh store_code và slug duy nhất; tên không có ký tự Latin (vd. "月饼") cho slug rỗng → dùng store code
         String storeCode = generateUniqueStoreCode();
-        String slug = ensureUniqueSlug(generateSlug(request.name()));
+        String baseSlug = generateSlug(request.name());
+        String slug = ensureUniqueSlug(baseSlug.isEmpty() ? storeCode.toLowerCase(Locale.ROOT) : baseSlug);
 
         // 3. Lưu store
         StoreEntity store = new StoreEntity();
@@ -138,6 +143,7 @@ public class StoreServiceImpl implements StoreService {
         store.setBannerUrl(request.bannerUrl());
         store.setThemeKey(request.themeKey());
         store.setDescription(request.description());
+        store.setShippingFee(request.shippingFee());
         store.setStatus(StoreStatus.DRAFT); // Trạng thái ban đầu là DRAFT
 
         store = storeRepository.save(store);
@@ -240,6 +246,10 @@ public class StoreServiceImpl implements StoreService {
         if (!admin && !store.getSupplierIdRef().equals(supplier.supplierId())) {
             throw new ForbiddenException("Bạn không có quyền chỉnh sửa store này.");
         }
+        // Giống branch/product: store bị admin tạm khóa thì owner không được sửa gì (kể cả đổi trạng thái).
+        if (!admin && store.getStatus() == StoreStatus.SUSPENDED) {
+            throw new ForbiddenException("Store đang bị tạm khóa, không thể chỉnh sửa. Vui lòng liên hệ quản trị viên.");
+        }
 
         // 4. Patch từng field nếu có giá trị
         if (StringUtils.hasText(request.name())) {
@@ -261,13 +271,19 @@ public class StoreServiceImpl implements StoreService {
             store.setShippingFee(request.shippingFee());
         }
         if (StringUtils.hasText(request.status())) {
+            StoreStatus next;
             try {
-                StoreStatus next = StoreStatus.valueOf(request.status().trim().toUpperCase());
-                validateStatusTransition(store.getStatus(), next, admin);
-                store.setStatus(next);
+                next = StoreStatus.valueOf(request.status().trim().toUpperCase());
             } catch (IllegalArgumentException ex) {
                 throw new BadRequestException("Trạng thái store không hợp lệ: " + request.status());
             }
+            validateStatusTransition(store.getStatus(), next, admin);
+            // Checkout tính phí ship theo store: không công bố store chưa cấu hình phí (shippingFee đã patch ở trên).
+            if (next == StoreStatus.ACTIVE && store.getStatus() != StoreStatus.ACTIVE && store.getShippingFee() == null) {
+                throw new ConflictException(SHIPPING_FEE_REQUIRED,
+                        "Cần cấu hình phí vận chuyển (shippingFee) trước khi mở bán store.");
+            }
+            store.setStatus(next);
         }
 
         store = storeRepository.save(store);
