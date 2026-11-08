@@ -98,9 +98,105 @@ class OrderQueryServiceTest {
                 .thenReturn(new SupplierSummaryResponse(23L, 31L, "Other", null, "VERIFIED"));
         assertThat(queries.listSupplierOrders(30L, PageRequest.of(0, 20)).getTotalElements()).isEqualTo(1);
         Long sellerId = seller.getId();
-        assertThat(queries.getSellerOrder(30L, null, sellerId).items().getFirst().productNameSnapshot())
+        assertThat(queries.getSellerOrder(30L, null, sellerId, false).items().getFirst().productNameSnapshot())
                 .isEqualTo("Old mooncake name");
-        assertThatThrownBy(() -> queries.getSellerOrder(31L, null, sellerId))
+        assertThatThrownBy(() -> queries.getSellerOrder(31L, null, sellerId, false))
+                .isInstanceOf(ResponseStatusException.class).hasMessageContaining("404");
+    }
+
+    @Test
+    void supplierSeesDeliveryAddressSnapshotAndDiscountOfItsSellerOrder() {
+        CustomerOrderEntity order = new CustomerOrderEntity();
+        set(order, "orderNo", "MSS-test-300");
+        set(order, "customerIdRef", 300L);
+        set(order, "sourceType", "RETAIL");
+        set(order, "subtotal", new BigDecimal("200.00"));
+        set(order, "discountTotal", new BigDecimal("30.00"));
+        set(order, "shippingTotal", BigDecimal.ZERO);
+        set(order, "grandTotal", new BigDecimal("170.00"));
+        set(order, "status", "READY_FOR_FULFILLMENT");
+        set(order, "placedAt", LocalDateTime.now());
+        order = orders.saveAndFlush(order);
+
+        DeliveryAddressEntity address = new DeliveryAddressEntity();
+        set(address, "orderId", order.getId());
+        set(address, "sourceAddressIdRef", 77L);
+        set(address, "recipientName", "Nguyễn Văn A");
+        set(address, "recipientPhone", "0900000001");
+        set(address, "addressLine", "12 Lê Lợi");
+        set(address, "ward", "Bến Nghé");
+        set(address, "district", "Quận 1");
+        set(address, "city", "TP Hồ Chí Minh");
+        addresses.save(address);
+
+        SellerOrderEntity seller = new SellerOrderEntity();
+        set(seller, "orderId", order.getId());
+        set(seller, "sellerOrderNo", "MSS-test-300-1");
+        set(seller, "storeIdRef", 32L);
+        set(seller, "supplierIdRef", 42L);
+        set(seller, "storeNameSnapshot", "Store");
+        set(seller, "supplierNameSnapshot", "Supplier");
+        set(seller, "subtotal", new BigDecimal("200.00"));
+        set(seller, "shippingFee", BigDecimal.ZERO);
+        set(seller, "totalAmount", new BigDecimal("170.00"));
+        set(seller, "status", "READY_FOR_FULFILLMENT");
+        seller = sellers.saveAndFlush(seller);
+        for (String discount : new String[]{"10.00", "20.00"}) {
+            OrderItemEntity item = new OrderItemEntity();
+            set(item, "sellerOrderId", seller.getId());
+            set(item, "productNameSnapshot", "Mooncake");
+            set(item, "quantity", 1);
+            set(item, "unitPrice", new BigDecimal("100.00"));
+            set(item, "discountAmount", new BigDecimal(discount));
+            set(item, "subtotal", new BigDecimal("100.00"));
+            items.save(item);
+        }
+        when(identity.getSupplierSummaryByUser(50L))
+                .thenReturn(new SupplierSummaryResponse(42L, 50L, "Supplier", null, "VERIFIED"));
+
+        var view = queries.getSellerOrder(50L, null, seller.getId(), false);
+
+        assertThat(view.discountTotal()).isEqualByComparingTo("30.00");
+        var delivery = view.deliveryAddress();
+        assertThat(delivery.recipientName()).isEqualTo("Nguyễn Văn A");
+        assertThat(delivery.recipientPhone()).isEqualTo("0900000001");
+        assertThat(delivery.addressLine()).isEqualTo("12 Lê Lợi");
+        assertThat(delivery.ward()).isEqualTo("Bến Nghé");
+        assertThat(delivery.district()).isEqualTo("Quận 1");
+        assertThat(delivery.city()).isEqualTo("TP Hồ Chí Minh");
+        assertThat(queries.getCustomerOrder(300L, order.getId()).sellerOrders().getFirst().deliveryAddress()
+                .addressLine()).isEqualTo("12 Lê Lợi");
+    }
+
+    @Test
+    void adminReadsAnySellerOrderWithoutASupplierProfile() {
+        CustomerOrderEntity order = new CustomerOrderEntity();
+        set(order, "orderNo", "MSS-test-400");
+        set(order, "customerIdRef", 400L);
+        set(order, "sourceType", "RETAIL");
+        set(order, "subtotal", new BigDecimal("100.00"));
+        set(order, "discountTotal", BigDecimal.ZERO);
+        set(order, "shippingTotal", BigDecimal.ZERO);
+        set(order, "grandTotal", new BigDecimal("100.00"));
+        set(order, "status", "AWAITING_PAYMENT");
+        set(order, "placedAt", LocalDateTime.now());
+        order = orders.saveAndFlush(order);
+        SellerOrderEntity seller = new SellerOrderEntity();
+        set(seller, "orderId", order.getId());
+        set(seller, "sellerOrderNo", "MSS-test-400-1");
+        set(seller, "storeIdRef", 52L);
+        set(seller, "supplierIdRef", 62L);
+        set(seller, "storeNameSnapshot", "Store");
+        set(seller, "supplierNameSnapshot", "Supplier");
+        set(seller, "subtotal", new BigDecimal("100.00"));
+        set(seller, "shippingFee", BigDecimal.ZERO);
+        set(seller, "totalAmount", new BigDecimal("100.00"));
+        set(seller, "status", "AWAITING_PAYMENT");
+        Long sellerId = sellers.saveAndFlush(seller).getId();
+
+        assertThat(queries.getSellerOrder(900L, null, sellerId, true).sellerOrderId()).isEqualTo(sellerId);
+        org.mockito.Mockito.verifyNoInteractions(identity);
+        assertThatThrownBy(() -> queries.getSellerOrder(900L, null, sellerId, false))
                 .isInstanceOf(ResponseStatusException.class).hasMessageContaining("404");
     }
 

@@ -2,6 +2,7 @@ package mss.mooncake.identity.dto.request;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 public record RegisterRequest(
@@ -19,5 +20,6 @@ public record RegisterRequest(
     String password,
 
     @Size(max = 30, message = "Phone cannot exceed 30 characters")
+    @Pattern(regexp = ValidationPatterns.PHONE_OR_EMPTY, message = ValidationPatterns.PHONE_MESSAGE)
     String phone
 ) { }

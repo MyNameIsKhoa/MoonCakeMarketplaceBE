@@ -126,6 +126,28 @@ class CategoryControllerTest {
                 .andExpect(status().isNotFound());
     }
 
+    @Test
+    @DisplayName("GET /api/categories/{id} với JWT admin trả cả danh mục INACTIVE")
+    void detail_adminSeesInactive() throws Exception {
+        when(categoryService.getCategoryForAdmin(5L))
+                .thenReturn(new CategoryResponse(5L, 3L, "Bánh chay cũ", "chay-cu", "INACTIVE"));
+
+        mockMvc.perform(get("/api/categories/{id}", 5L).with(user(admin())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("INACTIVE"));
+        verify(categoryService, never()).getCategory(any());
+    }
+
+    @Test
+    @DisplayName("GET /api/categories/{id} với JWT customer vẫn chỉ thấy ACTIVE")
+    void detail_customerUsesPublicLookup() throws Exception {
+        when(categoryService.getCategory(5L)).thenThrow(new ResourceNotFoundException("Không tìm thấy"));
+
+        mockMvc.perform(get("/api/categories/{id}", 5L).with(user(customer())))
+                .andExpect(status().isNotFound());
+        verify(categoryService, never()).getCategoryForAdmin(any());
+    }
+
     // ── POST / PATCH — admin ──────────────────────────────────────────────────────
 
     @Test

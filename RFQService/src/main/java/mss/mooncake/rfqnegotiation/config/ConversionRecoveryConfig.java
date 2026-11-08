@@ -11,4 +11,6 @@ public class ConversionRecoveryConfig {
     public ConversionRecoveryConfig(QuotationApplicationService service) { this.service=service; }
     @Scheduled(fixedDelayString="${app.conversion-recovery.delay-ms:30000}", initialDelayString="${app.conversion-recovery.delay-ms:30000}")
     public void recover() { service.recoverPendingConversions(); }
+    @Scheduled(fixedDelayString="${app.order-sync.delay-ms:60000}", initialDelayString="${app.order-sync.delay-ms:60000}")
+    public void syncOrders() { service.syncAcceptedOrders(); }
 }

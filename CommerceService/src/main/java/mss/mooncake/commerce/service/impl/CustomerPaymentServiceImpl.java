@@ -1,12 +1,16 @@
 package mss.mooncake.commerce.service.impl;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import mss.mooncake.commerce.client.PaymentProvider;
 import mss.mooncake.commerce.client.CatalogServiceClient;
+import mss.mooncake.commerce.client.dto.catalog.StockReservationRequest;
+import mss.mooncake.commerce.client.dto.catalog.StockRestoreRequest;
 import mss.mooncake.commerce.dto.response.CustomerPaymentResponse;
 import mss.mooncake.commerce.exception.FinanceException;
+import mss.mooncake.commerce.notification.CommerceNotifier;
 import mss.mooncake.commerce.repository.FinanceRepository;
 import mss.mooncake.commerce.repository.FinanceRepository.CustomerPayment;
 import mss.mooncake.commerce.repository.FinanceRepository.CustomerPaymentItem;
@@ -18,6 +22,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -32,17 +37,42 @@ public class CustomerPaymentServiceImpl implements CustomerPaymentService {
     private final CatalogServiceClient catalog;
     private final ObjectProvider<FinanceService> finance;
     private final mss.mooncake.commerce.service.FinanceIntegrationService integration;
+    private final long depositTimeoutHours;
+    private final long retailPaymentTimeoutMinutes;
+    private final CommerceNotifier notifier;
 
     @Autowired
     public CustomerPaymentServiceImpl(FinanceRepository repository, PaymentProvider provider,
             PlatformTransactionManager manager, CatalogServiceClient catalog,
-            ObjectProvider<FinanceService> finance, mss.mooncake.commerce.service.FinanceIntegrationService integration) {
+            ObjectProvider<FinanceService> finance, mss.mooncake.commerce.service.FinanceIntegrationService integration,
+            @Value("${commerce.rfq.deposit-timeout-hours:48}") long depositTimeoutHours,
+            @Value("${commerce.retail.payment-timeout-minutes:60}") long retailPaymentTimeoutMinutes,
+            CommerceNotifier notifier) {
         this.repository = repository;
         this.provider = provider;
         this.transaction = new TransactionTemplate(manager);
         this.catalog = catalog;
         this.finance = finance;
         this.integration = integration;
+        this.depositTimeoutHours = depositTimeoutHours;
+        this.retailPaymentTimeoutMinutes = retailPaymentTimeoutMinutes;
+        this.notifier = notifier;
+    }
+
+    /** Without in-app notifications, for tests that do not check them. */
+    public CustomerPaymentServiceImpl(FinanceRepository repository, PaymentProvider provider,
+            PlatformTransactionManager manager, CatalogServiceClient catalog,
+            ObjectProvider<FinanceService> finance, mss.mooncake.commerce.service.FinanceIntegrationService integration,
+            long depositTimeoutHours, long retailPaymentTimeoutMinutes) {
+        this(repository, provider, manager, catalog, finance, integration, depositTimeoutHours,
+                retailPaymentTimeoutMinutes, CommerceNotifier.disabled());
+    }
+
+    // Direct construction remains useful for the isolated finance unit tests.
+    public CustomerPaymentServiceImpl(FinanceRepository repository, PaymentProvider provider,
+            PlatformTransactionManager manager, CatalogServiceClient catalog,
+            ObjectProvider<FinanceService> finance, mss.mooncake.commerce.service.FinanceIntegrationService integration) {
+        this(repository, provider, manager, catalog, finance, integration, 48, 60);
     }
 
     public CustomerPaymentServiceImpl(FinanceRepository repository, PaymentProvider provider,
@@ -235,34 +265,49 @@ public class CustomerPaymentServiceImpl implements CustomerPaymentService {
 
     @Override
     public void cancelUnpaidOrder(long orderId, String reason, FinanceService.Actor actor) {
+        cancelUnpaidOrder(orderId, reason, actor, false);
+    }
+
+    /** RFQ orders reserve no Catalog stock: only retail orders need a reservation key and a stock restore. */
+    private void cancelUnpaidOrder(long orderId, String reason, FinanceService.Actor actor, boolean system) {
         if (reason == null || reason.isBlank() || reason.length() > 500) {
             throw new FinanceException(HttpStatus.BAD_REQUEST, "CANCELLATION_REASON_REQUIRED");
         }
+        boolean retail = repository.retailOrder(orderId);
+        String auditActor = system ? "SYSTEM" : Long.toString(actor.userId());
         boolean pending = Boolean.TRUE.equals(transaction.execute(status -> {
             var ids = lockOrder(orderId);
             buyer(orderId, actor);
-            require(repository.retailOrder(orderId), "CUSTOMER_PAYMENT_RETAIL_ONLY");
             if (repository.count("SELECT COUNT(*) FROM customer_order WHERE order_id=? AND status='CANCELLED'",
                     orderId) == 1) { return false; }
-            String reservationKey = repository.stockReservationKey(orderId);
-            require(reservationKey != null && !reservationKey.isBlank(),
-                    "STOCK_RESERVATION_RECONCILIATION_REQUIRED");
+            if (retail) {
+                String reservationKey = repository.stockReservationKey(orderId);
+                require(reservationKey != null && !reservationKey.isBlank(),
+                        "STOCK_RESERVATION_RECONCILIATION_REQUIRED");
+            }
             for (long id : ids) {
                 require(repository.paid(id) == 0, "ORDER_ALREADY_PAID");
-                require(repository.count("""
+                require(repository.count(retail ? """
                         SELECT COUNT(*) FROM seller_order WHERE seller_order_id=?
                         AND status IN ('AWAITING_PAYMENT','PENDING_CONFIRMATION')
+                        """ : """
+                        SELECT COUNT(*) FROM seller_order WHERE seller_order_id=?
+                        AND status IN ('AWAITING_DEPOSIT','AWAITING_PAYMENT')
                         """, id) == 1, "ORDER_CANNOT_BE_CANCELLED");
-                var cases = repository.cancellations(id);
+                // The job settled links before this lock; one the buyer opened since waits for the next run.
+                require(!system || (!repository.active(id) && !repository.activeCustomerPayment(id)),
+                        "PAYMENT_RECONCILIATION_REQUIRED");
+                // A rejected request is history: the buyer (or the timeout job) may still cancel an unpaid order.
+                var cases = repository.cancellations(id).stream().filter(c -> !"REJECTED".equals(c.status())).toList();
                 require(cases.isEmpty() || cases.stream().allMatch(c -> "REQUESTED".equals(c.status())),
                         "CANCELLATION_ALREADY_EXISTS");
                 if (cases.isEmpty()) {
                     long cancellationId = repository.insert("""
                             INSERT INTO cancellation(seller_order_id,actor_type,actor_id_ref,reason,status,requested_at)
-                            VALUES(?,'CUSTOMER',?,?,'REQUESTED',?)
-                            """, id, actor.userId(), reason, FinanceRepository.utc(Instant.now()));
-                    repository.event(id, "CANCELLATION_REQUESTED", cancellationId,
-                            Long.toString(actor.userId()), reason);
+                            VALUES(?,?,?,?,'REQUESTED',?)
+                            """, id, system ? "SYSTEM" : "CUSTOMER", actor.userId(), reason,
+                            FinanceRepository.utc(Instant.now()));
+                    repository.event(id, "CANCELLATION_REQUESTED", cancellationId, auditActor, reason);
                 }
             }
             repository.update("UPDATE customer_order SET status='CANCEL_REQUESTED' WHERE order_id=?", orderId);
@@ -271,20 +316,7 @@ public class CustomerPaymentServiceImpl implements CustomerPaymentService {
         if (!pending) { return; }
 
         // Once requested, finance rejects new links while remote links and stock are reconciled.
-        for (long id : repository.sellerOrderIds(orderId)) {
-            for (var payment : repository.payments(id)) {
-                if (payment.orderCode() != null && List.of("CREATING", "RECONCILING", "PENDING", "CANCELLING")
-                        .contains(payment.status())) {
-                    require(finance != null, "PAYOS_RECONCILIATION_UNAVAILABLE");
-                    finance.getObject().reconcile(payment.id(), actor, true);
-                }
-            }
-        }
-        var group = repository.customerPayments(orderId).stream().findFirst().orElse(null);
-        if (group != null && List.of("CREATING", "RECONCILING", "PENDING", "CANCELLING")
-                .contains(group.status())) {
-            reconcile(orderId, actor, true);
-        }
+        cancelOpenLinks(orderId, actor);
 
         transaction.executeWithoutResult(status -> {
             for (long id : lockOrder(orderId)) {
@@ -293,11 +325,13 @@ public class CustomerPaymentServiceImpl implements CustomerPaymentService {
             }
         });
 
-        String reservationKey = repository.stockReservationKey(orderId);
-        require(reservationKey != null && !reservationKey.isBlank(),
-                "STOCK_RESERVATION_RECONCILIATION_REQUIRED");
-        var restored = catalog == null ? null : catalog.cancelConfirmedStockReservation(reservationKey);
-        require(restored != null && "CANCELLED".equals(restored.status()), "STOCK_RESTORE_REQUIRED");
+        if (retail) {
+            String reservationKey = repository.stockReservationKey(orderId);
+            require(reservationKey != null && !reservationKey.isBlank(),
+                    "STOCK_RESERVATION_RECONCILIATION_REQUIRED");
+            var restored = catalog == null ? null : catalog.cancelConfirmedStockReservation(reservationKey);
+            require(restored != null && "CANCELLED".equals(restored.status()), "STOCK_RESTORE_REQUIRED");
+        }
         transaction.executeWithoutResult(status -> {
             var ids = lockOrder(orderId);
             buyer(orderId, actor);
@@ -312,13 +346,35 @@ public class CustomerPaymentServiceImpl implements CustomerPaymentService {
                 repository.update("""
                         UPDATE cancellation SET status='APPROVED',decision_reason=?,cancelled_at=?
                         WHERE cancellation_id=?
-                        """, "Hủy ngay vì đơn chưa thanh toán", FinanceRepository.utc(Instant.now()), cancellation.id());
+                        """, system ? reason : "Hủy ngay vì đơn chưa thanh toán", FinanceRepository.utc(Instant.now()),
+                        cancellation.id());
                 repository.update("UPDATE seller_order SET status='CANCELLED' WHERE seller_order_id=?", id);
-                repository.event(id, "CANCELLATION_DECIDED", cancellation.id(),
-                        Long.toString(actor.userId()), "Unpaid retail order cancelled");
+                repository.event(id, "CANCELLATION_DECIDED", cancellation.id(), auditActor,
+                        retail ? "Unpaid retail order cancelled" : "Unpaid RFQ order cancelled");
             }
-            repository.update("UPDATE customer_order SET status='CANCELLED' WHERE order_id=?", orderId);
+            repository.update("UPDATE customer_order SET status='CANCELLED',stock_restored_at=? WHERE order_id=?",
+                    retail ? FinanceRepository.utc(Instant.now()) : null, orderId);
+            // The buyer cancelling their own order needs no notice; a timeout cancellation tells them why.
+            if (system) notifier.unpaidOrderCancelled(orderId, reason);
         });
+    }
+
+    /** Cancels every open PayOS link of the order; a link PayOS reports as paid is collected instead. */
+    private void cancelOpenLinks(long orderId, FinanceService.Actor actor) {
+        for (long id : repository.sellerOrderIds(orderId)) {
+            for (var payment : repository.payments(id)) {
+                if (payment.orderCode() != null && List.of("CREATING", "RECONCILING", "PENDING", "CANCELLING")
+                        .contains(payment.status())) {
+                    require(finance != null, "PAYOS_RECONCILIATION_UNAVAILABLE");
+                    finance.getObject().reconcile(payment.id(), actor, true);
+                }
+            }
+        }
+        var group = repository.customerPayments(orderId).stream().findFirst().orElse(null);
+        if (group != null && List.of("CREATING", "RECONCILING", "PENDING", "CANCELLING")
+                .contains(group.status())) {
+            reconcile(orderId, actor, true);
+        }
     }
 
     private void collect(CustomerPayment payment, String linkId, String reference, long amount) {
@@ -363,6 +419,7 @@ public class CustomerPaymentServiceImpl implements CustomerPaymentService {
                 UPDATE customer_payment SET status='SUCCESS',payment_link_id=?,transaction_ref=?,paid_at=?
                 WHERE customer_payment_id=?
                 """, linkId, reference, FinanceRepository.utc(Instant.now()), payment.id());
+        notifier.customerPaymentCollected(payment.id(), amount, items);
     }
 
     @org.springframework.scheduling.annotation.Scheduled(cron = "${commerce.cancellation.recovery-cron:*/30 * * * * *}")
@@ -373,6 +430,115 @@ public class CustomerPaymentServiceImpl implements CustomerPaymentService {
                         new FinanceService.Actor(0, repository.customerOrderOwner(orderId), null, false));
             } catch (RuntimeException failure) {
                 log.warn("Cancellation {} still requires reconciliation: {}", orderId, failure.getClass().getSimpleName());
+            }
+        }
+    }
+
+    /**
+     * A fully cancelled checkout returns its whole reservation (cancel-confirmed); otherwise each cancelled seller
+     * order returns exactly its own lines. Catalog excludes lines restored one by one from the whole cancellation, and
+     * restores nothing twice for the same restore key, so retries and both paths never return the same units twice.
+     */
+    @Override
+    public void restoreCancelledRetailStock(long orderId) {
+        String reservationKey = transaction.execute(status -> {
+            repository.lockCustomerOrder(orderId);
+            return repository.count("""
+                    SELECT COUNT(*) FROM customer_order WHERE order_id=? AND source_type='RETAIL'
+                    AND status='CANCELLED' AND stock_reservation_key IS NOT NULL AND stock_restored_at IS NULL
+                    """, orderId) == 1 ? repository.stockReservationKey(orderId) : null;
+        });
+        if (reservationKey == null) {
+            restoreCancelledSellerOrderLines(orderId);
+            return;
+        }
+        var restored = catalog == null ? null : catalog.cancelConfirmedStockReservation(reservationKey);
+        require(restored != null && "CANCELLED".equals(restored.status()), "STOCK_RESTORE_REQUIRED");
+        transaction.executeWithoutResult(status -> repository.update(
+                "UPDATE customer_order SET stock_restored_at=? WHERE order_id=? AND stock_restored_at IS NULL",
+                FinanceRepository.utc(Instant.now()), orderId));
+    }
+
+    private record LineRestore(long sellerOrderId, String reservationKey, StockRestoreRequest request) { }
+
+    /** Partially cancelled checkout: stamps seller_order.stock_restored_at once Catalog returned that order's lines. */
+    private void restoreCancelledSellerOrderLines(long orderId) {
+        List<LineRestore> pending = transaction.execute(status -> {
+            repository.lockCustomerOrder(orderId);
+            if (repository.count("""
+                    SELECT COUNT(*) FROM customer_order WHERE order_id=? AND source_type='RETAIL' AND status<>'CANCELLED'
+                    AND stock_reservation_key IS NOT NULL AND stock_restored_at IS NULL
+                    """, orderId) != 1) { return List.of(); }
+            String reservationKey = repository.stockReservationKey(orderId);
+            return repository.unrestoredCancelledSellerOrderIds(orderId).stream()
+                    .map(id -> new LineRestore(id, reservationKey, new StockRestoreRequest(reservationKey + "-so" + id,
+                            repository.sellerOrderStockLines(id).stream()
+                                    .map(line -> new StockReservationRequest.Line(line.variantId(), line.quantity()))
+                                    .toList())))
+                    .toList();
+        });
+        for (var restore : pending) {
+            if (!restore.request().lines().isEmpty()) {
+                var restored = catalog == null ? null
+                        : catalog.restoreStockReservationLines(restore.reservationKey(), restore.request());
+                require(restored != null && restore.request().restoreKey().equals(restored.restoreKey()),
+                        "STOCK_RESTORE_REQUIRED");
+            }
+            transaction.executeWithoutResult(status -> {
+                repository.lockCustomerOrder(orderId);
+                if (repository.update("""
+                        UPDATE seller_order SET stock_restored_at=? WHERE seller_order_id=? AND stock_restored_at IS NULL
+                        """, FinanceRepository.utc(Instant.now()), restore.sellerOrderId()) == 1
+                        && repository.hasContext(restore.sellerOrderId())) {
+                    repository.event(restore.sellerOrderId(), "STOCK_RESTORED", restore.sellerOrderId(), "SYSTEM",
+                            restore.request().restoreKey());
+                }
+            });
+        }
+    }
+
+    /** Retries Catalog restores (whole checkout or one seller order's lines) that failed after a cancellation. */
+    @org.springframework.scheduling.annotation.Scheduled(cron = "${commerce.cancellation.recovery-cron:*/30 * * * * *}")
+    public void recoverCancelledRetailStock() {
+        for (long orderId : repository.unrestoredCancelledRetailOrderIds()) {
+            try {
+                restoreCancelledRetailStock(orderId);
+            } catch (RuntimeException failure) {
+                log.warn("Stock of cancelled order {} still awaits Catalog restore: {}", orderId, failure.getMessage());
+            }
+        }
+    }
+
+    /** RFQ orders reserve no stock, so nothing else would ever release an order whose deposit never arrives. */
+    @org.springframework.scheduling.annotation.Scheduled(cron = "${commerce.rfq.deposit-timeout-cron:0 */5 * * * *}")
+    public void cancelOverdueRfqOrders() {
+        String reason = "Quá hạn đặt cọc " + depositTimeoutHours + " giờ";
+        for (long orderId : repository.overdueRfqOrderIds(Instant.now().minus(Duration.ofHours(depositTimeoutHours)))) {
+            try {
+                var system = new FinanceService.Actor(0, repository.customerOrderOwner(orderId), null, false);
+                // Settle open links before recording the cancellation: a deposit paid at the deadline is
+                // collected and the order proceeds, instead of being stuck as a paid cancellation request.
+                cancelOpenLinks(orderId, system);
+                cancelUnpaidOrder(orderId, reason, system, true);
+            } catch (RuntimeException failure) {
+                log.warn("Overdue RFQ order {} was not cancelled in this run: {}", orderId, failure.getMessage());
+            }
+        }
+    }
+
+    /** Retail checkout deducts stock at once: an order that is never paid must give that stock back. */
+    @org.springframework.scheduling.annotation.Scheduled(cron = "${commerce.retail.payment-timeout-cron:0 * * * * *}")
+    public void cancelOverdueRetailOrders() {
+        String reason = "Quá hạn thanh toán " + retailPaymentTimeoutMinutes + " phút";
+        for (long orderId : repository.overdueRetailOrderIds(
+                Instant.now().minus(Duration.ofMinutes(retailPaymentTimeoutMinutes)))) {
+            try {
+                var system = new FinanceService.Actor(0, repository.customerOrderOwner(orderId), null, false);
+                // A payment made at the deadline is collected and the order proceeds instead of being cancelled.
+                cancelOpenLinks(orderId, system);
+                cancelUnpaidOrder(orderId, reason, system, true);
+            } catch (RuntimeException failure) {
+                log.warn("Overdue retail order {} was not cancelled in this run: {}", orderId, failure.getMessage());
             }
         }
     }

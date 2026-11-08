@@ -11,7 +11,8 @@ import java.time.LocalDateTime;
 @Table(name = "cancellation")
 @AttributeOverride(name = "id", column = @Column(name = "cancellation_id"))
 public class CancellationEntity extends BaseCommerceEntity {
-    @Column(name = "seller_order_id", nullable = false, unique = true) private Long sellerOrderId;
+    // One REQUESTED/APPROVED case per seller order (filtered unique index, V11); rejected cases stay as history.
+    @Column(name = "seller_order_id", nullable = false) private Long sellerOrderId;
     @Column(name = "actor_type", nullable = false, length = 30) private String actorType;
     @Column(name = "actor_id_ref", nullable = false) private Long actorIdRef;
     @Column(name = "reason", nullable = false, length = 500) private String reason;

@@ -3,7 +3,9 @@ package mss.mooncake.catalogstore.controller;
 import io.swagger.v3.oas.annotations.Hidden;
 import jakarta.validation.Valid;
 import mss.mooncake.catalogstore.dto.request.StockReservationRequest;
+import mss.mooncake.catalogstore.dto.request.StockRestoreRequest;
 import mss.mooncake.catalogstore.dto.response.StockReservationResponse;
+import mss.mooncake.catalogstore.dto.response.StockRestoreResponse;
 import mss.mooncake.catalogstore.service.StockReservationService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -42,5 +44,12 @@ public class InternalStockReservationController {
     @PutMapping("/{reservationKey}/cancel-confirmed")
     public StockReservationResponse cancelConfirmed(@PathVariable String reservationKey) {
         return service.cancelConfirmed(reservationKey);
+    }
+
+    /** Partial cancellation: returns only the given confirmed lines to stock, once per restore key. */
+    @PutMapping("/{reservationKey}/restore-lines")
+    public StockRestoreResponse restoreLines(@PathVariable String reservationKey,
+            @Valid @RequestBody StockRestoreRequest request) {
+        return service.restoreLines(reservationKey, request);
     }
 }

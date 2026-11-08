@@ -24,12 +24,15 @@ import mss.mooncake.rfqnegotiation.entity.ConversationReadStateEntity;
 import mss.mooncake.rfqnegotiation.entity.MessageEntity;
 import mss.mooncake.rfqnegotiation.entity.RfqEntity;
 import mss.mooncake.rfqnegotiation.enums.ConversationStatus;
+import mss.mooncake.rfqnegotiation.enums.QuotationStatus;
 import mss.mooncake.rfqnegotiation.enums.RfqAudience;
 import mss.mooncake.rfqnegotiation.enums.RfqStatus;
 import mss.mooncake.rfqnegotiation.exception.ApiException;
+import mss.mooncake.rfqnegotiation.notification.RfqNotifier;
 import mss.mooncake.rfqnegotiation.repository.ConversationReadStateRepository;
 import mss.mooncake.rfqnegotiation.repository.ConversationRepository;
 import mss.mooncake.rfqnegotiation.repository.MessageRepository;
+import mss.mooncake.rfqnegotiation.repository.QuotationRepository;
 import mss.mooncake.rfqnegotiation.repository.RfqRepository;
 import mss.mooncake.rfqnegotiation.repository.RfqTargetStoreRepository;
 import mss.mooncake.rfqnegotiation.security.ActorContext;
@@ -49,21 +52,26 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
     private final ConversationReadStateRepository reads;
     private final RfqRepository rfqs;
     private final RfqTargetStoreRepository targets;
+    private final QuotationRepository quotations;
     private final ActorContext actor;
     private final IdentityServiceClient identity;
     private final ApplicationEventPublisher events;
+    private final RfqNotifier notifier;
 
     public ConversationApplicationServiceImpl(ConversationRepository conversations, MessageRepository messages,
             ConversationReadStateRepository reads, RfqRepository rfqs, RfqTargetStoreRepository targets,
-            ActorContext actor, IdentityServiceClient identity, ApplicationEventPublisher events) {
+            QuotationRepository quotations, ActorContext actor, IdentityServiceClient identity, ApplicationEventPublisher events,
+            RfqNotifier notifier) {
         this.conversations = conversations;
         this.messages = messages;
         this.reads = reads;
         this.rfqs = rfqs;
         this.targets = targets;
+        this.quotations = quotations;
         this.actor = actor;
         this.identity = identity;
         this.events = events;
+        this.notifier = notifier;
     }
 
     @Override
@@ -100,8 +108,10 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
         if (!"VERIFIED".equals(supplier.verificationStatus())) {
             throw ApiException.conflict("SUPPLIER_NOT_VERIFIED", "Nhà cung cấp chưa được xác minh nên chưa thể mở hội thoại");
         }
-        if (rfq.getStatus() != RfqStatus.OPEN || (rfq.getExpiresAt() != null
-                && !rfq.getExpiresAt().isAfter(LocalDateTime.now(ZoneOffset.UTC)))) {
+        // After intake ends, a supplier whose quotation was accepted still needs a channel for delivery details.
+        boolean accepted = quotations.existsByRfqIdAndSupplierIdRefAndStatus(rfqId, supplierId, QuotationStatus.ACCEPTED);
+        if (!accepted && (rfq.getStatus() != RfqStatus.OPEN || (rfq.getExpiresAt() != null
+                && !rfq.getExpiresAt().isAfter(LocalDateTime.now(ZoneOffset.UTC))))) {
             throw ApiException.conflict("RFQ_NOT_OPEN", "Chỉ mở hội thoại mới khi RFQ đang nhận trao đổi");
         }
         var conversation = new ConversationEntity();
@@ -168,7 +178,7 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
         // One conversation lock protects dedup across concurrent sessions; the DB unique is the final guard.
         var conversation = conversations.findByIdForUpdate(conversationId)
                 .orElseThrow(() -> ApiException.notFound("CONVERSATION_NOT_FOUND", "Không tìm thấy hội thoại"));
-        requireParticipant(conversation, userId);
+        var sender = requireParticipant(conversation, userId);
         var existing = messages.findByConversationIdAndSenderUserIdRefAndClientMessageId(
                 conversationId, userId, request.clientMessageId());
         if (existing.isPresent()) {
@@ -193,6 +203,9 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
         message.setSentAt(LocalDateTime.now(ZoneOffset.UTC).withNano(0));
         var response = toResponse(messages.saveAndFlush(message));
         events.publishEvent(new MessagePersistedEvent(response));
+        Long recipientLastRead = reads.findFirstByConversationIdAndUserIdRefNotOrderByLastReadMessageIdDesc(conversationId, userId)
+                .map(ConversationReadStateEntity::getLastReadMessageId).orElse(null);
+        notifier.chatMessage(conversation, sender.buyer(), sender.displayName(), request.content(), recipientLastRead);
         return response;
     }
 
@@ -231,15 +244,19 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
                 .orElseThrow(() -> ApiException.notFound("CONVERSATION_NOT_FOUND", "Không tìm thấy hội thoại"));
     }
 
-    private void requireParticipant(ConversationEntity conversation, Long userId) {
+    /** Which side the user is on, and the name the other side knows them by. */
+    private record Participant(boolean buyer, String displayName) { }
+
+    private Participant requireParticipant(ConversationEntity conversation, Long userId) {
         if (userId == null) throw ApiException.forbidden("NOT_CONVERSATION_PARTICIPANT", "Bạn không thuộc hội thoại này");
         try {
             var user = identity.getUserSummary(userId);
             if (user == null || !Objects.equals(user.userId(), userId)) {
                 throw ApiException.unavailable("IDENTITY_UNAVAILABLE", "Không xác minh được tài khoản");
             }
-            if (Objects.equals(user.customerId(), conversation.getCustomerIdRef())) return;
-            if (Objects.equals(requireSupplier(conversation.getSupplierIdRef()).userId(), userId)) return;
+            if (Objects.equals(user.customerId(), conversation.getCustomerIdRef())) return new Participant(true, user.fullName());
+            var supplier = requireSupplier(conversation.getSupplierIdRef());
+            if (Objects.equals(supplier.userId(), userId)) return new Participant(false, supplier.companyName());
         } catch (FeignException ex) {
             throw ApiException.unavailable("IDENTITY_UNAVAILABLE", "Không xác minh được quyền hội thoại");
         }

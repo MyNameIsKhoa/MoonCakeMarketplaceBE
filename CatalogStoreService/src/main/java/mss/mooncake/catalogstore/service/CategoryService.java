@@ -1,5 +1,6 @@
 package mss.mooncake.catalogstore.service;
 
+import java.util.List;
 import mss.mooncake.catalogstore.dto.request.CreateCategoryRequest;
 import mss.mooncake.catalogstore.dto.request.UpdateCategoryRequest;
 import mss.mooncake.catalogstore.dto.response.CategoryResponse;
@@ -22,6 +23,12 @@ public interface CategoryService {
      * CA02 — chi tiết danh mục ACTIVE; INACTIVE hoặc không tồn tại trả 404.
      */
     CategoryResponse getCategory(Long categoryId);
+
+    /** Admin — mọi danh mục ở mọi trạng thái (danh sách phẳng, có parentCategoryId để dựng cây). */
+    List<CategoryResponse> getAllCategoriesForAdmin();
+
+    /** Admin — chi tiết danh mục bất kể trạng thái; không tồn tại trả 404. */
+    CategoryResponse getCategoryForAdmin(Long categoryId);
 
     /**
      * CA03 — tạo danh mục ACTIVE. Slug trùng trả 409; parent phải tồn tại.

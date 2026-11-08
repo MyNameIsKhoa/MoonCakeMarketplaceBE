@@ -47,6 +47,8 @@ class QuotationManagementIntegrationTest {
     @Autowired private QuotationConversionRepository conversions;
     @MockitoBean private ActorContext actor;
     @MockitoBean private CatalogServiceClient catalog;
+    // Quotations notify the buyer through Identity; keep the test off the network.
+    @MockitoBean private mss.mooncake.rfqnegotiation.client.IdentityServiceClient identity;
     private Long rfqId;
 
     @BeforeEach
@@ -60,6 +62,7 @@ class QuotationManagementIntegrationTest {
         rfqs.deleteAll();
         when(actor.userId()).thenReturn(10L);
         when(actor.supplierId()).thenReturn(20L);
+        when(actor.verifiedSupplierId()).thenReturn(20L);
         when(catalog.getStoreSummary(30L)).thenReturn(new StoreSummaryResponse(30L, 20L, "STORE-30", "Shop", "shop", null, "ACTIVE"));
         var rfq = new RfqEntity();
         rfq.setRfqCode("RFQ-MANAGEMENT-TEST");

@@ -1,6 +1,7 @@
 package mss.mooncake.catalogstore.service.impl;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import mss.mooncake.catalogstore.dto.request.CreateCategoryRequest;
 import mss.mooncake.catalogstore.dto.request.UpdateCategoryRequest;
@@ -15,6 +16,7 @@ import mss.mooncake.catalogstore.repository.CategoryRepository;
 import mss.mooncake.catalogstore.service.CategoryService;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -96,6 +98,20 @@ public class CategoryServiceImpl implements CategoryService {
     @Override
     public CategoryResponse getCategory(Long categoryId) {
         return toResponse(requireActive(categoryId));
+    }
+
+    @Override
+    public List<CategoryResponse> getAllCategoriesForAdmin() {
+        return categoryRepository.findAll(Sort.by("name").and(Sort.by("id"))).stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Override
+    public CategoryResponse getCategoryForAdmin(Long categoryId) {
+        return categoryRepository.findById(categoryId)
+                .map(this::toResponse)
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy danh mục với id: " + categoryId));
     }
 
     @Override

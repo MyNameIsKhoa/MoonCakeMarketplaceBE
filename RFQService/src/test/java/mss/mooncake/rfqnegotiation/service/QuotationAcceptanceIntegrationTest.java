@@ -153,6 +153,7 @@ class QuotationAcceptanceIntegrationTest {
     }
     @Test void acceptsSeveralQuotationsOfOneRfqAsSeparateOrdersWithDistinctKeys() {
         var first=quotations.findById(id).orElseThrow();
+        var rfq=rfqs.findById(first.getRfqId()).orElseThrow(); rfq.setQuantity(15); rfqs.save(rfq);
         var other=new QuotationEntity(); other.setRfqId(first.getRfqId()); other.setSupplierIdRef(203L); other.setStoreIdRef(402L);
         other.setVersionNo(1); other.setTotalAmount(new BigDecimal("550.00")); other.setDepositPercent(new BigDecimal("30.00"));
         other.setShippingFee(new BigDecimal("50.00")); other.setValidUntil(first.getValidUntil());
@@ -172,5 +173,147 @@ class QuotationAcceptanceIntegrationTest {
         assertThat(conversions.count()).isEqualTo(2);
         assertThat(quotations.findAllById(List.of(id,other.getId()))).extracting("status")
                 .containsOnly(QuotationStatus.ACCEPTED);
+    }
+
+    @Test void acceptsSeveralQuotationsOnlyUpToTheRfqQuantity() {
+        Long six=quotation(203L,402L,6), five=quotation(204L,403L,5);
+        service.acceptQuotation(six,new AcceptQuotationRequest(1,301L),"accept-six");
+        var rfq=rfqs.findById(rfqId()).orElseThrow();
+        assertThat(rfq.getStatus()).isEqualTo(RfqStatus.OPEN);
+        assertThat(quotations.findById(id).orElseThrow().getStatus()).isEqualTo(QuotationStatus.SUBMITTED);
+        assertThatThrownBy(()->service.acceptQuotation(five,new AcceptQuotationRequest(1,301L),"accept-five"))
+                .isInstanceOf(ApiException.class).extracting("code").isEqualTo("RFQ_QUANTITY_EXCEEDED");
+        assertThat(conversions.findByQuotationId(five)).isEmpty();
+    }
+    @Test void reachingTheRfqQuantityClosesItAndDeclinesTheOtherQuotations() {
+        Long other=quotation(203L,402L,4);
+        service.acceptQuotation(id,new AcceptQuotationRequest(1,301L),"accept-all");
+        var rfq=rfqs.findById(rfqId()).orElseThrow();
+        assertThat(rfq.getStatus()).isEqualTo(RfqStatus.CLOSED);
+        assertThat(rfq.isAutoClosed()).isTrue();
+        var declined=quotations.findById(other).orElseThrow();
+        assertThat(declined.getStatus()).isEqualTo(QuotationStatus.REJECTED);
+        assertThat(declined.getDecisionReason()).contains("đủ số lượng");
+    }
+    @Test void cancelledOrderMarksTheQuotationAndReopensTheAutoClosedRfq() {
+        service.acceptQuotation(id,new AcceptQuotationRequest(1,301L),"accept-then-cancel");
+        when(commerce.getOrderByQuotation(id)).thenReturn(new OrderResponse(501L,"CANCELLED",601L,id,1));
+        service.syncAcceptedOrders();
+        assertThat(quotations.findById(id).orElseThrow().getStatus()).isEqualTo(QuotationStatus.ORDER_CANCELLED);
+        var rfq=rfqs.findById(rfqId()).orElseThrow();
+        assertThat(rfq.getStatus()).isEqualTo(RfqStatus.OPEN);
+        assertThat(rfq.isAutoClosed()).isFalse();
+        Long next=quotation(203L,402L,10);
+        assertThat(service.acceptQuotation(next,new AcceptQuotationRequest(1,301L),"accept-next").conversionStatus()).isEqualTo("COMPLETED");
+    }
+    @Test void syncLeavesLiveOrdersAndBuyerClosedRfqsAlone() {
+        service.acceptQuotation(id,new AcceptQuotationRequest(1,301L),"accept-live");
+        when(commerce.getOrderByQuotation(id)).thenReturn(new OrderResponse(501L,"AWAITING_DEPOSIT",601L,id,1));
+        service.syncAcceptedOrders();
+        assertThat(quotations.findById(id).orElseThrow().getStatus()).isEqualTo(QuotationStatus.ACCEPTED);
+        var rfq=rfqs.findById(rfqId()).orElseThrow(); rfq.setAutoClosed(false); rfqs.save(rfq);
+        when(commerce.getOrderByQuotation(id)).thenReturn(new OrderResponse(501L,"CANCELLED",601L,id,1));
+        service.syncAcceptedOrders();
+        assertThat(quotations.findById(id).orElseThrow().getStatus()).isEqualTo(QuotationStatus.ORDER_CANCELLED);
+        assertThat(rfqs.findById(rfqId()).orElseThrow().getStatus()).isEqualTo(RfqStatus.CLOSED);
+    }
+
+    @Test void unknownAddressIsReportedAsNotFound() {
+        when(identity.getAddressSummary(999L)).thenThrow(feignError(404));
+        assertThatThrownBy(()->service.acceptQuotation(id,new AcceptQuotationRequest(1,999L),"no-address"))
+                .isInstanceOf(ApiException.class).extracting("code").isEqualTo("ADDRESS_NOT_FOUND");
+    }
+    @Test void buyerCannotAcceptAQuotationFromTheirOwnSupplierAccount() {
+        when(identity.getSupplierSummary(202L)).thenReturn(new SupplierSummaryResponse(202L,11L,"Self","TAX","VERIFIED"));
+        assertThatThrownBy(()->service.acceptQuotation(id,new AcceptQuotationRequest(1,301L),"self"))
+                .isInstanceOf(ApiException.class).extracting("code").isEqualTo("SELF_DEALING");
+        verifyNoInteractions(commerce);
+    }
+    @Test void reopeningRestoresQuotationsDeclinedForQuantityAndReportsTheOrderStatus() {
+        Long other=quotation(203L,402L,4);
+        service.acceptQuotation(id,new AcceptQuotationRequest(1,301L),"accept-full");
+        assertThat(quotations.findById(other).orElseThrow().getStatus()).isEqualTo(QuotationStatus.REJECTED);
+        when(commerce.getOrderByQuotation(id)).thenReturn(new OrderResponse(501L,"CANCELLED",601L,id,1));
+        service.syncAcceptedOrders();
+        var restored=quotations.findById(other).orElseThrow();
+        assertThat(restored.getStatus()).isEqualTo(QuotationStatus.SUBMITTED);
+        assertThat(restored.getDecisionReason()).isNull();
+        assertThat(service.getOrderLink(id).orderStatus()).isEqualTo("CANCELLED");
+    }
+    @Test void quotationOfASuspendedSupplierCannotBeAccepted() {
+        when(identity.getSupplierSummary(202L)).thenReturn(new SupplierSummaryResponse(202L,22L,"Supplier","TAX","SUSPENDED"));
+        assertThatThrownBy(()->service.acceptQuotation(id,new AcceptQuotationRequest(1,301L),"suspended"))
+                .isInstanceOf(ApiException.class).extracting("code").isEqualTo("SUPPLIER_NOT_VERIFIED");
+        assertThat(conversions.count()).isZero();
+        verifyNoInteractions(commerce);
+    }
+
+    @Test void acceptedQuotationNotifiesItsSupplierAndTheDeclinedOnesOnce() {
+        Long other=quotation(203L,402L,4);
+        service.acceptQuotation(id,new AcceptQuotationRequest(1,301L),"accept-notify");
+        var sent=sentNotifications();
+        assertThat(sent).filteredOn(n -> "QUOTATION_ACCEPTED".equals(n.type())).singleElement().satisfies(n -> {
+            assertThat(n.supplierId()).isEqualTo(202L);
+            assertThat(n.target()).containsEntry("kind","ORDER").containsEntry("id","601").containsEntry("role","SELLER");
+        });
+        assertThat(sent).filteredOn(n -> "QUOTATION_NOT_SELECTED".equals(n.type()))
+                .extracting(CreateNotificationRequest::supplierId).containsExactly(203L);
+        assertThat(quotations.findById(other).orElseThrow().getStatus()).isEqualTo(QuotationStatus.REJECTED);
+        // Replaying the same acceptance tells nobody again.
+        service.acceptQuotation(id,new AcceptQuotationRequest(1,301L),"accept-notify");
+        assertThat(sentNotifications()).hasSize(sent.size());
+    }
+    @Test void notificationFailureNeverBreaksTheAcceptance() {
+        doThrow(new IllegalStateException("identity down")).when(identity).createNotification(any());
+        var accepted=service.acceptQuotation(id,new AcceptQuotationRequest(1,301L),"accept-identity-down");
+        assertThat(accepted.conversionStatus()).isEqualTo("COMPLETED");
+        assertThat(quotations.findById(id).orElseThrow().getStatus()).isEqualTo(QuotationStatus.ACCEPTED);
+        verify(identity,atLeastOnce()).createNotification(any());
+    }
+    @Test void cancelledOrderFoundBySyncNotifiesBuyerAndSupplierOnce() {
+        service.acceptQuotation(id,new AcceptQuotationRequest(1,301L),"accept-cancel-notify");
+        clearInvocations(identity);
+        when(commerce.getOrderByQuotation(id)).thenReturn(new OrderResponse(501L,"CANCELLED",601L,id,1));
+        service.syncAcceptedOrders();
+        service.syncAcceptedOrders();
+        var sent=sentNotifications();
+        assertThat(sent).extracting(CreateNotificationRequest::type).containsOnly("ORDER_CANCELLED");
+        assertThat(sent).hasSize(2);
+        assertThat(sent).filteredOn(n -> n.customerId()!=null).singleElement().satisfies(n -> {
+            assertThat(n.customerId()).isEqualTo(101L);
+            assertThat(n.target()).containsEntry("kind","ORDER").containsEntry("id","501");
+        });
+        assertThat(sent).filteredOn(n -> n.supplierId()!=null).singleElement()
+                .satisfies(n -> assertThat(n.target()).containsEntry("id","601").containsEntry("role","SELLER"));
+    }
+    @Test void failedConversionNotifiesNobody() {
+        when(commerce.createOrderFromAcceptedQuotation(any())).thenThrow(feignError(409));
+        when(commerce.getOrderByQuotation(id)).thenThrow(feignError(404));
+        assertThatThrownBy(()->service.acceptQuotation(id,new AcceptQuotationRequest(1,301L),"accept-refused-notify"))
+                .isInstanceOf(ApiException.class);
+        verify(identity,never()).createNotification(any());
+    }
+
+    private List<CreateNotificationRequest> sentNotifications() {
+        var captor=org.mockito.ArgumentCaptor.forClass(CreateNotificationRequest.class);
+        verify(identity,atLeast(0)).createNotification(captor.capture());
+        return captor.getAllValues();
+    }
+    private Long rfqId() { return quotations.findById(id).orElseThrow().getRfqId(); }
+    /** Another store's SUBMITTED quotation of `quantity` units at 100 each plus 50 shipping. */
+    private Long quotation(long supplierId, long storeId, int quantity) {
+        var first=quotations.findById(id).orElseThrow();
+        var q=new QuotationEntity(); q.setRfqId(first.getRfqId()); q.setSupplierIdRef(supplierId); q.setStoreIdRef(storeId);
+        q.setVersionNo(1); q.setTotalAmount(BigDecimal.valueOf(quantity*100L+50).setScale(2)); q.setDepositPercent(new BigDecimal("30.00"));
+        q.setShippingFee(new BigDecimal("50.00")); q.setValidUntil(first.getValidUntil());
+        q.setProposedDeliveryDate(first.getProposedDeliveryDate()); q.setStatus(QuotationStatus.SUBMITTED); quotations.save(q);
+        var line=new QuotationItemEntity(); line.setQuotationId(q.getId()); line.setItemNameSnapshot("Bánh "+quantity); line.setQuantity(quantity);
+        line.setUnitPrice(new BigDecimal("100.00")); line.setDiscountAmount(BigDecimal.ZERO); line.setSubtotal(BigDecimal.valueOf(quantity*100L).setScale(2)); items.save(line);
+        when(identity.getSupplierSummary(supplierId)).thenReturn(new SupplierSummaryResponse(supplierId,supplierId-180,"Supplier "+supplierId,"TAX"+supplierId,"VERIFIED"));
+        when(catalog.getStoreSummary(storeId)).thenReturn(new StoreSummaryResponse(storeId,supplierId,"STORE"+storeId,"Shop "+storeId,"shop-"+storeId,null,"ACTIVE"));
+        Long quotationId=q.getId();
+        when(commerce.createOrderFromAcceptedQuotation(argThat(r -> r!=null && quotationId.equals(r.quotationId()))))
+                .thenReturn(new OrderResponse(500L+quotationId,"AWAITING_DEPOSIT",600L+quotationId,quotationId,1));
+        return quotationId;
     }
 }

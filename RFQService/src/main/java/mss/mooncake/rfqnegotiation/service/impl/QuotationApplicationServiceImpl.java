@@ -19,6 +19,7 @@ import mss.mooncake.rfqnegotiation.dto.response.QuotationAcceptedResponse;
 import mss.mooncake.rfqnegotiation.entity.*;
 import mss.mooncake.rfqnegotiation.enums.*;
 import mss.mooncake.rfqnegotiation.exception.ApiException;
+import mss.mooncake.rfqnegotiation.notification.RfqNotifier;
 import mss.mooncake.rfqnegotiation.repository.*;
 import mss.mooncake.rfqnegotiation.security.ActorContext;
 import mss.mooncake.rfqnegotiation.service.QuotationApplicationService;
@@ -34,6 +35,7 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 public class QuotationApplicationServiceImpl implements QuotationApplicationService {
     private static final Logger log = LoggerFactory.getLogger(QuotationApplicationServiceImpl.class);
+    private static final String DECLINED_FULL = "Không được chọn: yêu cầu báo giá đã đủ số lượng";
     private final RfqRepository rfqs;
     private final QuotationRepository quotations;
     private final QuotationItemRepository items;
@@ -45,14 +47,16 @@ public class QuotationApplicationServiceImpl implements QuotationApplicationServ
     private final ObjectMapper json;
     private final Validator validator;
     private final TransactionTemplate tx;
+    private final RfqNotifier notifier;
 
     public QuotationApplicationServiceImpl(RfqRepository rfqs, QuotationRepository quotations,
             QuotationItemRepository items, QuotationConversionRepository conversions, ActorContext actor,
             IdentityServiceClient identity, CatalogServiceClient catalog, CommerceServiceClient commerce,
-            ObjectMapper json, Validator validator, PlatformTransactionManager transactionManager) {
+            ObjectMapper json, Validator validator, PlatformTransactionManager transactionManager, RfqNotifier notifier) {
         this.rfqs=rfqs; this.quotations=quotations; this.items=items; this.conversions=conversions;
         this.actor=actor; this.identity=identity; this.catalog=catalog; this.commerce=commerce;
         this.json=json; this.validator=validator; this.tx=new TransactionTemplate(transactionManager);
+        this.notifier=notifier;
     }
 
     @Override public QuotationAcceptedResponse acceptQuotation(Long id, AcceptQuotationRequest request, String key) {
@@ -84,6 +88,10 @@ public class QuotationApplicationServiceImpl implements QuotationApplicationServ
             if (!Objects.equals(q.getVersionNo(),request.expectedVersion())) throw ApiException.conflict("QUOTATION_VERSION_CONFLICT", "Phiên bản báo giá không khớp");
             if (rfq.getStatus()!=RfqStatus.OPEN && rfq.getStatus()!=RfqStatus.CLOSED) throw ApiException.conflict("RFQ_NOT_ACCEPTABLE", "RFQ đã hủy hoặc chưa được công bố");
             if (q.getStatus()!=QuotationStatus.SUBMITTED || !q.getValidUntil().isAfter(now)) throw ApiException.conflict("QUOTATION_NOT_ACCEPTABLE", "Báo giá không còn được chấp nhận");
+            // Several quotations may be accepted, but together never more units than the RFQ asked for.
+            long committed=conversions.committedQuantity(rfq.getId()), wanted=items.quantityOf(q.getId());
+            if (committed+wanted>rfq.getQuantity()) throw ApiException.conflict("RFQ_QUANTITY_EXCEEDED",
+                    "Vượt số lượng của yêu cầu báo giá: đã chốt "+committed+"/"+rfq.getQuantity()+", báo giá này thêm "+wanted+".");
             var snapshot=makeSnapshot(rfq,q,snapshotData,"quotation-v1-"+id,now);
             if (!validator.validate(snapshot).isEmpty()) throw ApiException.unavailable("INVALID_ACCEPTANCE_SNAPSHOT", "Dữ liệu báo giá hoặc địa chỉ chưa đáp ứng hợp đồng tạo đơn");
             var saved=new QuotationConversionEntity(); saved.setQuotationId(id); saved.setCustomerIdRef(customerId);
@@ -101,11 +109,15 @@ public class QuotationApplicationServiceImpl implements QuotationApplicationServ
 
     private SnapshotData loadSnapshotData(QuotationEntity q, Long customerId, Long addressId) {
         try {
-            var address=identity.getAddressSummary(addressId);
+            AddressSummaryResponse address;
+            try { address=identity.getAddressSummary(addressId); }
+            catch (FeignException.NotFound missing) { throw ApiException.notFound("ADDRESS_NOT_FOUND", "Không tìm thấy địa chỉ giao hàng"); }
             if (address==null || !Objects.equals(address.addressId(),addressId) || !Objects.equals(address.customerId(),customerId)) throw ApiException.forbidden("ADDRESS_NOT_OWNED", "Địa chỉ không thuộc người mua");
             var store=catalog.getStoreSummary(q.getStoreIdRef());
             var supplier=identity.getSupplierSummary(q.getSupplierIdRef());
             if (store==null || supplier==null || !Objects.equals(store.storeId(),q.getStoreIdRef()) || !Objects.equals(store.supplierIdRef(),q.getSupplierIdRef()) || !Objects.equals(supplier.supplierId(),q.getSupplierIdRef()) || !"ACTIVE".equals(store.status())) throw ApiException.conflict("STORE_NOT_AVAILABLE", "Cửa hàng không còn hợp lệ");
+            if (Objects.equals(supplier.userId(),actor.userId())) throw ApiException.forbidden("SELF_DEALING", "Không thể chấp nhận báo giá của chính tài khoản nhà cung cấp của bạn");
+            if (!"VERIFIED".equals(supplier.verificationStatus())) throw ApiException.conflict("SUPPLIER_NOT_VERIFIED", "Nhà cung cấp đang bị khóa hoặc chưa được xác minh nên không thể chốt báo giá này");
             return new SnapshotData(store,supplier,address);
         } catch (FeignException ex) { throw ApiException.unavailable("SNAPSHOT_UNAVAILABLE", "Không lấy được dữ liệu địa chỉ/cửa hàng; hãy thử lại"); }
     }
@@ -153,7 +165,7 @@ public class QuotationApplicationServiceImpl implements QuotationApplicationServ
             final OrderResponse committed=order;
             return tx.execute(s -> {
                 var q0=quotation(intent.getQuotationId());
-                rfqs.findByIdForUpdate(q0.getRfqId()).orElseThrow();
+                var rfq=rfqs.findByIdForUpdate(q0.getRfqId()).orElseThrow();
                 var q=quotations.findByIdForUpdate(q0.getId()).orElseThrow();
                 var saved=conversions.findByQuotationId(q.getId()).orElseThrow();
                 if (!"COMPLETED".equals(saved.getStatus())) {
@@ -161,6 +173,8 @@ public class QuotationApplicationServiceImpl implements QuotationApplicationServ
                     saved.setStatus("COMPLETED"); saved.setUpdatedAt(now());
                     q.setStatus(QuotationStatus.ACCEPTED); q.setAcceptedAt(saved.getAcceptedAt());
                     quotations.save(q); conversions.save(saved);
+                    closeWhenFull(rfq);
+                    notifier.quotationAccepted(rfq,q,saved);
                 }
                 return saved;
             });
@@ -200,6 +214,50 @@ public class QuotationApplicationServiceImpl implements QuotationApplicationServ
     @Override public void recoverPendingConversions() {
         for (var intent:conversions.findByStatusOrderByUpdatedAtAsc("PENDING",PageRequest.of(0,50))) resolve(intent,true);
     }
+    @Override public void syncAcceptedOrders() {
+        for (var conversion:conversions.findOrdersToSync(PageRequest.of(0,50))) {
+            OrderResponse order;
+            try { order=commerce.getOrderByQuotation(conversion.getQuotationId()); }
+            catch (RuntimeException unavailable) {
+                log.warn("Order status of quotation {} unavailable; failureType={}", conversion.getQuotationId(), unavailable.getClass().getSimpleName());
+                continue;
+            }
+            if (order==null || order.status()==null) continue;
+            tx.executeWithoutResult(s -> applyOrderStatus(conversion.getQuotationId(), order.status()));
+        }
+    }
+
+    /** A cancelled order frees its quantity; an RFQ the system closed for being full reopens. */
+    private void applyOrderStatus(Long quotationId, String orderStatus) {
+        var rfq=rfqs.findByIdForUpdate(quotation(quotationId).getRfqId()).orElseThrow();
+        var q=quotations.findByIdForUpdate(quotationId).orElseThrow();
+        var saved=conversions.findByQuotationId(quotationId).orElseThrow();
+        saved.setOrderStatus(orderStatus); saved.setOrderCheckedAt(now()); conversions.save(saved);
+        if (!"CANCELLED".equals(orderStatus) || q.getStatus()!=QuotationStatus.ACCEPTED) return;
+        q.setStatus(QuotationStatus.ORDER_CANCELLED); quotations.save(q);
+        notifier.orderCancelled(rfq,q,saved);
+        if (rfq.isAutoClosed() && rfq.getStatus()==RfqStatus.CLOSED && conversions.committedQuantity(rfq.getId())<rfq.getQuantity()) {
+            rfq.setStatus(RfqStatus.OPEN); rfq.setAutoClosed(false); rfqs.save(rfq);
+            // Quotations declined only because the RFQ was full compete again while still valid.
+            for (var declined:quotations.findByRfqIdAndStatus(rfq.getId(),QuotationStatus.REJECTED)) {
+                if (!DECLINED_FULL.equals(declined.getDecisionReason()) || !declined.getValidUntil().isAfter(now())) continue;
+                declined.setStatus(QuotationStatus.SUBMITTED); declined.setDecisionReason(null); quotations.save(declined);
+            }
+        }
+    }
+
+    /** Runs under the RFQ lock once an acceptance completes. */
+    private void closeWhenFull(RfqEntity rfq) {
+        if (conversions.committedQuantity(rfq.getId())<rfq.getQuantity()) return;
+        if (rfq.getStatus()==RfqStatus.OPEN) { rfq.setStatus(RfqStatus.CLOSED); rfq.setAutoClosed(true); rfqs.save(rfq); }
+        for (var other:quotations.findByRfqIdAndStatus(rfq.getId(),QuotationStatus.SUBMITTED)) {
+            if (conversions.existsByQuotationIdAndStatusNot(other.getId(),"FAILED")) continue;
+            other.setStatus(QuotationStatus.REJECTED);
+            other.setDecisionReason(DECLINED_FULL);
+            quotations.save(other);
+            notifier.quotationNotSelected(rfq,other);
+        }
+    }
     private QuotationEntity quotation(Long id) { return quotations.findById(id).orElseThrow(() -> ApiException.notFound("QUOTATION_NOT_FOUND", "Không tìm thấy báo giá")); }
     private void assertSameIntent(QuotationConversionEntity saved,String key,String hash) {
         if (!saved.getIdempotencyKey().equals(key) || !saved.getRequestHash().equals(hash)) throw ApiException.conflict("IDEMPOTENCY_CONFLICT", "Báo giá đã có yêu cầu chấp nhận khác");
@@ -208,7 +266,7 @@ public class QuotationApplicationServiceImpl implements QuotationApplicationServ
     private QuotationAcceptedResponse response(QuotationConversionEntity c) {
         var q=quotation(c.getQuotationId());
         return new QuotationAcceptedResponse(q.getId().toString(),q.getRfqId().toString(),c.getCustomerIdRef().toString(),q.getSupplierIdRef().toString(),q.getStoreIdRef().toString(),q.getVersionNo(),
-                c.getOrderIdRef()==null?null:c.getOrderIdRef().toString(),c.getSellerOrderIdRef()==null?null:c.getSellerOrderIdRef().toString(),c.getStatus());
+                c.getOrderIdRef()==null?null:c.getOrderIdRef().toString(),c.getSellerOrderIdRef()==null?null:c.getSellerOrderIdRef().toString(),c.getStatus(),c.getOrderStatus());
     }
     private static LocalDateTime now() { return LocalDateTime.now(ZoneOffset.UTC).truncatedTo(ChronoUnit.SECONDS); }
     private static String hash(String text) {

@@ -37,6 +37,7 @@ import mss.mooncake.rfqnegotiation.enums.QuotationStatus;
 import mss.mooncake.rfqnegotiation.enums.RfqAudience;
 import mss.mooncake.rfqnegotiation.enums.RfqStatus;
 import mss.mooncake.rfqnegotiation.exception.ApiException;
+import mss.mooncake.rfqnegotiation.notification.RfqNotifier;
 import mss.mooncake.rfqnegotiation.repository.QuotationCommandRepository;
 import mss.mooncake.rfqnegotiation.repository.QuotationConversionRepository;
 import mss.mooncake.rfqnegotiation.repository.QuotationItemRepository;
@@ -66,11 +67,13 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
     private final CatalogServiceClient catalog;
     private final ActorContext actor;
     private final TransactionTemplate transaction;
+    private final RfqNotifier notifier;
 
     public QuotationManagementServiceImpl(RfqRepository rfqs, QuotationRepository quotations,
             QuotationItemRepository items, QuotationCommandRepository commands,
             QuotationConversionRepository conversions, RfqTargetStoreRepository targets,
-            CatalogServiceClient catalog, ActorContext actor, PlatformTransactionManager transactionManager) {
+            CatalogServiceClient catalog, ActorContext actor, PlatformTransactionManager transactionManager,
+            RfqNotifier notifier) {
         this.rfqs = rfqs;
         this.quotations = quotations;
         this.items = items;
@@ -80,6 +83,7 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
         this.catalog = catalog;
         this.actor = actor;
         this.transaction = new TransactionTemplate(transactionManager);
+        this.notifier = notifier;
     }
 
     @Override
@@ -89,7 +93,7 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
         String hash = hash(request);
         Optional<QuotationResponse> replay = replay(userId, "CREATE", rfqId, key, hash);
         if (replay.isPresent()) return replay.get();
-        Long supplierId = actor.supplierId();
+        Long supplierId = actor.verifiedSupplierId();
         PreparedQuotation prepared = prepare(request, supplierId);
 
         // Remote validation finishes before taking the RFQ lock. All local writes commit together.
@@ -102,12 +106,16 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
                 throw ApiException.forbidden("STORE_NOT_TARGETED", "Cửa hàng này không được mời báo giá cho yêu cầu");
             }
             ensureOpen(rfq);
+            ensureNotSelfDealing(rfq);
+            ensureWithinRfqQuantity(rfq, prepared);
             var latest = quotations.findFirstByRfqIdAndStoreIdRefOrderByVersionNoDesc(rfqId, request.storeId());
             if (latest.isPresent() && latest.get().getStatus() == QuotationStatus.SUBMITTED) {
                 throw ApiException.conflict("QUOTATION_REVISION_REQUIRED", "Cửa hàng đã có báo giá đang gửi; hãy tạo phiên bản mới");
             }
             int version = nextVersion(latest.map(QuotationEntity::getVersionNo).orElse(0));
-            return persist(prepared, rfqId, supplierId, version, null, userId, "CREATE", rfqId, key, hash);
+            QuotationResponse created = persist(prepared, rfqId, supplierId, version, null, userId, "CREATE", rfqId, key, hash);
+            notifier.quotationSubmitted(rfq, prepared.quotation(), prepared.storeName());
+            return created;
         });
     }
 
@@ -119,7 +127,7 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
         Optional<QuotationResponse> replay = replay(userId, "REVISE", quotationId, key, hash);
         if (replay.isPresent()) return replay.get();
         QuotationEntity initial = requiredQuotation(quotationId);
-        actor.assertSupplierOwner(initial.getSupplierIdRef());
+        actor.assertVerifiedSupplierOwner(initial.getSupplierIdRef());
         PreparedQuotation prepared = prepare(request.forStore(initial.getStoreIdRef()), initial.getSupplierIdRef());
         return transaction.execute(tx -> {
             RfqEntity rfq = lockedRfq(initial.getRfqId());
@@ -127,6 +135,7 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
             if (concurrentReplay.isPresent()) return concurrentReplay.get();
             QuotationEntity previous = lockedQuotation(quotationId);
             ensureOpen(rfq);
+            ensureWithinRfqQuantity(rfq, prepared);
             ensureSubmitted(previous);
             if (!Objects.equals(previous.getVersionNo(), request.expectedVersion())) {
                 throw ApiException.conflict("QUOTATION_VERSION_CONFLICT", "Phiên bản báo giá đã thay đổi");
@@ -141,8 +150,10 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
             }
             previous.setStatus(QuotationStatus.REVISED);
             quotations.save(previous);
-            return persist(prepared, previous.getRfqId(), previous.getSupplierIdRef(),
+            QuotationResponse revised = persist(prepared, previous.getRfqId(), previous.getSupplierIdRef(),
                     nextVersion(previous.getVersionNo()), previous.getId(), userId, "REVISE", quotationId, key, hash);
+            notifier.quotationSubmitted(rfq, prepared.quotation(), prepared.storeName());
+            return revised;
         });
     }
 
@@ -218,7 +229,7 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
             throw ApiException.badRequest("DECISION_REASON_TOO_LONG", "Lý do tối đa 2000 ký tự");
         }
         return transaction.execute(tx -> {
-            lockedRfq(initial.getRfqId());
+            RfqEntity rfq = lockedRfq(initial.getRfqId());
             QuotationEntity quotation = lockedQuotation(initial.getId());
             if (quotation.getStatus() == destination) {
                 if (!Objects.equals(reason, quotation.getDecisionReason())) {
@@ -233,6 +244,8 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
             quotation.setStatus(destination);
             quotation.setDecisionReason(reason);
             quotations.save(quotation);
+            // The supplier withdrawing its own quotation needs no notice; the buyer's rejection does.
+            if (destination == QuotationStatus.REJECTED) notifier.quotationRejected(rfq, quotation);
             return response(quotation);
         });
     }
@@ -287,7 +300,7 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
         quotation.setLeadTimeDays(request.leadTimeDays());
         quotation.setShippingMethod(text(request.shippingMethod()));
         quotation.setPaymentTerms(text(request.paymentTerms()));
-        return new PreparedQuotation(quotation, lines);
+        return new PreparedQuotation(quotation, lines, store.name());
     }
 
     private QuotationItemEntity prepareItem(QuotationItemRequest line, StoreSummaryResponse store,
@@ -518,6 +531,21 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
         return LocalDateTime.now(ZoneOffset.UTC).truncatedTo(ChronoUnit.SECONDS);
     }
 
-    private record PreparedQuotation(QuotationEntity quotation, List<QuotationItemEntity> items) {
+    /** A supplier may not quote on an RFQ its own account posted as a buyer. */
+    private void ensureNotSelfDealing(RfqEntity rfq) {
+        if (Objects.equals(actor.optionalCustomerId(), rfq.getCustomerIdRef())) {
+            throw ApiException.forbidden("SELF_DEALING", "Không thể báo giá cho yêu cầu do chính tài khoản của bạn tạo");
+        }
+    }
+
+    /** A quotation offering more units than the RFQ asks for could never be accepted. */
+    private void ensureWithinRfqQuantity(RfqEntity rfq, PreparedQuotation prepared) {
+        int units = prepared.items().stream().mapToInt(QuotationItemEntity::getQuantity).sum();
+        if (rfq.getQuantity() != null && units > rfq.getQuantity()) {
+            throw ApiException.conflict("QUOTATION_EXCEEDS_RFQ_QUANTITY", "Báo giá có " + units + " sản phẩm, vượt số lượng yêu cầu " + rfq.getQuantity());
+        }
+    }
+
+    private record PreparedQuotation(QuotationEntity quotation, List<QuotationItemEntity> items, String storeName) {
     }
 }

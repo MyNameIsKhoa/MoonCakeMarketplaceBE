@@ -76,7 +76,7 @@ public class OrderQueryServiceImpl implements OrderQueryService {
                         address.getRecipientPhone(), address.getAddressLine(), address.getWard(),
                         address.getDistrict(), address.getCity()),
                 sellers.stream().map(seller -> mapSeller(seller,
-                        itemsBySeller.getOrDefault(seller.getId(), List.of()))).toList());
+                        itemsBySeller.getOrDefault(seller.getId(), List.of()), address)).toList());
     }
 
     @Override
@@ -93,18 +93,19 @@ public class OrderQueryServiceImpl implements OrderQueryService {
     }
 
     @Override
-    public SellerOrderResponse getSellerOrder(Long userId, Long customerId, Long sellerOrderId) {
+    public SellerOrderResponse getSellerOrder(Long userId, Long customerId, Long sellerOrderId, boolean admin) {
         SellerOrderEntity seller = sellerOrders.findById(sellerOrderId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Seller order not found"));
         CustomerOrderEntity order = orders.findById(seller.getOrderId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Seller order not found"));
-        if (customerId == null || !customerId.equals(order.getCustomerIdRef())) {
+        if (!admin && (customerId == null || !customerId.equals(order.getCustomerIdRef()))) {
             SupplierSummaryResponse supplier = supplierForUser(userId, HttpStatus.NOT_FOUND);
             if (!supplier.supplierId().equals(seller.getSupplierIdRef())) {
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Seller order not found");
             }
         }
-        return mapSeller(seller, items.findBySellerOrderIdIn(List.of(sellerOrderId)));
+        return mapSeller(seller, items.findBySellerOrderIdIn(List.of(sellerOrderId)),
+                addresses.findByOrderId(seller.getOrderId()).orElse(null));
     }
 
     private SupplierSummaryResponse supplierForUser(Long userId, HttpStatus missingStatus) {
@@ -125,14 +126,20 @@ public class OrderQueryServiceImpl implements OrderQueryService {
                 order.getDiscountTotal(), order.getShippingTotal(), order.getGrandTotal());
     }
 
-    private SellerOrderResponse mapSeller(SellerOrderEntity seller, List<OrderItemEntity> lines) {
+    private SellerOrderResponse mapSeller(SellerOrderEntity seller, List<OrderItemEntity> lines,
+                                          DeliveryAddressEntity address) {
         return new SellerOrderResponse(seller.getId(), seller.getOrderId(), seller.getSellerOrderNo(),
                 seller.getStoreIdRef(), seller.getSupplierIdRef(), seller.getQuotationIdRef(),
                 seller.getStoreNameSnapshot(), seller.getSupplierNameSnapshot(), seller.getStatus(),
                 seller.getSubtotal(), seller.getShippingFee(), seller.getTotalAmount(),
                 seller.getDepositPercent(), seller.getDepositAmount(), seller.getRemainingAmount(),
                 seller.getRemainingDueAt(), seller.getDeliveryDateSnapshot(), seller.getShippingMethodSnapshot(),
-                seller.getPaymentTermsSnapshot(), lines.stream().map(this::mapItem).toList());
+                seller.getPaymentTermsSnapshot(), lines.stream().map(this::mapItem).toList(),
+                lines.stream().map(OrderItemEntity::getDiscountAmount).filter(java.util.Objects::nonNull)
+                        .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add),
+                address == null ? null : new SellerOrderResponse.DeliveryAddress(address.getRecipientName(),
+                        address.getRecipientPhone(), address.getAddressLine(), address.getWard(),
+                        address.getDistrict(), address.getCity()));
     }
 
     private OrderItemResponse mapItem(OrderItemEntity item) {
