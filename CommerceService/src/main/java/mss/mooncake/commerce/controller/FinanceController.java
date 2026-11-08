@@ -30,7 +30,9 @@ public class FinanceController {
     public record Decision(boolean approve, @NotBlank @Size(max = 1000) String reason) { }
     public record Refund(@Positive long paymentId, @Positive long amount,
             @NotBlank @Size(max = 500) String reason,
-            @NotBlank @Size(max = 2000) String policySnapshot) { }
+            @NotBlank @Size(max = 2000) String policySnapshot, @Positive Long disputeId) { }
+    public record DisputeDecision(@NotBlank String decision, @Positive Long amount,
+            @NotBlank @Size(max = 1000) String reason) { }
     public record Proof(@NotBlank @Size(max = 255) String reference,
             @NotBlank @Size(max = 1000) @Pattern(regexp = "https://[^\\s]+") String evidenceUrl) { }
     public record Evidence(@NotBlank @Size(max = 1000) @Pattern(regexp = "https://[^\\s]+") String evidenceUrl) { }
@@ -132,11 +134,29 @@ public class FinanceController {
         return service.summary(orderId, actor);
     }
 
-    @PostMapping("/orders/{orderId}/disputes/{id}/resolve")
-    public FinanceResponse resolve(@PathVariable long orderId, @PathVariable long id, @Valid @RequestBody Reason body,
+    @PostMapping("/orders/{orderId}/disputes/{id}/respond")
+    public FinanceResponse respondDispute(@PathVariable long orderId, @PathVariable long id,
+            @Valid @RequestBody Reason body, @RequestHeader("Idempotency-Key") String key,
+            Authentication authentication) {
+        var actor = actor(authentication);
+        service.respondDispute(orderId, id, body.reason(), key, actor);
+        return service.summary(orderId, actor);
+    }
+
+    @PostMapping("/orders/{orderId}/disputes/{id}/escalate")
+    public FinanceResponse escalateDispute(@PathVariable long orderId, @PathVariable long id,
             @RequestHeader("Idempotency-Key") String key, Authentication authentication) {
         var actor = actor(authentication);
-        service.resolveDispute(orderId, id, body.reason(), key, actor);
+        service.escalateDispute(orderId, id, key, actor);
+        return service.summary(orderId, actor);
+    }
+
+    @PostMapping("/orders/{orderId}/disputes/{id}/decision")
+    public FinanceResponse decideDispute(@PathVariable long orderId, @PathVariable long id,
+            @Valid @RequestBody DisputeDecision body, @RequestHeader("Idempotency-Key") String key,
+            Authentication authentication) {
+        var actor = actor(authentication);
+        service.decideDispute(orderId, id, body.decision(), body.amount(), body.reason(), key, actor);
         return service.summary(orderId, actor);
     }
 
@@ -144,7 +164,8 @@ public class FinanceController {
     public FinanceResponse refund(@PathVariable long orderId, @Valid @RequestBody Refund body,
             @RequestHeader("Idempotency-Key") String key, Authentication authentication) {
         var actor = actor(authentication);
-        service.requestRefund(orderId, body.paymentId(), body.amount(), body.reason(), body.policySnapshot(), key, actor);
+        service.requestRefund(orderId, body.paymentId(), body.amount(), body.disputeId(),
+                body.reason(), body.policySnapshot(), key, actor);
         return service.summary(orderId, actor);
     }
 

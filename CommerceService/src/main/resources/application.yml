@@ -41,7 +41,7 @@ payos:
   cancel-url: ${PAYOS_CANCEL_URL:http://localhost:3000/?finance=cancel}
 finance:
   settlement:
-    fee-basis: ${FINANCE_FEE_BASIS:}
-    rounding: ${FINANCE_FEE_ROUNDING:}
+    fee-basis: ${FINANCE_FEE_BASIS:NET_AFTER_REFUND}
+    rounding: ${FINANCE_FEE_ROUNDING:HALF_UP}
   dispute:
-    admin-adjudication-enabled: ${FINANCE_DISPUTE_ADMIN_ENABLED:false}
+    admin-adjudication-enabled: ${FINANCE_DISPUTE_ADMIN_ENABLED:true}

@@ -34,6 +34,11 @@ public class FinanceRepositoryImpl implements FinanceRepository {
         return value == null ? null : value.toLocalDateTime().toInstant(java.time.ZoneOffset.UTC);
     }
 
+    private static Instant instant(java.sql.ResultSet rs, int column) throws java.sql.SQLException {
+        Timestamp value = rs.getTimestamp(column);
+        return value == null ? null : value.toLocalDateTime().toInstant(java.time.ZoneOffset.UTC);
+    }
+
     private static Timestamp utc(Instant value) { return FinanceRepository.utc(value); }
 
     private final RowMapper<Context> contexts = (rs, n) -> new Context(rs.getLong("seller_order_id"),
@@ -230,13 +235,43 @@ public class FinanceRepositoryImpl implements FinanceRepository {
                 WHERE p.seller_order_id=? ORDER BY r.refund_id
                 """, (rs, n) -> new FinanceResponse.Case(rs.getLong("refund_id"), rs.getString("status"),
                         rs.getString("reason"), rs.getBigDecimal("amount").longValueExact(),
-                        rs.getString("evidence_url"), rs.getString("policy_snapshot")), orderId);
+                        rs.getString("evidence_url"), rs.getString("policy_snapshot"), null, null,
+                        null, null, null, rs.getObject("dispute_id", Long.class)), orderId);
     }
 
     public List<FinanceResponse.Case> disputes(long orderId) {
         return jdbc.query("SELECT * FROM dispute WHERE seller_order_id=? ORDER BY dispute_id",
                 (rs, n) -> new FinanceResponse.Case(rs.getLong("dispute_id"), rs.getString("status"),
-                        rs.getString("reason"), null, rs.getString("evidence_url"), rs.getString("resolution")), orderId);
+                        rs.getString("reason"), rs.getObject("awarded_amount") == null ? null
+                                : rs.getBigDecimal("awarded_amount").longValueExact(),
+                        rs.getString("evidence_url"), rs.getString("resolution"), rs.getString("seller_response"),
+                        instant(rs, "opened_at"), instant(rs, "responded_at"), instant(rs, "escalated_at"),
+                        rs.getString("decision_type"), null), orderId);
+    }
+
+    public Instant deliveredAt(long orderId) {
+        return jdbc.queryForObject("SELECT MAX(delivered_at) FROM shipment WHERE seller_order_id=?",
+                (rs, n) -> instant(rs, 1), orderId);
+    }
+
+    public Instant expectedDeliveryAt(long orderId) {
+        return jdbc.queryForObject("SELECT MAX(expected_delivery_at) FROM shipment WHERE seller_order_id=?",
+                (rs, n) -> instant(rs, 1), orderId);
+    }
+
+    public long refunded(long orderId) {
+        return count("SELECT COALESCE(SUM(r.amount),0) FROM refund r JOIN payment p ON p.payment_id=r.payment_id "
+                + "WHERE p.seller_order_id=? AND r.status='SUCCESS'", orderId);
+    }
+
+    public long refundedForDispute(long disputeId) {
+        return count("SELECT COALESCE(SUM(amount),0) FROM refund WHERE dispute_id=? AND status='SUCCESS'", disputeId);
+    }
+
+    public List<Long> pendingDisputeOrderIds(int offset, int limit) {
+        return jdbc.queryForList("SELECT DISTINCT seller_order_id FROM dispute "
+                + "WHERE status IN ('OPEN','ADMIN_REVIEW','REFUND_PENDING') "
+                + "ORDER BY seller_order_id OFFSET ? ROWS FETCH NEXT ? ROWS ONLY", Long.class, offset, limit);
     }
 
     public List<FinanceResponse.Settlement> settlements(long orderId) {
@@ -244,12 +279,14 @@ public class FinanceRepositoryImpl implements FinanceRepository {
                 (rs, n) -> new FinanceResponse.Settlement(rs.getLong("settlement_id"),
                         rs.getBigDecimal("gross_amount").longValueExact(), rs.getString("fee_basis"),
                         rs.getString("rounding_rule"), rs.getBigDecimal("fee_amount").longValueExact(),
-                        rs.getBigDecimal("supplier_payout_amount").longValueExact(), rs.getString("status")), orderId);
+                        rs.getBigDecimal("supplier_payout_amount").longValueExact(), rs.getString("status"),
+                        rs.getBigDecimal("refunded_amount").longValueExact()), orderId);
     }
 
     public List<FinanceResponse.Audit> history(long orderId) {
         return jdbc.query("SELECT TOP 200 * FROM finance_audit WHERE seller_order_id=? ORDER BY audit_id DESC",
                 (rs, n) -> new FinanceResponse.Audit(rs.getLong("audit_id"), rs.getString("event_type"),
+                        rs.getLong("resource_id"),
                         rs.getString("actor"), rs.getString("detail"), instant(rs, "created_at")), orderId);
     }
 

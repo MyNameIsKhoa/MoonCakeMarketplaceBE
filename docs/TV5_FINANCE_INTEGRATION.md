@@ -130,18 +130,22 @@ Use stable reference `mss-refund-{refundId}` for the manual transfer and reconci
 reference before retrying any bank transfer with an uncertain outcome.
 Only successful-transfer reference plus HTTPS evidence can confirm a refund; there is
 no automatic 100% calculation and no fake bank transfer. Ledger and audit retain both
-the policy snapshot and outcome. Successful or pending refunds conservatively block
-settlement until a future partial-refund settlement policy is approved.
+the policy snapshot and outcome. Pending refunds block settlement. Confirmed refunds
+reduce the settlement base; `gross_amount = refunded_amount + platform_fee + supplier_payout`.
 
-Both parties can open a dispute and append evidence to immutable history. An open
-dispute blocks settlement and payout. ADMIN resolution is **disabled by default**;
-enable `FINANCE_DISPUTE_ADMIN_ENABLED` only after the authority is agreed. SLA remains
-unconfigured; there is no automatic decision on expiry.
+Only the buyer opens a dispute after a successful payment. Before delivery it requires
+an overdue promised date; after delivery it must be opened within seven days of the
+last recorded delivery. A seller may respond once. The buyer or ADMIN may escalate after that
+response or after 48 hours without one. Only ADMIN decides. `REJECT` closes the case;
+`REFUND` records the awarded amount and keeps the case open until linked manual refunds
+are confirmed with proof. An open case blocks settlement. The 48-hour deadline does not
+automatically decide the case. The admin queue is `/api/admin/commerce/disputes`.
 
-Settlement fee rate is snapshotted at 5%. It is blocked until `FINANCE_FEE_BASIS` and
-`FINANCE_FEE_ROUNDING` are explicitly approved. The current supported basis is
-`TOTAL_COLLECTED`; rounding can be HALF_UP, DOWN or UP. Shipping, discounts, deductions
-and net-of-refund basis alternatives need an explicit implementation if chosen.
+Settlement fee rate is snapshotted at 5% on collected money remaining after confirmed
+refunds (`NET_AFTER_REFUND`, `HALF_UP` by default). Original gross and confirmed refunds
+are snapshotted separately. Full refunds have no payout. Settlement requires buyer
+acceptance or a recorded ADMIN decision on a post-delivery dispute, no blocking case,
+and seven days since the last recorded delivery.
 
 Payouts API/account entitlement has not been activated or verified. The current workflow
 is explicitly **manual**, with no payOS payout webhook and no automated transfer call:
@@ -153,16 +157,18 @@ is explicitly **manual**, with no payOS payout webhook and no automated transfer
    if the result is uncertain. A second payout request never creates a new transfer.
 4. Confirm requires the successful bank reference and HTTPS proof. Only then does the
    settlement become SUCCESS and payment allocation become RELEASED. The fee and payout
-   ledger entries are distinct and sum to the collected gross snapshot.
+   ledger entries plus confirmed refunds sum to the collected gross snapshot.
 
-Once a manual payout is PROCESSING, new dispute/cancellation/refund mutations return
-`PAYOUT_ALREADY_RESERVED`; the operator must reconcile the in-flight transfer. This
-serialize-or-reject rule closes the dispute/payout race; never bypass it with SQL edits.
+A dispute or refund submitted before transfer moves an existing READY settlement to
+ON_HOLD. After the case and refunds finish, ADMIN runs settlement creation again to
+recalculate the same settlement row; the old payout amount cannot be used. Once payout
+is PROCESSING or SUCCESS, complaint/refund mutations return `PAYOUT_ALREADY_RESERVED`.
+Reconcile any in-flight transfer before changing finance state.
 If transfers need automatic retries, add a provider payout adapter and outcome queries
 before enabling them. Payout webhook signatures must use the payout-specific SDK rules,
 not the collection verifier. No failed/unknown manual transfer is treated as successful.
-Disputes can still be opened after completed payouts for investigation; this does not
-reverse a confirmed bank transfer or invent a recoverable refund balance.
+After payout, support must handle exceptional complaints manually; the finance API
+cannot reverse a confirmed bank transfer.
 
 ## API implemented now
 
@@ -179,10 +185,12 @@ with another command/body is rejected. Ownership and operator rights are checked
 | POST `/payos/callback` | payOS signature | Collection webhook |
 | POST `/orders/{orderId}/cancellations` K | Parties | `{reason}` |
 | POST `/orders/{orderId}/cancellations/{id}/decision` K | ADMIN | `{approve,reason}` |
-| POST `/orders/{orderId}/disputes` K | Parties | `{reason,evidenceUrl?}` |
+| POST `/orders/{orderId}/disputes` K | Buyer | `{reason,evidenceUrl?}` |
 | POST `/orders/{orderId}/disputes/{id}/evidence` K | Parties | `{evidenceUrl}` |
-| POST `/orders/{orderId}/disputes/{id}/resolve` K | Configured ADMIN | `{reason}` as resolution |
-| POST `/orders/{orderId}/refunds` K | ADMIN | `{paymentId,amount,reason,policySnapshot}` |
+| POST `/orders/{orderId}/disputes/{id}/respond` K | Supplier | `{reason}` as response |
+| POST `/orders/{orderId}/disputes/{id}/escalate` K | Buyer/ADMIN | No body; seller responded or 48 hours elapsed |
+| POST `/orders/{orderId}/disputes/{id}/decision` K | ADMIN | `{decision: REJECT/REFUND,amount?,reason}` |
+| POST `/orders/{orderId}/refunds` K | ADMIN | `{paymentId,amount,reason,policySnapshot,disputeId?}` |
 | POST `/orders/{orderId}/refunds/{id}/reject` K | ADMIN | `{reason}` |
 | POST `/orders/{orderId}/refunds/{id}/confirm` K | ADMIN | `{reference,evidenceUrl}` |
 | POST `/orders/{orderId}/settlements` K | ADMIN | Snapshot eligible settlement |
@@ -218,9 +226,9 @@ The existing TV1/TV3 order/login mocks remain unchanged until their owners conne
 
 - Fixed deposit amount/percentage and how retail confirmation maps to acceptance (TV3).
 - Midnight remaining-payment cutoff acknowledgement; amendment/overdue schedule workflow.
-- Refund matrix/version, partial refund settlement treatment, manual approval authority.
-- Dispute adjudicator, SLA and in-flight payout complaint escalation process.
-- Fee basis, rounding and exact TV6 receipt/acceptance conditions.
+- Cancellation-specific refund matrix and automated refund approval authority.
+- Post-payout exceptional complaint handling and proof upload storage.
+- Exact TV6 receipt/acceptance conditions beyond the seven-day delivery hold.
 - payOS Payouts entitlement, bank destination verification and automatic payout adapter.
 - Broker transport, consumer bindings, public webhook registration/tunnel and TV1 JWT hook.
 
