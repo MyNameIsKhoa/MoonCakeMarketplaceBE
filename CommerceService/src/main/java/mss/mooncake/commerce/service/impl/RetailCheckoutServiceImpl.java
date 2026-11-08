@@ -10,6 +10,7 @@ import mss.mooncake.commerce.client.IdentityServiceClient;
 import mss.mooncake.commerce.client.dto.catalog.StockReservationRequest;
 import mss.mooncake.commerce.client.dto.catalog.StockReservationResponse;
 import mss.mooncake.commerce.dto.response.RetailCheckoutResponse;
+import mss.mooncake.commerce.exception.CommerceException;
 import mss.mooncake.commerce.repository.CheckoutRepository;
 import mss.mooncake.commerce.service.RetailCheckoutService;
 import mss.mooncake.commerce.service.CartApplicationService;
@@ -34,7 +35,7 @@ public class RetailCheckoutServiceImpl implements RetailCheckoutService {
         this.identity = identity;
     }
 
-    public RetailCheckoutResponse place(long customerId, long addressId, String key) {
+    public RetailCheckoutResponse place(long userId, long customerId, long addressId, String key) {
         if (key == null || !key.matches("[A-Za-z0-9._-]{8,100}"))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Idempotency-Key must be 8-100 safe characters");
         if (addressId <= 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid addressId");
@@ -58,6 +59,10 @@ public class RetailCheckoutServiceImpl implements RetailCheckoutService {
         if (address == null || !Long.valueOf(customerId).equals(address.customerId()))
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Address does not belong to customer");
         var pricing = carts.priceCart(customerId);
+        // Stock is reserved for every cart line, so a line that can no longer be sold must be removed first.
+        if (pricing.unavailableItems() != null && !pricing.unavailableItems().isEmpty())
+            throw new CommerceException(HttpStatus.CONFLICT, "CART_HAS_UNAVAILABLE_ITEMS",
+                    "Giỏ hàng có sản phẩm đã ngừng bán, vui lòng xóa khỏi giỏ trước khi đặt hàng");
         if (pricing.stores() == null || pricing.stores().isEmpty())
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Cart cannot be priced");
         List<CheckoutRepository.Store> stores = new ArrayList<>();
@@ -71,6 +76,9 @@ public class RetailCheckoutServiceImpl implements RetailCheckoutService {
             if (supplier == null || !price.supplierId().equals(supplier.supplierId())
                     || !"VERIFIED".equals(supplier.verificationStatus()))
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "Seller is unavailable");
+            if (supplier.userId() != null && supplier.userId() == userId)
+                throw new CommerceException(HttpStatus.CONFLICT, "SELF_PURCHASE_NOT_ALLOWED",
+                        "Không thể mua sản phẩm của chính cửa hàng mình: " + price.storeName());
             stores.add(new CheckoutRepository.Store(price,
                     store.shippingFee().setScale(0, RoundingMode.CEILING), supplier.companyName()));
         }

@@ -5,6 +5,7 @@ import java.net.URI;
 import java.util.List;
 import mss.mooncake.commerce.dto.request.CreateShipmentRequest;
 import mss.mooncake.commerce.dto.request.UpdateShipmentRequest;
+import mss.mooncake.commerce.dto.response.ShipmentItemProgressResponse;
 import mss.mooncake.commerce.dto.response.ShipmentResponse;
 import mss.mooncake.commerce.security.CommercePrincipal;
 import mss.mooncake.commerce.service.FulfillmentApplicationService;
@@ -56,6 +57,14 @@ public class ShipmentController {
         return ResponseEntity.ok(fulfillmentService.getShipmentsBySellerOrder(sellerOrderId, actors.resolve(authentication)));
     }
 
+    /** Per order item: ordered, allocated, shipped, delivered and remaining units (what a new shipment may carry). */
+    @GetMapping("/items")
+    public ResponseEntity<List<ShipmentItemProgressResponse>> getShipmentItems(
+            @RequestParam Long sellerOrderId,
+            Authentication authentication) {
+        return ResponseEntity.ok(fulfillmentService.getShipmentItemProgress(sellerOrderId, actors.resolve(authentication)));
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<ShipmentResponse> getShipmentById(
             @PathVariable Long id,
@@ -78,6 +87,13 @@ public class ShipmentController {
             Authentication authentication) {
         Long supplierId = supplier(authentication);
         return ResponseEntity.ok(fulfillmentService.markAsShipped(id, supplierId));
+    }
+
+    @PostMapping("/{id}/cancel")
+    public ResponseEntity<ShipmentResponse> cancelShipment(
+            @PathVariable Long id,
+            Authentication authentication) {
+        return ResponseEntity.ok(fulfillmentService.cancelShipment(id, supplier(authentication)));
     }
 
     @PostMapping("/{id}/delivered")

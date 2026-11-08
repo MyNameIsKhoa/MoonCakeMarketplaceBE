@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 
+/** Runs before {@link GlobalExceptionHandler} so finance responses keep their {code,message} contract. */
+@org.springframework.core.annotation.Order(org.springframework.core.Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(assignableTypes = FinanceController.class)
 public class FinanceExceptionHandler {
     @ExceptionHandler(FinanceException.class)

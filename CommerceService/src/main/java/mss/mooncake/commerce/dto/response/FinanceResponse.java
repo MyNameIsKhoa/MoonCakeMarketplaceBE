@@ -29,5 +29,23 @@ public record FinanceResponse(Context context, List<Payment> payments, List<Case
         }
     }
     public record Eligibility(boolean eligible, List<String> blockingReasons) { }
+
+    /**
+     * A supplier's money per seller order (newest first) and totals over all of its seller orders. Amounts are exact
+     * VND. Until a settlement snapshot is READY/PROCESSING/SUCCESS, fee and payout are estimated
+     * ({@code feeEstimated}) with the configured settlement rule on money collected minus confirmed refunds.
+     * payoutStatus: PAID, PROCESSING (manual transfer reserved), READY (eligible or settlement READY), ON_HOLD,
+     * BLOCKED (not eligible yet), NO_PAYOUT (cancelled or fully refunded). Totals: pending = BLOCKED + ON_HOLD,
+     * ready = READY + PROCESSING, paid = PAID.
+     */
+    public record SupplierPayouts(List<Row> content, int page, int size, long totalElements, int totalPages,
+            Totals totals) {
+        public record Row(long sellerOrderId, String sellerOrderNo, long orderId, String orderNo, String storeName,
+                String orderStatus, Instant placedAt, long totalAmount, long grossCollected, long refundedAmount,
+                Long platformFee, Long netPayout, boolean feeEstimated, boolean eligible, List<String> blockingReasons,
+                Long settlementId, String settlementStatus, String payoutStatus, String payoutReference,
+                Instant paidAt) { }
+        public record Totals(long pendingAmount, long readyAmount, long paidAmount) { }
+    }
     public record Audit(long auditId, String eventType, long resourceId, String actor, String detail, Instant createdAt) { }
 }

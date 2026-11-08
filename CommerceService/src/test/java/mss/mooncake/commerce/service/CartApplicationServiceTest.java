@@ -15,6 +15,9 @@ import mss.mooncake.commerce.client.dto.catalog.StoreSummaryResponse;
 import mss.mooncake.commerce.client.dto.catalog.PromotionCalculationRequest;
 import mss.mooncake.commerce.client.dto.catalog.PromotionCalculationResult;
 import mss.mooncake.commerce.dto.request.AddCartItemRequest;
+import mss.mooncake.commerce.dto.response.CartPricingResponse;
+import mss.mooncake.commerce.exception.CommerceException;
+import org.springframework.http.HttpStatus;
 import mss.mooncake.commerce.repository.CartItemRepository;
 import mss.mooncake.commerce.repository.CartRepository;
 import org.junit.jupiter.api.Test;
@@ -67,6 +70,68 @@ class CartApplicationServiceTest {
         assertThat(carts.updateItem(customerId, first.item().cartItemId(), 4).quantity()).isEqualTo(4);
         carts.clear(customerId);
         assertThat(carts.getCart(customerId).items()).isEmpty();
+    }
+
+    @Test
+    void addingMoreThanTheAvailableStockIsRejected() {
+        long customerId = 10004L;
+        carts.addItem(customerId, new AddCartItemRequest(601L, 6));
+
+        assertThatThrownBy(() -> carts.addItem(customerId, new AddCartItemRequest(601L, 5)))
+                .isInstanceOfSatisfying(CommerceException.class, e -> {
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(e.getCode()).isEqualTo("INSUFFICIENT_STOCK");
+                });
+        assertThatThrownBy(() -> carts.addItem(10005L, new AddCartItemRequest(602L, 11)))
+                .isInstanceOf(CommerceException.class);
+        assertThat(carts.getCart(customerId).items().getFirst().quantity()).isEqualTo(6);
+    }
+
+    @Test
+    void updatingAboveTheAvailableStockIsRejected() {
+        long customerId = 10006L;
+        var item = carts.addItem(customerId, new AddCartItemRequest(603L, 2)).item();
+
+        assertThatThrownBy(() -> carts.updateItem(customerId, item.cartItemId(), 11))
+                .isInstanceOfSatisfying(CommerceException.class,
+                        e -> assertThat(e.getCode()).isEqualTo("INSUFFICIENT_STOCK"));
+        assertThat(carts.updateItem(customerId, item.cartItemId(), 10).quantity()).isEqualTo(10);
+    }
+
+    @Test
+    void inactiveLineIsFlaggedUnavailableInsteadOfFailingTheWholeCart() {
+        long customerId = 10007L;
+        carts.addItem(customerId, new AddCartItemRequest(701L, 1));
+        var stale = carts.addItem(customerId, new AddCartItemRequest(702L, 2)).item();
+        doAnswer(invocation -> {
+            VariantSnapshotBatchRequest request = invocation.getArgument(0);
+            return request.variantIds().stream().map(id -> new VariantSnapshotResponse(id, id, 1L, 1L, "P",
+                    "Mooncake " + id, "Box", "SKU" + id, null, new BigDecimal("100"), 10,
+                    id == 702L ? "INACTIVE" : "ACTIVE", "ACTIVE", "ACTIVE")).toList();
+        }).when(catalog).getVariantSnapshots(any());
+        when(catalog.getStoreSummary(1L))
+                .thenReturn(new StoreSummaryResponse(1L, 1L, "S1", "Store 1", "s1", null, "ACTIVE"));
+        when(catalog.calculatePromotions(any())).thenAnswer(invocation -> {
+            PromotionCalculationRequest request = invocation.getArgument(0);
+            assertThat(request.lines()).extracting(PromotionCalculationRequest.Line::variantId).containsExactly(701L);
+            BigDecimal price = new BigDecimal("100");
+            return new PromotionCalculationResult(1L, java.time.LocalDateTime.now(), price, BigDecimal.ZERO, price,
+                    List.of(new PromotionCalculationResult.LineResult(701L, 1, price, price, BigDecimal.ZERO,
+                            price, List.of())), List.of());
+        });
+
+        var priced = carts.priceCart(customerId);
+
+        assertThat(priced.totalAmount()).isEqualByComparingTo("100");
+        assertThat(priced.stores()).singleElement().satisfies(store -> assertThat(store.items())
+                .extracting(CartPricingResponse.LinePrice::variantId).containsExactly(701L));
+        assertThat(priced.unavailableItems()).singleElement().satisfies(line -> {
+            assertThat(line.cartItemId()).isEqualTo(stale.cartItemId());
+            assertThat(line.variantId()).isEqualTo(702L);
+            assertThat(line.quantity()).isEqualTo(2);
+            assertThat(line.productName()).isEqualTo("Mooncake 702");
+            assertThat(line.reason()).isEqualTo("UNAVAILABLE");
+        });
     }
 
     @Test

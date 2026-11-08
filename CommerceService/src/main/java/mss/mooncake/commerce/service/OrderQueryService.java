@@ -11,5 +11,6 @@ public interface OrderQueryService {
     Page<OrderSummaryResponse> listCustomerOrders(Long customerId, Pageable pageable);
     OrderDetailResponse getCustomerOrder(Long customerId, Long orderId);
     Page<SellerOrderSummaryResponse> listSupplierOrders(Long userId, Pageable pageable);
-    SellerOrderResponse getSellerOrder(Long userId, Long customerId, Long sellerOrderId);
+    /** The buyer of the parent order, the owning supplier, or ({@code admin}) any administrator may read it. */
+    SellerOrderResponse getSellerOrder(Long userId, Long customerId, Long sellerOrderId, boolean admin);
 }
