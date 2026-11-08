@@ -7,8 +7,11 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
@@ -33,6 +36,7 @@ import mss.mooncake.rfqnegotiation.enums.QuotationStatus;
 import mss.mooncake.rfqnegotiation.enums.RfqAudience;
 import mss.mooncake.rfqnegotiation.enums.RfqStatus;
 import mss.mooncake.rfqnegotiation.exception.ApiException;
+import mss.mooncake.rfqnegotiation.notification.RfqNotifier;
 import mss.mooncake.rfqnegotiation.repository.QuotationCommandRepository;
 import mss.mooncake.rfqnegotiation.repository.QuotationConversionRepository;
 import mss.mooncake.rfqnegotiation.repository.QuotationItemRepository;
@@ -62,6 +66,7 @@ class QuotationManagementServiceTest {
     @Mock private CatalogServiceClient catalog;
     @Mock private ActorContext actor;
     @Mock private PlatformTransactionManager transactionManager;
+    @Mock private RfqNotifier notifier;
     private QuotationManagementService service;
     private RfqEntity rfq;
     private final OffsetDateTime validity = OffsetDateTime.now(ZoneOffset.UTC).plusDays(2).withNano(0);
@@ -71,13 +76,14 @@ class QuotationManagementServiceTest {
     @BeforeEach
     void setUp() {
         service = new QuotationManagementServiceImpl(rfqs, quotations, items, commands, conversions,
-                targets, catalog, actor, transactionManager);
+                targets, catalog, actor, transactionManager, notifier);
         rfq = new RfqEntity();
         rfq.setStatus(RfqStatus.OPEN);
         rfq.setCustomerIdRef(2L);
         rfq.setExpiresAt(LocalDateTime.now(ZoneOffset.UTC).plusDays(1));
         lenient().when(actor.userId()).thenReturn(10L);
         lenient().when(actor.supplierId()).thenReturn(20L);
+        lenient().when(actor.verifiedSupplierId()).thenReturn(20L);
         lenient().when(catalog.getStoreSummary(30L)).thenReturn(activeStore(20L));
         lenient().when(rfqs.findByIdForUpdate(1L)).thenReturn(Optional.of(rfq));
         lenient().when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
@@ -87,6 +93,13 @@ class QuotationManagementServiceTest {
             return saved;
         });
         lenient().when(items.saveAll(anyList())).thenAnswer(invocation -> invocation.getArgument(0));
+    }
+
+    @Test
+    void suspendedSupplierCannotCreateAQuotation() {
+        when(actor.verifiedSupplierId()).thenThrow(new ApiException(org.springframework.http.HttpStatus.FORBIDDEN,
+                "SUPPLIER_NOT_VERIFIED", "Hồ sơ nhà cung cấp chưa được xác minh hoặc đang bị khóa"));
+        assertCode(() -> service.create(1L, "suspended", request(customItem("120000.00", "0"))), "SUPPLIER_NOT_VERIFIED");
     }
 
     @Test
@@ -100,6 +113,7 @@ class QuotationManagementServiceTest {
         assertThat(result.submittedAt()).endsWith("Z");
         verify(commands).save(any(QuotationCommandEntity.class));
         verify(transactionManager).commit(any());
+        verify(notifier).quotationSubmitted(eq(rfq), argThat(q -> q.getPreviousQuotationId() == null), eq("Cửa hàng bánh"));
     }
 
     @Test
@@ -109,6 +123,7 @@ class QuotationManagementServiceTest {
 
         assertCode(() -> service.create(1L, "create-1", request(customItem("100.00", "0"))), "RFQ_NOT_FOUND");
         verify(quotations, never()).saveAndFlush(any());
+        verifyNoInteractions(notifier);
     }
 
     @Test
@@ -219,6 +234,8 @@ class QuotationManagementServiceTest {
         assertThat(previous.getStatus()).isEqualTo(QuotationStatus.REVISED);
         assertThat(previous.getTotalAmount()).isEqualByComparingTo(previousAmount);
         assertThat(previous.getVersionNo()).isEqualTo(3);
+        verify(notifier).quotationSubmitted(eq(rfq), argThat(q -> Long.valueOf(90L).equals(q.getPreviousQuotationId())),
+                eq("Cửa hàng bánh"));
     }
 
     @Test
@@ -257,6 +274,8 @@ class QuotationManagementServiceTest {
         assertThat(replay.quotationId()).isEqualTo("100");
         verify(catalog).getStoreSummary(30L);
         verify(quotations).saveAndFlush(any());
+        // A replayed request is the same quotation: the buyer is not told twice.
+        verify(notifier, times(1)).quotationSubmitted(any(), any(), any());
     }
 
     @Test
@@ -292,13 +311,54 @@ class QuotationManagementServiceTest {
     }
 
     @Test
-    void depositQuotationNeedsDeliveryAtLeastFourDaysAheadInVietnam() {
-        assertCode(() -> service.create(1L, "create-1", request("30.00", todayInVietnam.plusDays(3))),
+    void buyerRejectionNotifiesTheSupplierOnce() {
+        QuotationEntity quotation = decidableQuotation();
+        when(quotations.findById(90L)).thenReturn(Optional.of(quotation));
+        when(quotations.findByIdForUpdate(90L)).thenReturn(Optional.of(quotation));
+        when(rfqs.findById(1L)).thenReturn(Optional.of(rfq));
+
+        service.reject(90L, new QuotationDecisionRequest("Giá cao hơn ngân sách"));
+        service.reject(90L, new QuotationDecisionRequest("Giá cao hơn ngân sách"));
+
+        assertThat(quotation.getStatus()).isEqualTo(QuotationStatus.REJECTED);
+        verify(notifier, times(1)).quotationRejected(rfq, quotation);
+    }
+
+    @Test
+    void supplierWithdrawingItsOwnQuotationNotifiesNobody() {
+        QuotationEntity quotation = decidableQuotation();
+        when(quotations.findById(90L)).thenReturn(Optional.of(quotation));
+        when(quotations.findByIdForUpdate(90L)).thenReturn(Optional.of(quotation));
+
+        service.cancel(90L, new QuotationDecisionRequest("Hết nguyên liệu"));
+
+        assertThat(quotation.getStatus()).isEqualTo(QuotationStatus.CANCELLED);
+        verifyNoInteractions(notifier);
+    }
+
+    @Test
+    void depositQuotationNeedsDeliveryAtLeastSixDaysAheadInVietnam() {
+        // 48h to pay the deposit, then the remaining balance is due 3 days before delivery.
+        assertCode(() -> service.create(1L, "create-1", request("30.00", todayInVietnam.plusDays(5))),
                 "DELIVERY_TOO_SOON_FOR_REMAINING");
         verify(quotations, never()).saveAndFlush(any());
 
-        assertThat(service.create(1L, "create-2", request("30.00", todayInVietnam.plusDays(4))).status())
+        assertThat(service.create(1L, "create-2", request("30.00", todayInVietnam.plusDays(6))).status())
                 .isEqualTo(QuotationStatus.SUBMITTED);
+    }
+
+    @Test
+    void supplierCannotQuoteOnTheirOwnRfq() {
+        when(actor.optionalCustomerId()).thenReturn(2L);
+        assertCode(() -> service.create(1L, "self", request(customItem("100.00", "0"))), "SELF_DEALING");
+        verify(quotations, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void quotationCannotOfferMoreUnitsThanTheRfqAsks() {
+        rfq.setQuantity(1);
+        assertCode(() -> service.create(1L, "too-many", request(customItem("100.00", "0"))), "QUOTATION_EXCEEDS_RFQ_QUANTITY");
+        verify(quotations, never()).saveAndFlush(any());
     }
 
     @Test
@@ -336,6 +396,15 @@ class QuotationManagementServiceTest {
         quotation.setStatus(QuotationStatus.SUBMITTED);
         quotation.setVersionNo(3);
         quotation.setTotalAmount(new BigDecimal("123.45"));
+        return quotation;
+    }
+
+    /** A SUBMITTED quotation complete enough to be returned after a decision. */
+    private QuotationEntity decidableQuotation() {
+        QuotationEntity quotation = previousQuotation();
+        quotation.setDepositPercent(new BigDecimal("30.00"));
+        quotation.setShippingFee(new BigDecimal("10000.00"));
+        quotation.setValidUntil(validity.withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime());
         return quotation;
     }
 

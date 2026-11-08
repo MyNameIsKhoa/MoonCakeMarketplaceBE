@@ -7,10 +7,12 @@ import mss.mooncake.catalogstore.dto.request.CreateCategoryRequest;
 import mss.mooncake.catalogstore.dto.request.UpdateCategoryRequest;
 import mss.mooncake.catalogstore.dto.response.CategoryResponse;
 import mss.mooncake.catalogstore.dto.response.PageResponse;
+import mss.mooncake.catalogstore.security.UserPrincipal;
 import mss.mooncake.catalogstore.service.CategoryService;
 import mss.mooncake.catalogstore.dto.request.PageQuery;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -49,9 +51,14 @@ public class CategoryController {
                 pageQuery.toPageable(SORT_FIELDS, DEFAULT_SORT)));
     }
 
+    /** Public chỉ thấy ACTIVE; admin (JWT ROLE_ADMIN) xem được mọi trạng thái để quản trị. */
     @GetMapping("/{categoryId}")
-    public ResponseEntity<CategoryResponse> getCategory(@PathVariable Long categoryId) {
-        return ResponseEntity.ok(categoryService.getCategory(categoryId));
+    public ResponseEntity<CategoryResponse> getCategory(@PathVariable Long categoryId,
+                                                        @AuthenticationPrincipal UserPrincipal principal) {
+        boolean admin = principal != null && principal.getAuthorities().stream()
+                .anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
+        return ResponseEntity.ok(admin ? categoryService.getCategoryForAdmin(categoryId)
+                : categoryService.getCategory(categoryId));
     }
 
     @PostMapping

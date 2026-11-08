@@ -10,4 +10,9 @@ public interface CustomerPaymentService {
     CustomerPaymentResponse reconcile(long orderId, FinanceService.Actor actor, boolean cancel);
     boolean receive(PaymentProvider.Receipt receipt);
     void cancelUnpaidOrder(long orderId, String reason, FinanceService.Actor actor);
+    /**
+     * Returns cancelled confirmed Catalog stock of a retail checkout: the whole reservation once every seller order is
+     * cancelled, otherwise exactly the lines of each cancelled seller order (idempotent, retried by the recovery job).
+     */
+    void restoreCancelledRetailStock(long orderId);
 }

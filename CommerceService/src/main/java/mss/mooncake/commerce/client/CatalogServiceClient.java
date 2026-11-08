@@ -5,6 +5,8 @@ import mss.mooncake.commerce.client.dto.catalog.VariantSnapshotBatchRequest;
 import mss.mooncake.commerce.client.dto.catalog.VariantSnapshotResponse;
 import mss.mooncake.commerce.client.dto.catalog.StockReservationRequest;
 import mss.mooncake.commerce.client.dto.catalog.StockReservationResponse;
+import mss.mooncake.commerce.client.dto.catalog.StockRestoreRequest;
+import mss.mooncake.commerce.client.dto.catalog.StockRestoreResponse;
 import mss.mooncake.commerce.client.dto.catalog.PromotionCalculationRequest;
 import mss.mooncake.commerce.client.dto.catalog.PromotionCalculationResult;
 import mss.mooncake.commerce.client.dto.catalog.StoreSummaryResponse;
@@ -38,6 +40,11 @@ public interface CatalogServiceClient {
 
     @PutMapping("/internal/v1/inventory/reservations/{reservationKey}/cancel-confirmed")
     StockReservationResponse cancelConfirmedStockReservation(@PathVariable String reservationKey);
+
+    /** Returns only these confirmed lines to stock (one cancelled seller order), once per restore key. */
+    @PutMapping("/internal/v1/inventory/reservations/{reservationKey}/restore-lines")
+    StockRestoreResponse restoreStockReservationLines(@PathVariable String reservationKey,
+            @RequestBody StockRestoreRequest request);
 
     @PostMapping("/internal/v1/promotions/calculate")
     PromotionCalculationResult calculatePromotions(@RequestBody PromotionCalculationRequest request);

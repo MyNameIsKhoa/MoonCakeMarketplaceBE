@@ -28,7 +28,7 @@ public class CheckoutController {
                                         @Valid @RequestBody CheckoutRequest request) {
         if (principal == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
         if (principal.customerId() == null) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        var order = checkout.place(principal.customerId(), request.addressId(), key);
+        var order = checkout.place(principal.userId(), principal.customerId(), request.addressId(), key);
         return ResponseEntity.created(URI.create("/api/orders/" + order.orderId())).body(order);
     }
 }

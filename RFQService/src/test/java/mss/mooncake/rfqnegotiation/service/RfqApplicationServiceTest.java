@@ -4,8 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -31,6 +33,7 @@ import mss.mooncake.rfqnegotiation.entity.RfqTargetStoreEntity;
 import mss.mooncake.rfqnegotiation.enums.RfqAudience;
 import mss.mooncake.rfqnegotiation.enums.RfqStatus;
 import mss.mooncake.rfqnegotiation.exception.ApiException;
+import mss.mooncake.rfqnegotiation.notification.RfqNotifier;
 import mss.mooncake.rfqnegotiation.repository.QuotationRepository;
 import mss.mooncake.rfqnegotiation.repository.RfqRepository;
 import mss.mooncake.rfqnegotiation.repository.RfqTargetStoreRepository;
@@ -52,13 +55,14 @@ class RfqApplicationServiceTest {
     @Mock private RfqTargetStoreRepository targets;
     @Mock private CatalogServiceClient catalog;
     @Mock private ActorContext actor;
+    @Mock private RfqNotifier notifier;
     private ValidatorFactory validators;
     private RfqApplicationService service;
 
     @BeforeEach
     void setUp() {
         validators = Validation.buildDefaultValidatorFactory();
-        service = new RfqApplicationServiceImpl(rfqs, quotations, targets, catalog, actor, validators.getValidator());
+        service = new RfqApplicationServiceImpl(rfqs, quotations, targets, catalog, actor, validators.getValidator(), notifier);
     }
 
     @AfterEach
@@ -125,6 +129,25 @@ class RfqApplicationServiceTest {
         assertThat(saved.getValue()).extracting(RfqTargetStoreEntity::getSupplierIdRef).containsExactly(20L, 21L);
         assertThat(saved.getValue()).extracting(RfqTargetStoreEntity::getStoreNameSnapshot).containsExactly("Kinh Do", "Givral");
         verify(catalog, times(2)).getStoreSummary(anyLong());
+    }
+
+    @Test
+    void privateRfqNotifiesEachInvitedSupplierOnceAndPublicRfqNobody() {
+        when(actor.customerId()).thenReturn(17L);
+        when(catalog.getStoreSummary(30L)).thenReturn(store(30L, 20L, "Kinh Do", "ACTIVE"));
+        when(catalog.getStoreSummary(31L)).thenReturn(store(31L, 20L, "Kinh Do Q3", "ACTIVE"));
+        when(catalog.getStoreSummary(32L)).thenReturn(store(32L, 21L, "Givral", "ACTIVE"));
+        when(rfqs.save(any())).thenAnswer(invocation -> {
+            RfqEntity rfq = invocation.getArgument(0);
+            ReflectionTestUtils.setField(rfq, "id", 91L);
+            return rfq;
+        });
+
+        service.create(request(100, null, List.of(30L, 31L, 32L)));
+        verify(notifier).rfqInvited(any(RfqEntity.class), eq(List.of(20L, 21L)));
+
+        service.create(request(100, null));
+        verify(notifier, times(1)).rfqInvited(any(), any());
     }
 
     @Test
@@ -252,6 +275,49 @@ class RfqApplicationServiceTest {
     }
 
     @Test
+    void buyerClosingAnRfqTheSystemClosedKeepsItClosedForGood() {
+        when(actor.customerId()).thenReturn(17L);
+        RfqEntity rfq = entity(RfqStatus.CLOSED);
+        rfq.setAutoClosed(true);
+        when(rfqs.findByIdForUpdate(91L)).thenReturn(Optional.of(rfq));
+        assertThat(service.close(91L).status()).isEqualTo(RfqStatus.CLOSED);
+        assertThat(rfq.isAutoClosed()).isFalse();
+    }
+
+    @Test
+    void cancelIsRefusedWhileAQuotationIsTurningOrHasTurnedIntoAnOrder() {
+        when(actor.customerId()).thenReturn(17L);
+        RfqEntity rfq = entity(RfqStatus.OPEN);
+        when(rfqs.findByIdForUpdate(91L)).thenReturn(Optional.of(rfq));
+        when(quotations.hasLiveAcceptance(91L)).thenReturn(true);
+        assertThatThrownBy(() -> service.cancel(91L))
+                .isInstanceOf(ApiException.class).extracting("code").isEqualTo("RFQ_HAS_ORDERS");
+        assertThat(rfq.getStatus()).isEqualTo(RfqStatus.OPEN);
+    }
+
+    @Test
+    void cancellingDeclinesTheQuotationsStillWaiting() {
+        when(actor.customerId()).thenReturn(17L);
+        when(rfqs.findByIdForUpdate(91L)).thenReturn(Optional.of(entity(RfqStatus.OPEN)));
+        var waiting = new mss.mooncake.rfqnegotiation.entity.QuotationEntity();
+        waiting.setStatus(mss.mooncake.rfqnegotiation.enums.QuotationStatus.SUBMITTED);
+        when(quotations.findByRfqIdAndStatus(91L, mss.mooncake.rfqnegotiation.enums.QuotationStatus.SUBMITTED))
+                .thenReturn(List.of(waiting));
+        service.cancel(91L);
+        assertThat(waiting.getStatus()).isEqualTo(mss.mooncake.rfqnegotiation.enums.QuotationStatus.REJECTED);
+        assertThat(waiting.getDecisionReason()).contains("hủy");
+        verify(notifier).rfqCancelled(any(RfqEntity.class), eq(waiting));
+    }
+
+    @Test
+    void quotationIntakeMustCloseBeforeTheRequestedDeliveryDate() {
+        var request = new CreateRfqRequest("Mooncakes", null, 10, null, LocalDate.now(ZoneOffset.UTC).plusDays(5),
+                null, null, OffsetDateTime.now(ZoneOffset.UTC).plusDays(10), null);
+        assertThatThrownBy(() -> service.create(request))
+                .isInstanceOf(ApiException.class).extracting("code").isEqualTo("VALIDATION_FAILED");
+    }
+
+    @Test
     void closeAndCancelAreIdempotentAndLeaveAcceptedTransactionsUntouched() {
         when(actor.customerId()).thenReturn(17L);
         RfqEntity rfq = entity(RfqStatus.OPEN);
@@ -261,7 +327,9 @@ class RfqApplicationServiceTest {
         assertThat(service.cancel(91L).status()).isEqualTo(RfqStatus.CANCELLED);
         assertThat(service.cancel(91L).status()).isEqualTo(RfqStatus.CANCELLED);
         assertThatThrownBy(() -> service.close(91L)).isInstanceOf(ApiException.class);
-        verifyNoInteractions(quotations);
+        // Cancel only reads quotations to refuse when orders exist; nothing accepted is rewritten.
+        verify(quotations, never()).save(any());
+        verifyNoInteractions(notifier);
     }
 
     @Test

@@ -45,6 +45,7 @@ public class SecurityConfig {
                         .requestMatchers("/internal/v1/users/**").hasAnyAuthority("ROLE_INTERNAL_COMMERCE", "ROLE_INTERNAL_RFQ")
                         .requestMatchers("/internal/v1/addresses/**").hasAnyAuthority("ROLE_INTERNAL_COMMERCE", "ROLE_INTERNAL_RFQ")
                         .requestMatchers("/internal/v1/suppliers/**").hasAnyAuthority("ROLE_INTERNAL_CATALOG", "ROLE_INTERNAL_COMMERCE", "ROLE_INTERNAL_RFQ")
+                        .requestMatchers("/internal/v1/notifications", "/internal/v1/notifications/**").hasAnyAuthority("ROLE_INTERNAL_COMMERCE", "ROLE_INTERNAL_RFQ")
                         .requestMatchers("/internal/**").denyAll()
                         .anyRequest().hasAnyAuthority("ROLE_CUSTOMER", "ROLE_SUPPLIER", "ROLE_ADMIN")
                 )

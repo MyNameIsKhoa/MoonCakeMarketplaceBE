@@ -11,6 +11,8 @@ import mss.mooncake.commerce.repository.FinanceRepository.Context;
 import mss.mooncake.commerce.repository.FinanceRepository.Payment;
 import mss.mooncake.commerce.repository.FinanceRepository.CustomerPayment;
 import mss.mooncake.commerce.repository.FinanceRepository.CustomerPaymentItem;
+import mss.mooncake.commerce.repository.FinanceRepository.StockLine;
+import mss.mooncake.commerce.repository.FinanceRepository.SupplierPayout;
 import mss.mooncake.commerce.dto.internal.FinanceOrderContext;
 import mss.mooncake.commerce.dto.internal.FinanceEvent;
 import mss.mooncake.commerce.dto.response.FinanceResponse;
@@ -88,7 +90,10 @@ public class FinanceRepositoryImpl implements FinanceRepository {
     }
 
     public long parentOrderId(long sellerOrderId) {
-        return count("SELECT order_id FROM seller_order WHERE seller_order_id=?", sellerOrderId);
+        var found = jdbc.queryForList("SELECT order_id FROM seller_order WHERE seller_order_id=?", Long.class,
+                sellerOrderId);
+        if (found.isEmpty()) { throw new FinanceException(HttpStatus.NOT_FOUND, "ORDER_NOT_FOUND"); }
+        return found.getFirst();
     }
 
     public List<String> sellerStatuses(long orderId) {
@@ -99,6 +104,69 @@ public class FinanceRepositoryImpl implements FinanceRepository {
     public List<Long> pendingCancellationOrderIds() {
         return jdbc.queryForList("SELECT TOP 50 order_id FROM customer_order WHERE status='CANCEL_REQUESTED' ORDER BY order_id",
                 Long.class);
+    }
+
+    /** Unpaid RFQ orders placed at or before the cutoff; an approved case is never retried, a rejected one is history. */
+    public List<Long> overdueRfqOrderIds(Instant placedBefore) {
+        return jdbc.queryForList("""
+                SELECT TOP 50 o.order_id FROM customer_order o
+                WHERE o.source_type='RFQ' AND o.status IN ('AWAITING_DEPOSIT','AWAITING_PAYMENT') AND o.placed_at<=?
+                AND NOT EXISTS (SELECT 1 FROM seller_order s JOIN cancellation c ON c.seller_order_id=s.seller_order_id
+                WHERE s.order_id=o.order_id AND c.status='APPROVED')
+                ORDER BY o.order_id
+                """, Long.class, utc(placedBefore));
+    }
+
+    /** Unpaid retail checkouts placed at or before the cutoff that still hold confirmed Catalog stock. */
+    public List<Long> overdueRetailOrderIds(Instant placedBefore) {
+        return jdbc.queryForList("""
+                SELECT TOP 50 o.order_id FROM customer_order o
+                WHERE o.source_type='RETAIL' AND o.status IN ('AWAITING_PAYMENT','PENDING_CONFIRMATION')
+                AND o.placed_at<=? AND o.stock_reservation_key IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM seller_order s JOIN cancellation c ON c.seller_order_id=s.seller_order_id
+                WHERE s.order_id=o.order_id AND c.status='APPROVED')
+                ORDER BY o.order_id
+                """, Long.class, utc(placedBefore));
+    }
+
+    public List<Long> autoAcceptableSellerOrderIds(Instant deliveredBefore) {
+        return jdbc.queryForList("""
+                SELECT TOP 50 s.seller_order_id FROM seller_order s
+                JOIN finance_context f ON f.seller_order_id=s.seller_order_id
+                JOIN (SELECT seller_order_id, MAX(delivered_at) AS last_delivered FROM shipment
+                      GROUP BY seller_order_id) d ON d.seller_order_id=s.seller_order_id
+                WHERE s.status='DELIVERED' AND f.delivered=1 AND f.received=0
+                AND d.last_delivered IS NOT NULL AND d.last_delivered<=?
+                AND NOT EXISTS (SELECT 1 FROM dispute x WHERE x.seller_order_id=s.seller_order_id
+                    AND (x.status IN ('OPEN','ADMIN_REVIEW','REFUND_PENDING') OR x.opened_at>=d.last_delivered))
+                ORDER BY s.seller_order_id
+                """, Long.class, utc(deliveredBefore));
+    }
+
+    /** Retail checkouts whose confirmed stock (whole checkout, or a cancelled seller order's lines) awaits Catalog. */
+    public List<Long> unrestoredCancelledRetailOrderIds() {
+        return jdbc.queryForList("""
+                SELECT TOP 50 o.order_id FROM customer_order o WHERE o.source_type='RETAIL'
+                AND o.stock_reservation_key IS NOT NULL AND o.stock_restored_at IS NULL
+                AND (o.status='CANCELLED' OR EXISTS (SELECT 1 FROM seller_order s WHERE s.order_id=o.order_id
+                    AND s.status='CANCELLED' AND s.stock_restored_at IS NULL))
+                ORDER BY o.order_id
+                """, Long.class);
+    }
+
+    public List<Long> unrestoredCancelledSellerOrderIds(long orderId) {
+        return jdbc.queryForList("""
+                SELECT seller_order_id FROM seller_order WHERE order_id=? AND status='CANCELLED'
+                AND stock_restored_at IS NULL ORDER BY seller_order_id
+                """, Long.class, orderId);
+    }
+
+    public List<StockLine> sellerOrderStockLines(long sellerOrderId) {
+        return jdbc.query("""
+                SELECT variant_id_ref, SUM(quantity) AS quantity FROM order_item
+                WHERE seller_order_id=? AND variant_id_ref IS NOT NULL
+                GROUP BY variant_id_ref ORDER BY variant_id_ref
+                """, (rs, n) -> new StockLine(rs.getLong("variant_id_ref"), rs.getInt("quantity")), sellerOrderId);
     }
 
     public boolean hasContext(long orderId) {
@@ -254,9 +322,15 @@ public class FinanceRepositoryImpl implements FinanceRepository {
                 (rs, n) -> instant(rs, 1), orderId);
     }
 
-    public Instant expectedDeliveryAt(long orderId) {
-        return jdbc.queryForObject("SELECT MAX(expected_delivery_at) FROM shipment WHERE seller_order_id=?",
+    public Instant lastPaidAt(long orderId) {
+        return jdbc.queryForObject("SELECT MAX(paid_at) FROM payment WHERE seller_order_id=? AND status='SUCCESS'",
                 (rs, n) -> instant(rs, 1), orderId);
+    }
+
+    public Instant expectedDeliveryAt(long orderId) {
+        return jdbc.queryForObject("""
+                SELECT MAX(expected_delivery_at) FROM shipment WHERE seller_order_id=? AND status<>'CANCELLED'
+                """, (rs, n) -> instant(rs, 1), orderId);
     }
 
     public long refunded(long orderId) {
@@ -282,6 +356,25 @@ public class FinanceRepositoryImpl implements FinanceRepository {
                         rs.getBigDecimal("supplier_payout_amount").longValueExact(), rs.getString("status"),
                         rs.getBigDecimal("refunded_amount").longValueExact()), orderId);
     }
+
+    public List<SupplierPayout> supplierPayouts(long supplierId) {
+        return jdbc.query("""
+                SELECT s.seller_order_id,s.seller_order_no,s.order_id,o.order_no,s.store_name_snapshot,s.status,o.placed_at,
+                t.settlement_id,t.status AS settlement_status,t.fee_amount,t.supplier_payout_amount,t.refunded_amount,
+                t.payout_reference,t.settled_at
+                FROM seller_order s JOIN customer_order o ON o.order_id=s.order_id
+                JOIN finance_context f ON f.seller_order_id=s.seller_order_id
+                LEFT JOIN settlement t ON t.seller_order_id=s.seller_order_id
+                WHERE s.supplier_id_ref=? ORDER BY s.seller_order_id DESC
+                """, (rs, n) -> new SupplierPayout(rs.getLong("seller_order_id"), rs.getString("seller_order_no"),
+                        rs.getLong("order_id"), rs.getString("order_no"), rs.getString("store_name_snapshot"),
+                        rs.getString("status"), instant(rs, "placed_at"), rs.getObject("settlement_id", Long.class),
+                        rs.getString("settlement_status"), exact(rs.getBigDecimal("fee_amount")),
+                        exact(rs.getBigDecimal("supplier_payout_amount")), exact(rs.getBigDecimal("refunded_amount")),
+                        rs.getString("payout_reference"), instant(rs, "settled_at")), supplierId);
+    }
+
+    private static Long exact(java.math.BigDecimal amount) { return amount == null ? null : amount.longValueExact(); }
 
     public List<FinanceResponse.Audit> history(long orderId) {
         return jdbc.query("SELECT TOP 200 * FROM finance_audit WHERE seller_order_id=? ORDER BY audit_id DESC",

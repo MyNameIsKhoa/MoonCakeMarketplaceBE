@@ -281,4 +281,33 @@ class AccountApplicationServiceTest {
         verify(customerProfileRepository).save(profile);
         verify(userRepository).save(user);
     }
+
+    @Test
+    void googleLoginOnUnverifiedAccountInvalidatesPasswordBeforeMarkingVerified() {
+        // Ai đó đăng ký trước bằng email của nạn nhân (chưa xác minh) và tự đặt mật khẩu.
+        UserEntity squatted = new UserEntity("victim@example.com", "attacker-hash", UserStatus.ACTIVE,
+                LocalDateTime.now(), LocalDateTime.now());
+        squatted.setEmailVerified(false);
+        ReflectionTestUtils.setField(squatted, "id", 9L);
+        when(userRepository.findByEmail("victim@example.com")).thenReturn(Optional.of(squatted));
+
+        accountService.loginWithGoogle("Victim@Example.com", "Victim");
+
+        assertTrue(squatted.isEmailVerified());
+        assertNull(squatted.getPasswordHash(), "mật khẩu do người chưa xác minh email đặt phải bị vô hiệu");
+        verify(userRepository).save(squatted);
+    }
+
+    @Test
+    void googleLoginOnVerifiedAccountKeepsExistingPassword() {
+        UserEntity owner = new UserEntity("owner@example.com", "owner-hash", UserStatus.ACTIVE,
+                LocalDateTime.now(), LocalDateTime.now());
+        ReflectionTestUtils.setField(owner, "id", 8L);
+        when(userRepository.findByEmail("owner@example.com")).thenReturn(Optional.of(owner));
+
+        accountService.loginWithGoogle("owner@example.com", "Owner");
+
+        assertTrue(owner.isEmailVerified());
+        assertEquals("owner-hash", owner.getPasswordHash());
+    }
 }

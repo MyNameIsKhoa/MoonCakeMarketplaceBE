@@ -27,4 +27,6 @@ public interface FinanceService {
     void createSettlement(long orderId, String commandKey, Actor actor);
     void beginPayout(long orderId, long id, String commandKey, Actor actor);
     void confirmPayout(long orderId, long id, String reference, String evidence, String commandKey, Actor actor);
+    /** Settlement state of the calling supplier's seller orders (page) with pending/ready/paid totals. */
+    FinanceResponse.SupplierPayouts supplierPayouts(Actor actor, int page, int size);
 }

@@ -174,8 +174,12 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
         });
 
         if (!user.isEmailVerified()) {
+            // Email chưa xác minh nghĩa là mật khẩu hiện có có thể do người khác đặt (đăng ký trước bằng email này).
+            // Google vừa chứng minh quyền sở hữu email: vô hiệu mật khẩu cũ; chủ thật dùng "Quên mật khẩu" để đặt lại.
+            user.setPasswordHash(null);
             user.setEmailVerified(true);
             user.setUpdatedAt(now);
+            userRepository.save(user);
         }
 
         if (user.getStatus() != UserStatus.ACTIVE) {

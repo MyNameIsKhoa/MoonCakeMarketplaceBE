@@ -35,6 +35,7 @@ public class SellerOrderController {
     public SellerOrderResponse get(@AuthenticationPrincipal CommercePrincipal principal,
                                    @PathVariable Long sellerOrderId) {
         if (principal == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
-        return queries.getSellerOrder(principal.userId(), principal.customerId(), sellerOrderId);
+        return queries.getSellerOrder(principal.userId(), principal.customerId(), sellerOrderId,
+                principal.hasRole("ROLE_ADMIN"));
     }
 }

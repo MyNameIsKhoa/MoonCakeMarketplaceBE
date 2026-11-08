@@ -23,11 +23,14 @@ import mss.mooncake.rfqnegotiation.client.dto.catalog.StoreSummaryResponse;
 import mss.mooncake.rfqnegotiation.dto.request.CreateRfqRequest;
 import mss.mooncake.rfqnegotiation.dto.response.PageResponse;
 import mss.mooncake.rfqnegotiation.dto.response.RfqResponse;
+import mss.mooncake.rfqnegotiation.entity.QuotationEntity;
 import mss.mooncake.rfqnegotiation.entity.RfqEntity;
 import mss.mooncake.rfqnegotiation.entity.RfqTargetStoreEntity;
+import mss.mooncake.rfqnegotiation.enums.QuotationStatus;
 import mss.mooncake.rfqnegotiation.enums.RfqAudience;
 import mss.mooncake.rfqnegotiation.enums.RfqStatus;
 import mss.mooncake.rfqnegotiation.exception.ApiException;
+import mss.mooncake.rfqnegotiation.notification.RfqNotifier;
 import mss.mooncake.rfqnegotiation.repository.QuotationRepository;
 import mss.mooncake.rfqnegotiation.repository.RfqRepository;
 import mss.mooncake.rfqnegotiation.repository.RfqTargetStoreRepository;
@@ -52,16 +55,18 @@ public class RfqApplicationServiceImpl implements RfqApplicationService {
     private final CatalogServiceClient catalog;
     private final ActorContext actor;
     private final Validator validator;
+    private final RfqNotifier notifier;
 
     public RfqApplicationServiceImpl(RfqRepository rfqs, QuotationRepository quotations,
                                      RfqTargetStoreRepository targets, CatalogServiceClient catalog,
-                                     ActorContext actor, Validator validator) {
+                                     ActorContext actor, Validator validator, RfqNotifier notifier) {
         this.rfqs = rfqs;
         this.quotations = quotations;
         this.targets = targets;
         this.catalog = catalog;
         this.actor = actor;
         this.validator = validator;
+        this.notifier = notifier;
     }
 
     @Override
@@ -88,6 +93,7 @@ public class RfqApplicationServiceImpl implements RfqApplicationService {
             return response(saved, true, null);
         }
         targets.saveAll(invited);
+        notifier.rfqInvited(saved, invited.stream().map(RfqTargetStoreEntity::getSupplierIdRef).distinct().toList());
         return response(saved, true, invited);
     }
 
@@ -177,6 +183,8 @@ public class RfqApplicationServiceImpl implements RfqApplicationService {
     public RfqResponse close(Long rfqId) {
         RfqEntity rfq = ownedForUpdate(rfqId);
         if (rfq.getStatus() == RfqStatus.CLOSED) {
+            // The buyer's own close wins: a cancelled order no longer reopens an RFQ the system had closed.
+            rfq.setAutoClosed(false);
             return ownerResponse(rfq);
         }
         if (rfq.getStatus() != RfqStatus.OPEN) {
@@ -190,7 +198,20 @@ public class RfqApplicationServiceImpl implements RfqApplicationService {
     @Transactional
     public RfqResponse cancel(Long rfqId) {
         RfqEntity rfq = ownedForUpdate(rfqId);
+        if (rfq.getStatus() == RfqStatus.CANCELLED) {
+            return ownerResponse(rfq);
+        }
+        // Orders made from this RFQ live on; the buyer can still close it to stop new quotations.
+        if (quotations.hasLiveAcceptance(rfqId)) {
+            throw ApiException.conflict("RFQ_HAS_ORDERS", "Yêu cầu đã có báo giá được chấp nhận hoặc đang tạo đơn; hãy đóng yêu cầu thay vì hủy");
+        }
         rfq.setStatus(RfqStatus.CANCELLED);
+        for (QuotationEntity waiting : quotations.findByRfqIdAndStatus(rfqId, QuotationStatus.SUBMITTED)) {
+            waiting.setStatus(QuotationStatus.REJECTED);
+            waiting.setDecisionReason("Người mua đã hủy yêu cầu báo giá");
+            quotations.save(waiting);
+            notifier.rfqCancelled(rfq, waiting);
+        }
         return ownerResponse(rfq);
     }
 
@@ -210,6 +231,11 @@ public class RfqApplicationServiceImpl implements RfqApplicationService {
         Map<String, String> errors = new LinkedHashMap<>();
         for (ConstraintViolation<CreateRfqRequest> violation : validator.validate(request)) {
             errors.putIfAbsent(violation.getPropertyPath().toString(), violation.getMessage());
+        }
+        if (request.expiresAt() != null && request.requestedDeliveryDate() != null
+                && !request.expiresAt().atZoneSameInstant(java.time.ZoneId.of("Asia/Ho_Chi_Minh")).toLocalDate()
+                        .isBefore(request.requestedDeliveryDate())) {
+            errors.putIfAbsent("expiresAt", "Hạn nhận báo giá phải trước ngày cần giao");
         }
         if (!errors.isEmpty()) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "Invalid RFQ fields", errors);

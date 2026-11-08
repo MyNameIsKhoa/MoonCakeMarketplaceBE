@@ -5,8 +5,10 @@ import jakarta.persistence.criteria.Subquery;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import mss.mooncake.catalogstore.entity.CategoryEntity;
 import mss.mooncake.catalogstore.entity.ProductEntity;
 import mss.mooncake.catalogstore.entity.StoreEntity;
+import mss.mooncake.catalogstore.enums.CategoryStatus;
 import mss.mooncake.catalogstore.enums.ProductStatus;
 import mss.mooncake.catalogstore.enums.StoreStatus;
 import org.springframework.data.jpa.domain.Specification;
@@ -27,11 +29,12 @@ public interface ProductRepository extends JpaRepository<ProductEntity, Long>,
 
   // ─── Specification cho search (CA06); filter null/rỗng được bỏ qua ─────────────
 
-  /** Public: chỉ product ACTIVE thuộc store ACTIVE. */
+  /** Public: chỉ product ACTIVE thuộc store ACTIVE và không thuộc danh mục đã bị ẩn (INACTIVE). */
   static Specification<ProductEntity> publicSearch(String q, Long storeId, Long categoryId) {
     List<Specification<ProductEntity>> specs = new ArrayList<>();
     specs.add((root, query, cb) -> cb.equal(root.get("status"), ProductStatus.ACTIVE));
     specs.add(storeHasStatus(StoreStatus.ACTIVE));
+    specs.add(categoryNotHidden());
     addOptionalFilters(specs, q, storeId, categoryId);
     return Specification.allOf(specs);
   }
@@ -60,6 +63,18 @@ public interface ProductRepository extends JpaRepository<ProductEntity, Long>,
         .replace("%", "\\%")
         .replace("_", "\\_");
     return (root, query, cb) -> cb.like(cb.lower(root.get("name")), "%" + escaped + "%", '\\');
+  }
+
+  /** NOT EXISTS danh mục của product có trạng thái khác ACTIVE (product không có quan hệ JPA tới Category). */
+  private static Specification<ProductEntity> categoryNotHidden() {
+    return (root, query, cb) -> {
+      Subquery<Long> sub = query.subquery(Long.class);
+      Root<CategoryEntity> category = sub.from(CategoryEntity.class);
+      sub.select(category.get("id"))
+          .where(cb.equal(category.get("id"), root.get("categoryId")),
+              cb.notEqual(category.get("status"), CategoryStatus.ACTIVE));
+      return cb.not(cb.exists(sub));
+    };
   }
 
   /** Product không có quan hệ JPA tới Store (chỉ giữ storeId) nên dùng subquery EXISTS. */

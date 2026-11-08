@@ -1,6 +1,7 @@
 package mss.mooncake.identity.dto.request;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 public record AddressRequest(
@@ -10,6 +11,7 @@ public record AddressRequest(
 
     @NotBlank(message = "Recipient phone is required")
     @Size(max = 30, message = "Recipient phone cannot exceed 30 characters")
+    @Pattern(regexp = ValidationPatterns.PHONE_OR_EMPTY, message = ValidationPatterns.PHONE_MESSAGE)
     String recipientPhone,
 
     @NotBlank(message = "Address line is required")
