@@ -46,6 +46,7 @@ public class SecurityConfig {
                         .permitAll()
                         // Category dùng chung toàn sàn: chỉ admin được ghi (CA03–CA05)
                         .requestMatchers("/api/categories", "/api/categories/**").hasAuthority("ROLE_ADMIN")
+                        .requestMatchers("/api/admin/catalog/**").hasAuthority("ROLE_ADMIN")
                         // Swagger
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .requestMatchers("/internal/v1/inventory/**").hasAuthority("ROLE_INTERNAL_COMMERCE")

@@ -3,6 +3,7 @@ package mss.mooncake.commerce.service.impl;
 import feign.FeignException;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import mss.mooncake.commerce.client.IdentityServiceClient;
 import mss.mooncake.commerce.client.dto.identity.SupplierSummaryResponse;
@@ -17,6 +18,7 @@ import mss.mooncake.commerce.entity.DeliveryAddressEntity;
 import mss.mooncake.commerce.entity.OrderItemEntity;
 import mss.mooncake.commerce.entity.SellerOrderEntity;
 import mss.mooncake.commerce.repository.CustomerOrderRepository;
+import mss.mooncake.commerce.repository.CancellationRepository;
 import mss.mooncake.commerce.repository.DeliveryAddressRepository;
 import mss.mooncake.commerce.repository.OrderItemRepository;
 import mss.mooncake.commerce.repository.SellerOrderRepository;
@@ -35,15 +37,17 @@ public class OrderQueryServiceImpl implements OrderQueryService {
     private final SellerOrderRepository sellerOrders;
     private final OrderItemRepository items;
     private final IdentityServiceClient identity;
+    private final CancellationRepository cancellations;
 
     public OrderQueryServiceImpl(CustomerOrderRepository orders, DeliveryAddressRepository addresses,
                                  SellerOrderRepository sellerOrders, OrderItemRepository items,
-                                 IdentityServiceClient identity) {
+                                 IdentityServiceClient identity, CancellationRepository cancellations) {
         this.orders = orders;
         this.addresses = addresses;
         this.sellerOrders = sellerOrders;
         this.items = items;
         this.identity = identity;
+        this.cancellations = cancellations;
     }
 
     @Override
@@ -79,10 +83,13 @@ public class OrderQueryServiceImpl implements OrderQueryService {
     public Page<SellerOrderSummaryResponse> listSupplierOrders(Long userId, Pageable pageable) {
         if (pageable.getPageSize() > 100) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "size must be <= 100");
         SupplierSummaryResponse supplier = supplierForUser(userId, HttpStatus.FORBIDDEN);
-        return sellerOrders.findBySupplierIdRef(supplier.supplierId(), pageable).map(seller ->
+        Page<SellerOrderEntity> page = sellerOrders.findBySupplierIdRef(supplier.supplierId(), pageable);
+        Set<Long> pending = page.isEmpty() ? Set.of() : Set.copyOf(cancellations.pendingSellerOrderIds(
+                page.getContent().stream().map(SellerOrderEntity::getId).toList()));
+        return page.map(seller ->
                 new SellerOrderSummaryResponse(seller.getId(), seller.getOrderId(),
                         seller.getSellerOrderNo(), seller.getStoreIdRef(), seller.getStoreNameSnapshot(),
-                        seller.getStatus(), seller.getTotalAmount()));
+                        seller.getStatus(), seller.getTotalAmount(), pending.contains(seller.getId())));
     }
 
     @Override

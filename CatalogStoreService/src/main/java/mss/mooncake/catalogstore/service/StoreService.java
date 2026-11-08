@@ -28,6 +28,7 @@ public interface StoreService {
      * Lấy tất cả store (public, phục vụ storefront listing).
      */
     List<StoreResponse> getAllStores();
+    List<StoreResponse> getAllStoresForAdmin();
 
     /**
      * Lấy danh sách store theo supplierId.

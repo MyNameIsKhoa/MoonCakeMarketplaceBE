@@ -199,8 +199,7 @@ public class FinanceServiceImpl implements FinanceService {
         if (!claimed) { return repository.payment(reserved.id()).response(); }
         try {
             var link = provider.create(reserved.orderCode(), reserved.amount(), reserved.expiresAt(),
-                    PaymentDescription.seller(repository.sellerOrderNumber(reserved.orderId()),
-                            reserved.orderId(), reserved.type()));
+                    PaymentDescription.seller(repository.context(reserved.orderId()).supplierId(), reserved.type()));
             return transaction.execute(status -> {
                 repository.lock(reserved.orderId());
                 require(link.orderCode() == reserved.orderCode() && link.amount() == reserved.amount()
@@ -282,7 +281,11 @@ public class FinanceServiceImpl implements FinanceService {
         var reservation = transaction.execute(status -> {
             var p = repository.payment(paymentId);
             var c = repository.lock(p.orderId());
-            access(c, actor, cancel);
+            if (cancel) {
+                require(isBuyer(c, actor) || actor.admin(), "FINANCE_ACCESS_DENIED");
+            } else {
+                access(c, actor, false);
+            }
             require(p.orderCode() != null, "PAYMENT_LINK_NOT_CREATED");
             return p;
         });
@@ -344,6 +347,9 @@ public class FinanceServiceImpl implements FinanceService {
     public void requestCancellation(long orderId, String reason, String commandKey, Actor actor) {
         command(orderId, commandKey, "cancel:" + reason, actor, () -> {
             noPayout(orderId);
+            require(repository.count("SELECT COUNT(*) FROM seller_order WHERE seller_order_id=? "
+                    + "AND status NOT IN ('CANCEL_REQUESTED','CANCELLED','DELIVERED','ACCEPTED','SETTLED','COMPLETED','DISPUTED')",
+                    orderId) == 1, "ORDER_CANNOT_BE_CANCELLED");
             require(repository.cancellations(orderId).isEmpty(), "CANCELLATION_ALREADY_EXISTS");
             long id = repository.insert("""
                     INSERT INTO cancellation(seller_order_id,actor_type,actor_id_ref,reason,status,requested_at)
@@ -362,8 +368,16 @@ public class FinanceServiceImpl implements FinanceService {
             require(!approve || (!repository.active(orderId) && !repository.activeCustomerPayment(orderId)), "CANCEL_UNPAID_LINKS_FIRST");
             require(repository.count("SELECT COUNT(*) FROM customer_order WHERE order_id=? AND status='CANCEL_REQUESTED'",
                     repository.parentOrderId(orderId)) == 0, "CANCELLATION_IN_PROGRESS");
+            if (approve) {
+                require(!repository.retailOrder(repository.parentOrderId(orderId)), "RETAIL_CANCELLATION_REQUIRES_STOCK_RESTORE");
+                require(repository.paid(orderId) == 0, "PAID_CANCELLATION_REQUIRES_REFUND_REVIEW");
+            }
             repository.update("UPDATE cancellation SET status=?,decision_reason=?,cancelled_at=? WHERE cancellation_id=?",
                     approve ? "APPROVED" : "REJECTED", reason, approve ? FinanceRepository.utc(Instant.now()) : null, id);
+            if (approve) {
+                repository.update("UPDATE seller_order SET status='CANCELLED' WHERE seller_order_id=?", orderId);
+                integration.syncCustomerOrder(orderId);
+            }
             repository.event(orderId, "CANCELLATION_DECIDED", id, Long.toString(actor.userId()), reason);
         });
     }

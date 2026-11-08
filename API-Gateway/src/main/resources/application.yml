@@ -8,6 +8,18 @@ spring:
       server:
         webmvc:
           routes:
+            - id: admin-catalog
+              uri: ${CATALOG_SERVICE_URL:http://localhost:8082}
+              predicates:
+                - Path=/api/admin/catalog/**
+            - id: admin-commerce-metrics
+              uri: ${COMMERCE_SERVICE_URL:http://localhost:8083}
+              predicates:
+                - Path=/api/admin/commerce/**
+            - id: admin-rfq-metrics
+              uri: ${RFQ_SERVICE_URL:http://localhost:8084}
+              predicates:
+                - Path=/api/admin/rfq/**
             - id: identity-service
               uri: ${IDENTITY_SERVICE_URL:http://localhost:8081}
               predicates:

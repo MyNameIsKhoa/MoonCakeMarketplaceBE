@@ -234,18 +234,17 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
         UserEntity user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + userId));
 
-        CustomerProfileEntity profile = customerProfileRepository.findByUserId(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("Customer profile not found for user id: " + userId));
+        CustomerProfileEntity profile = customerProfileRepository.findByUserId(userId).orElse(null);
 
         return new UserProfileResponse(
                 user.getId(),
-                profile.getId(),
+                profile != null ? profile.getId() : null,
                 user.getEmail(),
-                profile.getFullName(),
-                profile.getPhone(),
+                profile != null ? profile.getFullName() : null,
+                profile != null ? profile.getPhone() : null,
                 user.getStatus().name(),
-                profile.getCreatedAt(),
-                profile.getUpdatedAt()
+                profile != null ? profile.getCreatedAt() : user.getCreatedAt(),
+                profile != null ? profile.getUpdatedAt() : user.getUpdatedAt()
         );
     }
 

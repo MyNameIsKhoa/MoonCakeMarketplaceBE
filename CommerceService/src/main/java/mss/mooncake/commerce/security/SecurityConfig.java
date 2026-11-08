@@ -31,6 +31,7 @@ public class SecurityConfig {
                         .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/payments/payos/callback").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/reviews/**").permitAll()
+                        .requestMatchers("/api/admin/commerce/**").hasAuthority("ROLE_ADMIN")
                         .requestMatchers("/internal/**").hasAuthority("ROLE_INTERNAL_RFQ")
                         .anyRequest().hasAnyAuthority("ROLE_CUSTOMER", "ROLE_SUPPLIER", "ROLE_ADMIN"))
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)

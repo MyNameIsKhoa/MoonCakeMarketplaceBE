@@ -10,9 +10,9 @@ class PaymentDescriptionTest {
     void merchantReferenceIsReadableAndFitsPayOsDescription() {
         assertThat(PaymentDescription.customer("MSS-20261024-10005", 10005))
                 .isEqualTo("DH MSS-20261024-10005").hasSizeLessThanOrEqualTo(25);
-        assertThat(PaymentDescription.seller("MSS-20261024-10005-10006", 10006, "DEPOSIT"))
-                .isEqualTo("COC 20261024-10005-10006").hasSizeLessThanOrEqualTo(25);
-        assertThat(PaymentDescription.seller("VERY-LONG-SELLER-ORDER-NUMBER", 10006, "FULL"))
-                .isEqualTo("DH 10006");
+        assertThat(PaymentDescription.seller(12, "DEPOSIT"))
+                .matches("COC S12 [0-9]{10} [A-Z]{4}").hasSizeLessThanOrEqualTo(25);
+        assertThat(PaymentDescription.seller(123456789, "FULL"))
+                .matches("DH S[0-9A-Z]+ [0-9A-Z]+ [A-Z]{4}").hasSizeLessThanOrEqualTo(25);
     }
 }
