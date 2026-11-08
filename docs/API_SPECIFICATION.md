@@ -199,6 +199,8 @@ Server tạo nghĩa vụ `FULL`, `DEPOSIT`, `REMAINING` theo đơn hàng. Khách
 
 ### 5.3. Hủy đơn, hoàn tiền và tranh chấp
 
+Các dòng FI11–FI15b phản ánh contract Commerce cập nhật ngày 08/11/2026; các dòng khác trong tài liệu vẫn là danh mục API mục tiêu.
+
 | Mã | Phương thức và endpoint | Chức năng | Quyền |
 |---|---|---|---|
 | FI05* | `POST /api/cancellations/preview` | Kiểm tra điều kiện hủy và số tiền dự kiến hoàn | Bên tham gia hoặc quản trị |
@@ -207,13 +209,15 @@ Server tạo nghĩa vụ `FULL`, `DEPOSIT`, `REMAINING` theo đơn hàng. Khách
 | FI08 | `GET /api/cancellations/{cancellationId}` | Xem kết quả xử lý hủy | Bên tham gia hoặc quản trị |
 | FI09 | `GET /api/refunds` | Xem danh sách hoàn tiền | Bên tham gia hoặc quản trị |
 | FI10 | `GET /api/refunds/{refundId}` | Xem chi tiết hoàn tiền | Bên tham gia hoặc quản trị |
-| FI11* | `POST /api/refunds` | Tạo hoàn tiền theo quyết định được phê duyệt | Quản trị |
-| FI12 | `POST /api/disputes` | Mở tranh chấp đối với phần đơn | Bên tham gia theo chính sách |
-| FI13 | `GET /api/disputes` | Xem danh sách tranh chấp | Bên tham gia hoặc quản trị |
-| FI14 | `GET /api/disputes/{disputeId}` | Xem nội dung và tiến độ xử lý | Bên tham gia hoặc quản trị |
-| FI15* | `POST /api/disputes/{disputeId}/resolve` | Giải quyết tranh chấp | Quản trị |
+| FI11* | `POST /api/payments/orders/{sellerOrderId}/refunds` | Tạo khoản hoàn thủ công theo quyết định, liên kết `disputeId` nếu có | Quản trị |
+| FI12 | `POST /api/payments/orders/{sellerOrderId}/disputes` | Người mua mở khiếu nại sau thanh toán | Người mua |
+| FI13 | `GET /api/payments/orders/{sellerOrderId}` | Xem khiếu nại và lịch sử tài chính của phần đơn | Bên tham gia hoặc quản trị |
+| FI14 | `POST /api/payments/orders/{sellerOrderId}/disputes/{disputeId}/respond` | Nhà bán phản hồi | Nhà bán |
+| FI15 | `POST /api/payments/orders/{sellerOrderId}/disputes/{disputeId}/escalate` | Chuyển admin sau phản hồi hoặc sau 48 giờ | Người mua hoặc quản trị |
+| FI15a | `POST /api/payments/orders/{sellerOrderId}/disputes/{disputeId}/decision` | Từ chối hoặc quyết định số tiền hoàn, kèm lý do | Quản trị |
+| FI15b | `GET /api/admin/commerce/disputes` | Xem hàng đợi khiếu nại | Quản trị |
 
-Số tiền hoàn phụ thuộc bên hủy, thời điểm và trạng thái đơn. Tổng tiền hoàn không vượt số tiền đủ điều kiện hoàn. Tranh chấp đang chặn xử lý phải ngăn việc chi trả cho nhà cung cấp.
+Số tiền hoàn không vượt số tiền đã thu còn đủ điều kiện hoàn. Khiếu nại đang xử lý chặn giải ngân. Khoản hoàn theo quyết định chỉ kết thúc khi quản trị xác nhận chứng từ chuyển tiền; phí nền tảng 5% tính trên số tiền còn lại sau hoàn. Giải ngân chờ hết 7 ngày kể từ khi giao hàng.
 
 ### 5.4. Đối soát và chi trả
 
@@ -225,7 +229,7 @@ Số tiền hoàn phụ thuộc bên hủy, thời điểm và trạng thái đ�
 | FI19* | `POST /api/settlements` | Lập đối soát cho phần đơn | Quản trị |
 | FI20* | `POST /api/settlements/{settlementId}/payout` | Yêu cầu chi trả cho nhà cung cấp | Quản trị |
 
-Phí nền tảng được lưu tại thời điểm đối soát với mức 5% theo phạm vi hiện tại. Chỉ chi trả khi đủ điều kiện giao hàng/nghiệm thu và không có tranh chấp chặn. Nếu xử lý tự động, tác vụ hệ thống gọi service nội bộ thay cho API quản trị tương ứng.
+Phí nền tảng được lưu tại thời điểm đối soát với mức 5% trên số tiền đã thu còn lại sau hoàn tiền thành công. Chỉ chi trả sau 7 ngày kể từ khi giao, đã nghiệm thu hoặc có quyết định admin cho khiếu nại sau giao, và không còn hồ sơ đang chặn. Chi trả hiện được xác nhận thủ công bằng mã giao dịch và chứng từ.
 
 ### 5.5. Giao hàng, nghiệm thu và đánh giá
 

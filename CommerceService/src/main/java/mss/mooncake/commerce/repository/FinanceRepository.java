@@ -61,6 +61,11 @@ public interface FinanceRepository {
     List<FinanceResponse.Case> cancellations(long orderId);
     List<FinanceResponse.Case> refunds(long orderId);
     List<FinanceResponse.Case> disputes(long orderId);
+    java.time.Instant deliveredAt(long orderId);
+    java.time.Instant expectedDeliveryAt(long orderId);
+    long refunded(long orderId);
+    long refundedForDispute(long disputeId);
+    List<Long> pendingDisputeOrderIds(int offset, int limit);
     List<FinanceResponse.Settlement> settlements(long orderId);
     List<FinanceResponse.Audit> history(long orderId);
     void event(long orderId, String type, long resourceId, String actor, String detail);

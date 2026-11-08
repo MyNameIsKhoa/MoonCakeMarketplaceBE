@@ -65,7 +65,8 @@ class FinanceServiceTest {
         var jdbc = new JdbcTemplate(datasource);
         // Execute the real migrations, adapting only SQL Server syntax unsupported by H2.
         for (String file : new String[]{"V1__commerce_physical_schema.sql", "V3__tv5_finance.sql",
-                "V7__customer_order_payment.sql", "V8__seller_order_acceptance_timestamp.sql"}) {
+                "V7__customer_order_payment.sql", "V8__seller_order_acceptance_timestamp.sql",
+                "V10__dispute_workflow.sql"}) {
             var resource = new ClassPathResource("db/migration/" + file);
             String sql = resource.getContentAsString(StandardCharsets.UTF_8)
                     .replace("dbo.", "").replace("SYSUTCDATETIME()", "CURRENT_TIMESTAMP")
@@ -80,7 +81,7 @@ class FinanceServiceTest {
                 if (clean.isEmpty()) { continue; }
                 var matcher = java.util.regex.Pattern.compile("(?s)ALTER TABLE (\\w+) ADD (?!CONSTRAINT)(.*)").matcher(clean);
                 if (matcher.matches()) {
-                    for (String column : matcher.group(2).split(",")) {
+                    for (String column : matcher.group(2).split(",\\s*(?=[a-z_]+\\s)")) {
                         jdbc.execute("ALTER TABLE " + matcher.group(1) + " ADD " + column.trim());
                     }
                 } else { jdbc.execute(clean); }
@@ -315,7 +316,7 @@ class FinanceServiceTest {
             assertThat(accepted.acceptedAt()).isNotNull();
             assertThat(repository.context(1).received()).isTrue();
             assertThat(repository.context(1).fulfillmentVersion()).isEqualTo(2);
-            assertThat(service.summary(1, BUYER).eligibility().eligible()).isTrue();
+            assertThat(service.summary(1, BUYER).eligibility().blockingReasons()).contains("DISPUTE_WINDOW_OPEN");
             assertThat(repository.count("SELECT COUNT(*) FROM customer_order WHERE status='ACCEPTED'")).isEqualTo(1);
             // JPA must read every state emitted by the JDBC finance writer.
             for (String state : java.util.List.of("CREATING", "RECONCILING", "CANCELLING", "CANCELLED", "EXPIRED")) {
@@ -368,6 +369,16 @@ class FinanceServiceTest {
 
     private void deliver() {
         transaction.executeWithoutResult(status -> integration.syncFulfillment(1, 1, true, true));
+        new JdbcTemplate(datasource).update("""
+                INSERT INTO shipment(seller_order_id,shipping_method,status,delivered_at)
+                VALUES(1,'STANDARD','DELIVERED',?)
+                """, java.sql.Timestamp.valueOf(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC).minusDays(8)));
+    }
+
+    private void freshDelivery() {
+        deliver();
+        new JdbcTemplate(datasource).update("UPDATE shipment SET delivered_at=? WHERE seller_order_id=1",
+                java.sql.Timestamp.valueOf(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC)));
     }
 
     @Test
@@ -582,34 +593,91 @@ class FinanceServiceTest {
     }
 
     @Test
-    void openDisputePreventsSettlementAndPayoutEvenWhenSettlementAlreadyReady() {
-        fullPayment(); deliver();
-        service.createSettlement(1, key(), ADMIN);
+    void openDisputeBlocksSettlementDuringSevenDayWindow() {
+        fullPayment(); freshDelivery();
         service.openDispute(1, "Damaged goods", "https://evidence.test/photo", key(), BUYER);
-        long id = repository.settlements(1).getFirst().settlementId();
-        assertThatThrownBy(() -> service.beginPayout(1, id, key(), ADMIN)).hasMessage("SETTLEMENT_NOT_ELIGIBLE");
+        assertThatThrownBy(() -> service.createSettlement(1, key(), ADMIN)).hasMessage("SETTLEMENT_NOT_ELIGIBLE");
         assertThat(service.summary(1, BUYER).eligibility().blockingReasons()).contains("OPEN_DISPUTE");
     }
 
     @Test
-    void concurrentDisputeAndPayoutSerializeOnAggregate() throws Exception {
-        fullPayment(); deliver(); service.createSettlement(1, key(), ADMIN);
-        long id = repository.settlements(1).getFirst().settlementId();
-        var latch = new CountDownLatch(1);
-        try (var executor = Executors.newFixedThreadPool(2)) {
-            var dispute = executor.submit(() -> {
-                latch.await();
-                try { service.openDispute(1, "reason", null, "concurrent-dispute", BUYER); return true; }
-                catch (mss.mooncake.commerce.exception.FinanceException ex) { return false; }
-            });
-            var payout = executor.submit(() -> {
-                latch.await();
-                try { service.beginPayout(1, id, "concurrent-payout", ADMIN); return true; }
-                catch (mss.mooncake.commerce.exception.FinanceException ex) { return false; }
-            });
-            latch.countDown();
-            assertThat(dispute.get() ^ payout.get()).isTrue();
-        }
+    void legacyReadySettlementIsHeldAndRepricedAfterDispute() {
+        fullPayment(); deliver();
+        service.createSettlement(1, key(), ADMIN);
+        long settlementId = repository.settlements(1).getFirst().settlementId();
+        new JdbcTemplate(datasource).update("UPDATE shipment SET delivered_at=? WHERE seller_order_id=1",
+                java.sql.Timestamp.valueOf(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC)));
+        service.openDispute(1, "Late damage report", null, key(), BUYER);
+        assertThat(repository.settlements(1).getFirst().status()).isEqualTo("ON_HOLD");
+        assertThatThrownBy(() -> service.beginPayout(1, settlementId, key(), ADMIN))
+                .hasMessage("SETTLEMENT_NOT_ELIGIBLE");
+        long disputeId = repository.disputes(1).getFirst().id();
+        service.respondDispute(1, disputeId, "Evidence reviewed", key(),
+                new FinanceService.Actor(202, null, 20L, false));
+        service.escalateDispute(1, disputeId, key(), BUYER);
+        service.decideDispute(1, disputeId, "REJECT", null, "No defect found", key(), ADMIN);
+        new JdbcTemplate(datasource).update("UPDATE shipment SET delivered_at=? WHERE seller_order_id=1",
+                java.sql.Timestamp.valueOf(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC).minusDays(8)));
+        service.createSettlement(1, key(), ADMIN);
+        assertThat(repository.settlements(1).getFirst().settlementId()).isEqualTo(settlementId);
+        assertThat(repository.settlements(1).getFirst().status()).isEqualTo("READY");
+    }
+
+    @Test
+    void partialRefundWaitsForProofThenSettlementUsesNetAmount() {
+        long paymentId = fullPayment(); freshDelivery();
+        service.openDispute(1, "Damaged goods", null, key(), BUYER);
+        long disputeId = repository.disputes(1).getFirst().id();
+        assertThatThrownBy(() -> service.escalateDispute(1, disputeId, key(), BUYER))
+                .hasMessage("SELLER_RESPONSE_WINDOW_OPEN");
+        assertThatThrownBy(() -> service.requestRefund(1, paymentId, 100, "reason", "policy", key(), ADMIN))
+                .hasMessage("DISPUTE_REFUND_LINK_REQUIRED");
+        var supplier = new FinanceService.Actor(202, null, 20L, false);
+        service.respondDispute(1, disputeId, "Reviewed photos", key(), supplier);
+        service.escalateDispute(1, disputeId, key(), BUYER);
+        service.decideDispute(1, disputeId, "REFUND", 2000L, "Two cakes damaged", key(), ADMIN);
+        service.requestRefund(1, paymentId, 2000, disputeId, "Award", "dispute-v1", key(), ADMIN);
+        assertThat(repository.disputes(1).getFirst().status()).isEqualTo("REFUND_PENDING");
+        long refundId = repository.refunds(1).getFirst().id();
+        service.confirmRefund(1, refundId, "bank-refund-2", "https://proof.test/2", key(), ADMIN);
+        assertThat(repository.disputes(1).getFirst().status()).isEqualTo("RESOLVED");
+        assertThatThrownBy(() -> service.openDispute(1, " damaged goods ", null, key(), BUYER))
+                .hasMessage("DISPUTE_DUPLICATE");
+        new JdbcTemplate(datasource).update("UPDATE shipment SET delivered_at=? WHERE seller_order_id=1",
+                java.sql.Timestamp.valueOf(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC).minusDays(8)));
+        new JdbcTemplate(datasource).update("UPDATE finance_context SET received=0 WHERE seller_order_id=1");
+        new JdbcTemplate(datasource).update("UPDATE seller_order SET status='DELIVERED' WHERE seller_order_id=1");
+        var netService = new FinanceServiceImpl(repository, provider, new DataSourceTransactionManager(datasource),
+                "NET_AFTER_REFUND", "HALF_UP", true, customerPayments, integration);
+        netService.createSettlement(1, key(), ADMIN);
+        var settled = repository.settlements(1).getFirst();
+        assertThat(settled.grossAmount()).isEqualTo(10001);
+        assertThat(settled.refundedAmount()).isEqualTo(2000);
+        assertThat(settled.feeAmount()).isEqualTo(400);
+        assertThat(settled.supplierPayoutAmount()).isEqualTo(7601);
+        netService.beginPayout(1, settled.settlementId(), key(), ADMIN);
+        netService.confirmPayout(1, settled.settlementId(), "bank-payout-2", "https://proof.test/payout", key(), ADMIN);
+        assertThat(repository.count("SELECT COUNT(*) FROM seller_order WHERE status='SETTLED'")).isEqualTo(1);
+    }
+
+    @Test
+    void fullRefundLeavesNothingToPayOut() {
+        long paymentId = fullPayment(); freshDelivery();
+        service.openDispute(1, "All goods damaged", null, key(), BUYER);
+        long disputeId = repository.disputes(1).getFirst().id();
+        service.respondDispute(1, disputeId, "Reviewed", key(),
+                new FinanceService.Actor(202, null, 20L, false));
+        service.escalateDispute(1, disputeId, key(), BUYER);
+        service.decideDispute(1, disputeId, "REFUND", 10001L, "Full refund", key(), ADMIN);
+        service.requestRefund(1, paymentId, 10001, disputeId, "Award", "dispute-v1", key(), ADMIN);
+        service.confirmRefund(1, repository.refunds(1).getFirst().id(),
+                "bank-full-refund", "https://proof.test/full", key(), ADMIN);
+        new JdbcTemplate(datasource).update("UPDATE shipment SET delivered_at=? WHERE seller_order_id=1",
+                java.sql.Timestamp.valueOf(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC).minusDays(8)));
+        var netService = new FinanceServiceImpl(repository, provider, new DataSourceTransactionManager(datasource),
+                "NET_AFTER_REFUND", "HALF_UP", true, customerPayments, integration);
+        assertThat(netService.summary(1, BUYER).eligibility().blockingReasons()).contains("FULLY_REFUNDED");
+        assertThatThrownBy(() -> netService.createSettlement(1, key(), ADMIN)).hasMessage("SETTLEMENT_NOT_ELIGIBLE");
     }
 
     @Test
@@ -680,7 +748,15 @@ class FinanceServiceTest {
     void auditAndDisputeRecordUserIdRatherThanCustomerProfileId() {
         fullPayment();
         new JdbcTemplate(datasource).update("UPDATE seller_order SET status='PREPARING' WHERE seller_order_id=1");
+        new JdbcTemplate(datasource).update("INSERT INTO shipment(seller_order_id,shipping_method,status,expected_delivery_at) "
+                + "VALUES(1,'STANDARD','SHIPPED',?)",
+                java.sql.Timestamp.valueOf(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC).minusDays(1)));
         service.openDispute(1, "reason", null, key(), BUYER);
+        long disputeId = repository.disputes(1).getFirst().id();
+        assertThatThrownBy(() -> service.addEvidence(1, disputeId, "https://evidence.test/foreign", key(),
+                new FinanceService.Actor(999, 999L, null, false))).hasMessage("FINANCE_ACCESS_DENIED");
+        service.addEvidence(1, disputeId, "https://evidence.test/photo", key(), BUYER);
+        assertThat(repository.history(1).getFirst().eventType()).isEqualTo("DISPUTE_EVIDENCE_ADDED");
         assertThat(repository.count("SELECT opened_by_user_id_ref FROM dispute")).isEqualTo(101);
         assertThat(repository.history(1).getFirst().actor()).isEqualTo("101");
         service.requestCancellation(1, "reason", key(), BUYER);

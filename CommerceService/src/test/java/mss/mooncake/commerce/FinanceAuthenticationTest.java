@@ -78,6 +78,18 @@ class FinanceAuthenticationTest {
     }
 
     @Test
+    void disputeQueueRequiresAdminEvenWhenControllerIsCalledDirectly() {
+        var repository = mock(mss.mooncake.commerce.repository.FinanceRepository.class);
+        var finance = mock(FinanceService.class);
+        var controller = new mss.mooncake.commerce.controller.AdminDisputeController(repository, finance, resolver);
+        assertThatThrownBy(() -> controller.pending(0, 20, authentication(10L, "ROLE_CUSTOMER")))
+                .hasMessage("FINANCE_ADMIN_REQUIRED");
+        when(repository.pendingDisputeOrderIds(0, 21)).thenReturn(List.of());
+        assertThat(controller.pending(0, 20, authentication(null, "ROLE_ADMIN")).content()).isEmpty();
+        verifyNoInteractions(finance);
+    }
+
+    @Test
     void shipmentControllerPassesSupplierProfileIdInsteadOfUserId() {
         when(identity.getSupplierSummaryByUser(101L)).thenReturn(
                 new SupplierSummaryResponse(20L, 101L, "Supplier", null, "VERIFIED"));

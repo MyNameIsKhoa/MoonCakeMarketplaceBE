@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
 public class RefundEntity extends BaseCommerceEntity {
     @Column(name = "payment_id", nullable = false) private Long paymentId;
     @Column(name = "cancellation_id") private Long cancellationId;
+    @Column(name = "dispute_id") private Long disputeId;
     @Column(name = "amount", nullable = false, precision = 18, scale = 2) private BigDecimal amount;
     @Column(name = "reason", nullable = false, length = 500) private String reason;
     @Column(name = "status", nullable = false, length = 30) private String status;

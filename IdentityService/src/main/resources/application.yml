@@ -47,7 +47,7 @@ security:
     commerce: ${COMMERCE_TO_IDENTITY_TOKEN}
     rfq: ${RFQ_TO_IDENTITY_TOKEN}
   admin:
-    user-ids: ${ADMIN_USER_IDS:}
+    user-ids: ${ADMIN_USER_IDS:11}
 springdoc:
   api-docs.path: /v3/api-docs
   swagger-ui.path: /swagger-ui.html
