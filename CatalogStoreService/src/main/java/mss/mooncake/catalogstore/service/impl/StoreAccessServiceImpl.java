@@ -11,6 +11,8 @@ import mss.mooncake.catalogstore.exception.ForbiddenException;
 import mss.mooncake.catalogstore.exception.ResourceNotFoundException;
 import mss.mooncake.catalogstore.repository.StoreRepository;
 import mss.mooncake.catalogstore.service.StoreAccessService;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,6 +44,11 @@ public class StoreAccessServiceImpl implements StoreAccessService {
         }
     }
 
+    private static boolean currentUserIsAdmin() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return auth != null && auth.getAuthorities().stream().anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
+    }
+
     // ─── Public API
     // ───────────────────────────────────────────────────────────────
 
@@ -51,6 +58,11 @@ public class StoreAccessServiceImpl implements StoreAccessService {
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy store với id: " + storeId));
 
         SupplierSummaryDto supplier = findSupplier(userId);
+        if (supplier == null && currentUserIsAdmin()) {
+            // Admin qua được SecurityConfig nhưng không phải chủ store: báo 403 rõ ràng thay vì 400 "chưa xác minh".
+            throw new ForbiddenException("Quản trị viên không chỉnh sửa trực tiếp catalog của nhà cung cấp. "
+                    + "Dùng chức năng tạm khóa/mở lại store trong trang quản trị nếu cần can thiệp.");
+        }
         if (supplier == null || !"VERIFIED".equalsIgnoreCase(supplier.verificationStatus())) {
             throw new BadRequestException("Hồ sơ nhà cung cấp chưa được xác minh. " +
                     "Vui lòng chờ phê duyệt trước khi quản lý sản phẩm hoặc khuyến mãi.");

@@ -168,6 +168,39 @@ class StoreControllerTest {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    @DisplayName("POST /api/stores trả 400 khi logoUrl không phải http(s)")
+    void createStore_400_nonHttpLogoUrl() throws Exception {
+        CreateStoreRequest req = new CreateStoreRequest("Store A", "javascript:alert(1)", null, null, null);
+
+        mockMvc.perform(post("/api/stores")
+                        .with(SecurityMockMvcRequestPostProcessors.user(principalA()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.logoUrl").exists());
+        org.mockito.Mockito.verifyNoInteractions(storeService);
+    }
+
+    @Test
+    @DisplayName("PATCH /api/stores/{id} trả 400 khi bannerUrl không phải http(s); https và chuỗi rỗng (xóa ảnh) hợp lệ")
+    void updateStore_bannerUrlMustBeHttp() throws Exception {
+        mockMvc.perform(patch("/api/stores/{id}", STORE_ID)
+                        .with(SecurityMockMvcRequestPostProcessors.user(principalA()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bannerUrl\":\"ftp://cdn.example.com/banner.png\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.bannerUrl").exists());
+
+        when(storeService.updateStore(eq(STORE_ID), any(UpdateStoreRequest.class), eq(USER_ID), eq(false)))
+                .thenReturn(sampleResponse());
+        mockMvc.perform(patch("/api/stores/{id}", STORE_ID)
+                        .with(SecurityMockMvcRequestPostProcessors.user(principalA()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bannerUrl\":\"https://cdn.example.com/banner.png\",\"logoUrl\":\"\"}"))
+                .andExpect(status().isOk());
+    }
+
     // ── PATCH /api/stores/{id} ────────────────────────────────────────────────────
 
     @Test

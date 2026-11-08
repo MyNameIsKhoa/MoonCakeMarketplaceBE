@@ -3,6 +3,7 @@ package mss.mooncake.catalogstore.controller;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -34,6 +35,27 @@ class StockReservationSecurityTest {
         mvc.perform(get(url).header("X-Service-Name", "commerce")
                 .header("X-Service-Token", "test-commerce-catalog-token-32-bytes-minimum"))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void onlyCommerceCanRestoreReservationLines() throws Exception {
+        String url = "/internal/v1/inventory/reservations/missing/restore-lines";
+        String body = "{\"restoreKey\":\"missing-so1\",\"lines\":[{\"variantId\":1,\"quantity\":1}]}";
+        mvc.perform(put(url).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(put(url).header("X-Service-Name", "rfq")
+                .header("X-Service-Token", "test-rfq-catalog-token-32-bytes-minimum")
+                .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isForbidden());
+        mvc.perform(put(url).header("X-Service-Name", "commerce")
+                .header("X-Service-Token", "test-commerce-catalog-token-32-bytes-minimum")
+                .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isNotFound());
+        mvc.perform(put(url).header("X-Service-Name", "commerce")
+                .header("X-Service-Token", "test-commerce-catalog-token-32-bytes-minimum")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"restoreKey\":\"missing-so1\",\"lines\":[{\"variantId\":1,\"quantity\":0}]}"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

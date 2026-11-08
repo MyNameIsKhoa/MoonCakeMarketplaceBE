@@ -87,6 +87,37 @@ class CategoryServiceImplTest {
 
             assertThatThrownBy(() -> categoryService.getCategory(1L)).isInstanceOf(ResourceNotFoundException.class);
         }
+
+        @Test
+        @DisplayName("admin: danh sách gồm mọi trạng thái, kèm parentCategoryId")
+        void adminListsEveryStatus() {
+            when(categoryRepository.findAll(any(org.springframework.data.domain.Sort.class))).thenReturn(List.of(
+                    category(1L, null, "banh-nuong", CategoryStatus.ACTIVE),
+                    category(2L, 1L, "banh-nuong-chay", CategoryStatus.INACTIVE)));
+
+            List<CategoryResponse> all = categoryService.getAllCategoriesForAdmin();
+
+            assertThat(all).extracting(CategoryResponse::status).containsExactly("ACTIVE", "INACTIVE");
+            assertThat(all.get(1).parentCategoryId()).isEqualTo(1L);
+        }
+
+        @Test
+        @DisplayName("admin: xem được chi tiết danh mục INACTIVE")
+        void adminSeesInactiveCategory() {
+            when(categoryRepository.findById(2L))
+                    .thenReturn(Optional.of(category(2L, 1L, "banh-nuong-chay", CategoryStatus.INACTIVE)));
+
+            assertThat(categoryService.getCategoryForAdmin(2L).status()).isEqualTo("INACTIVE");
+        }
+
+        @Test
+        @DisplayName("admin: danh mục không tồn tại → 404")
+        void adminCategoryNotFound() {
+            when(categoryRepository.findById(99L)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> categoryService.getCategoryForAdmin(99L))
+                    .isInstanceOf(ResourceNotFoundException.class);
+        }
     }
 
     @Nested

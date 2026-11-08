@@ -7,18 +7,23 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 import mss.mooncake.catalogstore.dto.request.StockReservationRequest;
+import mss.mooncake.catalogstore.dto.request.StockRestoreRequest;
 import mss.mooncake.catalogstore.dto.response.StockReservationResponse;
+import mss.mooncake.catalogstore.dto.response.StockRestoreResponse;
 import mss.mooncake.catalogstore.entity.ProductVariantEntity;
 import mss.mooncake.catalogstore.entity.StockReservationEntity;
 import mss.mooncake.catalogstore.entity.StockReservationLineEntity;
+import mss.mooncake.catalogstore.entity.StockReservationRestoreEntity;
 import mss.mooncake.catalogstore.exception.BadRequestException;
 import mss.mooncake.catalogstore.exception.ConflictException;
 import mss.mooncake.catalogstore.exception.ResourceNotFoundException;
 import mss.mooncake.catalogstore.repository.ProductVariantRepository;
 import mss.mooncake.catalogstore.repository.StockReservationLineRepository;
 import mss.mooncake.catalogstore.repository.StockReservationRepository;
+import mss.mooncake.catalogstore.repository.StockReservationRestoreRepository;
 import mss.mooncake.catalogstore.service.CatalogApplicationService;
 import mss.mooncake.catalogstore.service.StockReservationService;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -31,14 +36,16 @@ public class StockReservationServiceImpl implements StockReservationService {
     private final StockReservationLineRepository lines;
     private final ProductVariantRepository variants;
     private final CatalogApplicationService catalog;
+    private final StockReservationRestoreRepository restores;
 
     public StockReservationServiceImpl(StockReservationRepository reservations,
             StockReservationLineRepository lines, ProductVariantRepository variants,
-            CatalogApplicationService catalog) {
+            CatalogApplicationService catalog, StockReservationRestoreRepository restores) {
         this.reservations = reservations;
         this.lines = lines;
         this.variants = variants;
         this.catalog = catalog;
+        this.restores = restores;
     }
 
     @Override
@@ -155,13 +162,90 @@ public class StockReservationServiceImpl implements StockReservationService {
         var locked = variants.lockByIds(reserved.stream().map(StockReservationLineEntity::getVariantId).toList());
         Map<Long, ProductVariantEntity> byId = locked.stream()
                 .collect(Collectors.toMap(ProductVariantEntity::getId, variant -> variant));
+        // Units already returned by per-line restores (partial cancellations) are not returned again.
+        Map<Long, Long> restored = restoredQuantities(reservationKey);
         for (var line : reserved) {
             var variant = byId.get(line.getVariantId());
             if (variant == null) throw new ResourceNotFoundException("Variant not found");
-            variant.setStockQuantity(Math.addExact(variant.getStockQuantity(), line.getQuantity()));
+            long stillSold = line.getQuantity() - restored.getOrDefault(line.getVariantId(), 0L);
+            if (stillSold > 0) {
+                variant.setStockQuantity(Math.addExact(variant.getStockQuantity(), Math.toIntExact(stillSold)));
+            }
         }
         reservation.setStatus("CANCELLED");
         return response(reservation);
+    }
+
+    /**
+     * Both this and {@link #cancelConfirmed} hold the reservation row lock, so a per-line restore and a whole
+     * cancellation never return the same units twice: whatever is restored here is excluded from the whole
+     * cancellation, and after it nothing is left to restore line by line.
+     */
+    @Override
+    @Transactional
+    public StockRestoreResponse restoreLines(String reservationKey, StockRestoreRequest request) {
+        Map<Long, Integer> requested = new TreeMap<>();
+        for (var line : request.lines()) {
+            if (requested.putIfAbsent(line.variantId(), line.quantity()) != null) {
+                throw new BadRequestException("Duplicate variantId in restore");
+            }
+        }
+        StockReservationEntity reservation = reservations.lockByKey(reservationKey)
+                .orElseThrow(() -> new ResourceNotFoundException("Reservation not found"));
+        var previous = restores.findByRestoreKeyOrderByVariantId(request.restoreKey());
+        if (!previous.isEmpty()) {
+            Map<Long, Integer> restored = previous.stream().collect(Collectors.toMap(
+                    StockReservationRestoreEntity::getVariantId, StockReservationRestoreEntity::getQuantity));
+            if (!previous.getFirst().getReservationKey().equals(reservationKey) || !restored.equals(requested)) {
+                throw new ConflictException("Restore key already used with different payload");
+            }
+            return restoreResponse(request.restoreKey(), reservation, requested);
+        }
+        Map<Long, Integer> reserved = lines.findByReservationKeyOrderByVariantId(reservationKey).stream()
+                .collect(Collectors.toMap(StockReservationLineEntity::getVariantId, StockReservationLineEntity::getQuantity));
+        for (var line : requested.entrySet()) {
+            if (!reserved.containsKey(line.getKey())) {
+                throw new BadRequestException("Variant " + line.getKey() + " is not part of this reservation");
+            }
+        }
+        // The whole reservation was already returned to stock: nothing of it is still sold.
+        if ("CANCELLED".equals(reservation.getStatus())) {
+            return restoreResponse(request.restoreKey(), reservation, requested);
+        }
+        if (!"CONFIRMED".equals(reservation.getStatus())) {
+            throw new ConflictException("Only confirmed stock can be restored for a cancelled order");
+        }
+        Map<Long, Long> alreadyRestored = restoredQuantities(reservationKey);
+        for (var line : requested.entrySet()) {
+            if (alreadyRestored.getOrDefault(line.getKey(), 0L) + line.getValue() > reserved.get(line.getKey())) {
+                throw new ConflictException("Restore exceeds the confirmed quantity of variant " + line.getKey());
+            }
+        }
+        var locked = variants.lockByIds(List.copyOf(requested.keySet()));
+        Map<Long, ProductVariantEntity> byId = locked.stream()
+                .collect(Collectors.toMap(ProductVariantEntity::getId, variant -> variant));
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC).truncatedTo(ChronoUnit.SECONDS);
+        for (var line : requested.entrySet()) {
+            var variant = byId.get(line.getKey());
+            if (variant == null) throw new ResourceNotFoundException("Variant not found");
+            variant.setStockQuantity(Math.addExact(variant.getStockQuantity(), line.getValue()));
+        }
+        restores.saveAll(requested.entrySet().stream().map(line -> new StockReservationRestoreEntity(
+                request.restoreKey(), reservationKey, line.getKey(), line.getValue(), now)).toList());
+        return restoreResponse(request.restoreKey(), reservation, requested);
+    }
+
+    private Map<Long, Long> restoredQuantities(String reservationKey) {
+        return restores.restoredQuantities(reservationKey).stream().collect(Collectors.toMap(
+                StockReservationRestoreRepository.RestoredQuantity::getVariantId,
+                StockReservationRestoreRepository.RestoredQuantity::getQuantity));
+    }
+
+    private static StockRestoreResponse restoreResponse(String restoreKey, StockReservationEntity reservation,
+            Map<Long, Integer> restored) {
+        return new StockRestoreResponse(restoreKey, reservation.getReservationKey(), reservation.getStatus(),
+                restored.entrySet().stream()
+                        .map(line -> new StockReservationResponse.Line(line.getKey(), line.getValue())).toList());
     }
 
     private StockReservationResponse response(StockReservationEntity reservation) {

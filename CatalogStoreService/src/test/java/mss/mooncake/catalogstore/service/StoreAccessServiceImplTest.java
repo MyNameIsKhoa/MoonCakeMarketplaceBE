@@ -26,6 +26,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
@@ -105,6 +108,22 @@ class StoreAccessServiceImplTest {
 
             assertThatThrownBy(() -> storeAccessService.requireOwnedStore(STORE_ID, OTHER_USER))
                     .isInstanceOf(BadRequestException.class);
+        }
+
+        @Test
+        @DisplayName("admin (không có hồ sơ supplier) sửa catalog của supplier → 403 rõ ràng, không phải 400 'chưa xác minh'")
+        void adminGetsClearForbidden() {
+            when(storeRepository.findById(STORE_ID)).thenReturn(Optional.of(store(StoreStatus.ACTIVE)));
+            when(identityClient.getSupplierSummaryByUserId(OTHER_USER)).thenThrow(FeignException.NotFound.class);
+            SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                    "admin", null, List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
+            try {
+                assertThatThrownBy(() -> storeAccessService.requireOwnedStore(STORE_ID, OTHER_USER))
+                        .isInstanceOf(ForbiddenException.class)
+                        .hasMessageContaining("Quản trị viên");
+            } finally {
+                SecurityContextHolder.clearContext();
+            }
         }
 
         @Test

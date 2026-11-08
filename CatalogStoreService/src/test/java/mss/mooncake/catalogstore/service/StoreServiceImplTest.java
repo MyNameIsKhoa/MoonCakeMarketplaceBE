@@ -1,6 +1,7 @@
 package mss.mooncake.catalogstore.service;
 
 import feign.FeignException;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import mss.mooncake.catalogstore.client.IdentityClient;
@@ -12,6 +13,7 @@ import mss.mooncake.catalogstore.dto.response.StoreSummaryResponse;
 import mss.mooncake.catalogstore.entity.StoreEntity;
 import mss.mooncake.catalogstore.enums.StoreStatus;
 import mss.mooncake.catalogstore.exception.BadRequestException;
+import mss.mooncake.catalogstore.exception.ConflictException;
 import mss.mooncake.catalogstore.exception.ForbiddenException;
 import mss.mooncake.catalogstore.exception.ResourceNotFoundException;
 import mss.mooncake.catalogstore.repository.StoreRepository;
@@ -138,6 +140,49 @@ class StoreServiceImplTest {
                     .hasMessageContaining("chưa được xác minh");
 
             verify(storeRepository, never()).save(any());
+        }
+
+        private StoreResponse createAs(String name, BigDecimal shippingFee) {
+            when(identityClient.getSupplierSummaryByUserId(USER_A)).thenReturn(supplierA);
+            when(storeRepository.existsByStoreCode(anyString())).thenReturn(false);
+            when(storeRepository.existsBySlug(anyString())).thenReturn(false);
+            when(storeRepository.save(any(StoreEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+            return storeService.createStore(new CreateStoreRequest(name, null, null, null, null, shippingFee), USER_A);
+        }
+
+        @Test
+        @DisplayName("Slug chuyển Đ/đ thành d: \"Kinh Đô\" → kinh-do")
+        void createStore_slugTransliteratesVietnameseD() {
+            assertThat(createAs("Kinh Đô", null).slug()).isEqualTo("kinh-do");
+            assertThat(createAs("Bánh Trung Thu đặc biệt", null).slug()).isEqualTo("banh-trung-thu-dac-biet");
+        }
+
+        @Test
+        @DisplayName("Tên không có ký tự Latin → slug lấy theo store code thay vì rỗng")
+        void createStore_nonLatinNameFallsBackToStoreCode() {
+            StoreResponse resp = createAs("月饼工坊", null);
+
+            assertThat(resp.slug()).isNotBlank().isEqualTo(resp.storeCode().toLowerCase());
+        }
+
+        @Test
+        @DisplayName("Slug trùng → thêm hậu tố để không vi phạm UQ_store_slug")
+        void createStore_duplicateSlugGetsSuffix() {
+            when(storeRepository.existsBySlug(anyString())).thenAnswer(inv -> "kinh-do".equals(inv.getArgument(0)));
+            when(identityClient.getSupplierSummaryByUserId(USER_A)).thenReturn(supplierA);
+            when(storeRepository.existsByStoreCode(anyString())).thenReturn(false);
+            when(storeRepository.save(any(StoreEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            StoreResponse resp = storeService.createStore(
+                    new CreateStoreRequest("Kinh Đô", null, null, null, null), USER_A);
+
+            assertThat(resp.slug()).startsWith("kinh-do-").isNotEqualTo("kinh-do");
+        }
+
+        @Test
+        @DisplayName("Tạo store có thể khai báo luôn phí vận chuyển")
+        void createStore_acceptsShippingFee() {
+            assertThat(createAs("My Store", new BigDecimal("30000")).shippingFee()).isEqualByComparingTo("30000");
         }
     }
 
@@ -297,6 +342,74 @@ class StoreServiceImplTest {
                     new UpdateStoreRequest(null, null, null, null, "SUSPENDED", null), USER_A))
                     .isInstanceOf(ForbiddenException.class);
             verify(storeRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Không cho ACTIVE khi chưa cấu hình phí vận chuyển → 409 STORE_SHIPPING_FEE_REQUIRED")
+        void ownerCannotActivateStoreWithoutShippingFee() {
+            when(storeRepository.findById(1L)).thenReturn(Optional.of(storeOfSupplierA));
+            when(identityClient.getSupplierSummaryByUserId(USER_A)).thenReturn(supplierA);
+
+            assertThatThrownBy(() -> storeService.updateStore(1L,
+                    new UpdateStoreRequest(null, null, null, null, "ACTIVE", null), USER_A))
+                    .isInstanceOf(ConflictException.class)
+                    .hasMessageContaining("phí vận chuyển")
+                    .extracting("code").isEqualTo("STORE_SHIPPING_FEE_REQUIRED");
+            verify(storeRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Admin mở lại store chưa có phí vận chuyển cũng bị chặn")
+        void adminCannotActivateStoreWithoutShippingFee() {
+            storeOfSupplierA.setStatus(StoreStatus.SUSPENDED);
+            when(storeRepository.findById(1L)).thenReturn(Optional.of(storeOfSupplierA));
+
+            assertThatThrownBy(() -> storeService.updateStore(1L,
+                    new UpdateStoreRequest(null, null, null, null, "ACTIVE", null), USER_B, true))
+                    .isInstanceOf(ConflictException.class);
+            verify(storeRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Khai báo phí vận chuyển trong cùng request thì được ACTIVE")
+        void storeActivatesWhenShippingFeeSetInSameRequest() {
+            when(storeRepository.findById(1L)).thenReturn(Optional.of(storeOfSupplierA));
+            when(identityClient.getSupplierSummaryByUserId(USER_A)).thenReturn(supplierA);
+            when(storeRepository.save(any(StoreEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            StoreResponse resp = storeService.updateStore(1L, new UpdateStoreRequest(null, null, null, null,
+                    "ACTIVE", null, new BigDecimal("25000")), USER_A);
+
+            assertThat(resp.status()).isEqualTo("ACTIVE");
+            assertThat(resp.shippingFee()).isEqualByComparingTo("25000");
+        }
+
+        @Test
+        @DisplayName("Owner không được sửa store đang SUSPENDED → 403")
+        void ownerCannotEditSuspendedStore() {
+            storeOfSupplierA.setStatus(StoreStatus.SUSPENDED);
+            when(storeRepository.findById(1L)).thenReturn(Optional.of(storeOfSupplierA));
+            when(identityClient.getSupplierSummaryByUserId(USER_A)).thenReturn(supplierA);
+
+            assertThatThrownBy(() -> storeService.updateStore(1L,
+                    new UpdateStoreRequest("Tên mới", null, null, null, null, "Mô tả mới"), USER_A))
+                    .isInstanceOf(ForbiddenException.class)
+                    .hasMessageContaining("tạm khóa");
+            verify(storeRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Admin vẫn sửa được store đang SUSPENDED")
+        void adminCanEditSuspendedStore() {
+            storeOfSupplierA.setStatus(StoreStatus.SUSPENDED);
+            when(storeRepository.findById(1L)).thenReturn(Optional.of(storeOfSupplierA));
+            when(storeRepository.save(any(StoreEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            StoreResponse resp = storeService.updateStore(1L,
+                    new UpdateStoreRequest("Tên mới", null, null, null, null, null), USER_B, true);
+
+            assertThat(resp.name()).isEqualTo("Tên mới");
+            assertThat(resp.status()).isEqualTo("SUSPENDED");
         }
 
         @Test
