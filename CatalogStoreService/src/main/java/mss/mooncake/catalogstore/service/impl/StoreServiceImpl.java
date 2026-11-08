@@ -163,6 +163,12 @@ public class StoreServiceImpl implements StoreService {
     }
 
     @Override
+    public List<StoreResponse> getAllStoresForAdmin() {
+        return storeRepository.findAll(org.springframework.data.domain.Sort.by("id")).stream()
+                .map(this::toResponse).toList();
+    }
+
+    @Override
     public List<StoreResponse> getStoresBySupplierId(Long supplierId) {
         return storeRepository.findBySupplierIdRefAndStatusOrderByIdAsc(supplierId, StoreStatus.ACTIVE)
                 .stream()

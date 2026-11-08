@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
@@ -111,6 +112,20 @@ class FinanceServiceTest {
     private void context(boolean accepted, Long deposit, long version, LocalDate delivery) {
         transaction.executeWithoutResult(status -> integration.syncOrder(
                 new FinanceOrderContext(1, 10, 20, 10001, deposit, delivery, accepted, version)));
+    }
+
+    @Test
+    void adminApprovesUnpaidRfqCancellationAndClosesOrder() {
+        var jdbc = new JdbcTemplate(datasource);
+        jdbc.update("UPDATE customer_order SET source_type='RFQ',rfq_id_ref=7,status='AWAITING_DEPOSIT' WHERE order_id=1");
+        jdbc.update("UPDATE seller_order SET status='AWAITING_DEPOSIT' WHERE seller_order_id=1");
+        context(true, 3000L, 1, LocalDate.now().plusDays(10));
+        service.requestCancellation(1, "Buyer request", key(), BUYER);
+        long cancellationId = repository.cancellations(1).getFirst().id();
+        service.decideCancellation(1, cancellationId, true, "Approved unpaid RFQ", key(), ADMIN);
+        assertThat(repository.cancellations(1).getFirst().status()).isEqualTo("APPROVED");
+        assertThat(jdbc.queryForObject("SELECT status FROM seller_order WHERE seller_order_id=1", String.class)).isEqualTo("CANCELLED");
+        assertThat(jdbc.queryForObject("SELECT status FROM customer_order WHERE order_id=1", String.class)).isEqualTo("CANCELLED");
     }
 
     private long fullPayment() {
@@ -391,8 +406,8 @@ class FinanceServiceTest {
         var link = service.initiate(remaining, key(), BUYER);
         assertThat(link.amount()).isEqualTo(7001);
         assertThat(link.dueAt()).isEqualTo(FinanceIntegrationService.remainingDue(delivery));
-        verify(provider).create(anyLong(), anyLong(), any(), eq("COC SELLER-TEST"));
-        verify(provider).create(anyLong(), anyLong(), any(), eq("CON SELLER-TEST"));
+        verify(provider).create(anyLong(), anyLong(), any(), argThat(s -> s.matches("COC S20 [0-9]{10} [A-Z]{4}")));
+        verify(provider).create(anyLong(), anyLong(), any(), argThat(s -> s.matches("CON S20 [0-9]{10} [A-Z]{4}")));
     }
 
     @Test
@@ -600,6 +615,7 @@ class FinanceServiceTest {
     @Test
     void ownershipAndIdempotencyAreEnforcedOnServer() {
         context(true, null, 1, null);
+        new JdbcTemplate(datasource).update("UPDATE seller_order SET status='AWAITING_PAYMENT' WHERE seller_order_id=1");
         var stranger = new FinanceService.Actor(999, 99L, null, false);
         assertThatThrownBy(() -> service.summary(1, stranger)).hasMessage("FINANCE_ACCESS_DENIED");
         assertThatThrownBy(() -> service.initiate(repository.payments(1).getFirst().id(), key(), stranger))
@@ -663,6 +679,7 @@ class FinanceServiceTest {
     @Test
     void auditAndDisputeRecordUserIdRatherThanCustomerProfileId() {
         fullPayment();
+        new JdbcTemplate(datasource).update("UPDATE seller_order SET status='PREPARING' WHERE seller_order_id=1");
         service.openDispute(1, "reason", null, key(), BUYER);
         assertThat(repository.count("SELECT opened_by_user_id_ref FROM dispute")).isEqualTo(101);
         assertThat(repository.history(1).getFirst().actor()).isEqualTo("101");
