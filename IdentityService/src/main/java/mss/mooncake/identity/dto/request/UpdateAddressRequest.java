@@ -1,5 +1,6 @@
 package mss.mooncake.identity.dto.request;
 
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 public record UpdateAddressRequest(
@@ -7,6 +8,7 @@ public record UpdateAddressRequest(
     String recipientName,
 
     @Size(max = 30, message = "Recipient phone cannot exceed 30 characters")
+    @Pattern(regexp = ValidationPatterns.PHONE_OR_EMPTY, message = ValidationPatterns.PHONE_MESSAGE)
     String recipientPhone,
 
     @Size(max = 500, message = "Address line cannot exceed 500 characters")

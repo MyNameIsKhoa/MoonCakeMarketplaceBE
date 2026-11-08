@@ -7,6 +7,7 @@ import mss.mooncake.identity.dto.request.UpdateSupplierProfileRequest;
 import mss.mooncake.identity.dto.response.SupplierProfileResponse;
 import mss.mooncake.identity.dto.response.SupplierSummaryResponse;
 import mss.mooncake.identity.entity.SupplierProfileEntity;
+import mss.mooncake.identity.entity.SupplierVerificationAuditEntity;
 import mss.mooncake.identity.enums.SupplierVerificationStatus;
 import mss.mooncake.identity.exception.DuplicateResourceException;
 import mss.mooncake.identity.exception.ResourceNotFoundException;
@@ -17,6 +18,7 @@ import mss.mooncake.identity.service.impl.SupplierApplicationServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
@@ -25,6 +27,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -172,5 +176,85 @@ class SupplierApplicationServiceTest {
 
         assertEquals(1, result.getTotalElements());
         assertEquals(50L, result.getContent().getFirst().supplierId());
+    }
+
+    @Test
+    void rejectedProfileResubmittedWithoutChangesGoesBackToPendingWithAudit() {
+        SupplierProfileEntity entity = new SupplierProfileEntity(1L, "Kinh Do", "0123456789", "REJECTED",
+                LocalDateTime.now(), LocalDateTime.now());
+        ReflectionTestUtils.setField(entity, "id", 50L);
+        when(supplierProfileRepository.findByUserId(1L)).thenReturn(Optional.of(entity));
+
+        SupplierProfileResponse response = supplierService.updateSupplierProfile(1L,
+                new UpdateSupplierProfileRequest("Kinh Do", "0123456789"));
+
+        assertEquals("PENDING", response.verificationStatus());
+        verify(supplierProfileRepository).save(entity);
+        ArgumentCaptor<SupplierVerificationAuditEntity> audit = ArgumentCaptor.forClass(SupplierVerificationAuditEntity.class);
+        verify(auditRepository).save(audit.capture());
+        assertEquals(50L, audit.getValue().getSupplierId());
+        assertEquals(1L, audit.getValue().getActorUserId());
+        assertEquals("REJECTED", audit.getValue().getPreviousStatus());
+        assertEquals("PENDING", audit.getValue().getNewStatus());
+    }
+
+    @Test
+    void rejectedProfileResubmittedWithEmptyBodyGoesBackToPending() {
+        SupplierProfileEntity entity = new SupplierProfileEntity(1L, "Kinh Do", "0123456789", "REJECTED",
+                LocalDateTime.now(), LocalDateTime.now());
+        ReflectionTestUtils.setField(entity, "id", 50L);
+        when(supplierProfileRepository.findByUserId(1L)).thenReturn(Optional.of(entity));
+
+        SupplierProfileResponse response = supplierService.updateSupplierProfile(1L,
+                new UpdateSupplierProfileRequest(null, null));
+
+        assertEquals("PENDING", response.verificationStatus());
+        verify(auditRepository).save(any(SupplierVerificationAuditEntity.class));
+    }
+
+    @Test
+    void pendingProfileUnchangedUpdateWritesNoAudit() {
+        SupplierProfileEntity entity = new SupplierProfileEntity(1L, "Kinh Do", "0123456789", "PENDING",
+                LocalDateTime.now(), LocalDateTime.now());
+        ReflectionTestUtils.setField(entity, "id", 50L);
+        when(supplierProfileRepository.findByUserId(1L)).thenReturn(Optional.of(entity));
+
+        SupplierProfileResponse response = supplierService.updateSupplierProfile(1L,
+                new UpdateSupplierProfileRequest("Kinh Do", "0123456789"));
+
+        assertEquals("PENDING", response.verificationStatus());
+        verify(auditRepository, never()).save(any());
+    }
+
+    @Test
+    void supplierProfileExposesLatestAdminDecision() {
+        SupplierProfileEntity entity = new SupplierProfileEntity(1L, "Kinh Do", "0123456789", "REJECTED",
+                LocalDateTime.now(), LocalDateTime.now());
+        ReflectionTestUtils.setField(entity, "id", 50L);
+        LocalDateTime decidedAt = LocalDateTime.of(2026, 11, 1, 9, 30);
+        when(supplierProfileRepository.findByUserId(1L)).thenReturn(Optional.of(entity));
+        when(auditRepository.findFirstBySupplierIdAndNewStatusInOrderByActedAtDescIdDesc(eq(50L), anyCollection()))
+                .thenReturn(Optional.of(new SupplierVerificationAuditEntity(50L, 99L, "PENDING", "REJECTED",
+                        "Mã số thuế không khớp giấy phép kinh doanh", decidedAt)));
+
+        SupplierProfileResponse response = supplierService.getSupplierProfile(1L);
+
+        assertEquals("REJECTED", response.lastDecisionStatus());
+        assertEquals("Mã số thuế không khớp giấy phép kinh doanh", response.lastDecisionReason());
+        assertEquals(decidedAt, response.lastDecisionAt());
+    }
+
+    @Test
+    void supplierProfileWithoutAdminDecisionHasNoDecisionReason() {
+        SupplierProfileEntity entity = new SupplierProfileEntity(1L, "Kinh Do", "0123456789", "PENDING",
+                LocalDateTime.now(), LocalDateTime.now());
+        ReflectionTestUtils.setField(entity, "id", 50L);
+        when(supplierProfileRepository.findByUserId(1L)).thenReturn(Optional.of(entity));
+
+        SupplierProfileResponse response = supplierService.getSupplierProfile(1L);
+
+        assertNull(response.lastDecisionStatus());
+        assertNull(response.lastDecisionReason());
+        assertNull(response.lastDecisionAt());
     }
 }
