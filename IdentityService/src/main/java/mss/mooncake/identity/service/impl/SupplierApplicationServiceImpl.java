@@ -26,6 +26,12 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class SupplierApplicationServiceImpl implements SupplierApplicationService {
 
+    /** Trạng thái do admin quyết định; PENDING chỉ do supplier gửi/gửi lại hồ sơ. */
+    private static final List<String> ADMIN_DECISION_STATUSES = List.of(
+            SupplierVerificationStatus.VERIFIED.name(),
+            SupplierVerificationStatus.REJECTED.name(),
+            SupplierVerificationStatus.SUSPENDED.name());
+
     private final SupplierProfileRepository supplierProfileRepository;
     private final UserRepository userRepository;
     private final SupplierVerificationAuditRepository auditRepository;
@@ -104,8 +110,12 @@ public class SupplierApplicationServiceImpl implements SupplierApplicationServic
             }
         }
 
+        String currentStatus = entity.getVerificationStatus();
+        // Hồ sơ REJECTED: PATCH (kể cả không đổi gì) là thao tác "gửi lại hồ sơ" để admin xét lại.
+        if (SupplierVerificationStatus.REJECTED.name().equals(currentStatus)) {
+            updated = true;
+        }
         if (updated) {
-            String currentStatus = entity.getVerificationStatus();
             if (SupplierVerificationStatus.REJECTED.name().equals(currentStatus)
                     || SupplierVerificationStatus.VERIFIED.name().equals(currentStatus)) {
                 entity.setVerificationStatus(SupplierVerificationStatus.PENDING.name());
@@ -204,6 +214,9 @@ public class SupplierApplicationServiceImpl implements SupplierApplicationServic
     }
 
     private SupplierProfileResponse toResponse(SupplierProfileEntity entity) {
+        SupplierVerificationAuditEntity decision = entity.getId() == null ? null : auditRepository
+                .findFirstBySupplierIdAndNewStatusInOrderByActedAtDescIdDesc(entity.getId(), ADMIN_DECISION_STATUSES)
+                .orElse(null);
         return new SupplierProfileResponse(
                 entity.getId(),
                 entity.getUserId(),
@@ -211,7 +224,10 @@ public class SupplierApplicationServiceImpl implements SupplierApplicationServic
                 entity.getTaxCode(),
                 entity.getVerificationStatus(),
                 entity.getCreatedAt(),
-                entity.getUpdatedAt()
+                entity.getUpdatedAt(),
+                decision != null ? decision.getNewStatus() : null,
+                decision != null ? decision.getReason() : null,
+                decision != null ? decision.getActedAt() : null
         );
     }
 }

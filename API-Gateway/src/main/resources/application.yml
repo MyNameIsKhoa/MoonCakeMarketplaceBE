@@ -28,6 +28,10 @@ spring:
               uri: ${IDENTITY_SERVICE_URL:http://localhost:8081}
               predicates:
                 - Path=/api/supplier-profile/**
+            - id: notification-identity-service
+              uri: ${IDENTITY_SERVICE_URL:http://localhost:8081}
+              predicates:
+                - Path=/api/notifications,/api/notifications/**
             - id: catalog-store-service
               uri: ${CATALOG_SERVICE_URL:http://localhost:8082}
               predicates:
