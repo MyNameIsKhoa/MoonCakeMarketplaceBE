@@ -77,8 +77,10 @@ financeIntegrationService.syncFulfillment(sellerOrderId, fulfillmentSnapshotVers
 Versions start at 1. Old events are ignored and duplicate versions must match. Snapshots
 cannot undo delivery or acceptance. Acceptance without delivery is rejected. Both facts,
 full collection, agreed fee configuration, and no blocking case are required for settlement.
-The exact TV6 meaning of buyer acceptance, SLA, reversal and auto-acceptance remains a
-team decision; TV5 does not infer it from a redirect, clock or frontend status.
+TV5 never infers acceptance from a redirect or frontend status. Auto-acceptance is a server
+job (see "QA hardening" below): a DELIVERED seller order that the buyer neither accepted
+nor disputed within the 7-day dispute window is accepted by the system (`ORDER_AUTO_ACCEPTED`
+audit event, actor `SYSTEM`), so settlement is not blocked forever. Reversal remains a team decision.
 
 ## payOS configuration and recovery
 
@@ -119,8 +121,45 @@ still recorded as money received, subject to the same amount and balance checks.
 
 Customers/suppliers request cancellation with a reason. ADMIN decides with a recorded
 reason. All active links must be reconciled/cancelled before approving cancellation.
-Cancellation never silently issues a refund. One cancellation per order follows the
-existing V1 unique constraint.
+Cancellation never silently issues a refund. At most one REQUESTED/APPROVED cancellation
+exists per seller order (V11 filtered unique index); a REJECTED request is kept as history
+and the buyer may request again, or still use `cancel-unpaid` on an unpaid order.
+
+Approving a cancellation of a seller order that collected money requires
+`paid − confirmed (SUCCESS) refunds ≤ 0`; otherwise `409 PAID_CANCELLATION_REQUIRES_REFUND_REVIEW`.
+ADMIN flow: request refund (`POST /orders/{id}/refunds`, no `disputeId`) for the collected
+amount → confirm it with transfer proof → approve the cancellation. A refund still in
+MANUAL_REVIEW does not count. This applies to RFQ (e.g. a refunded deposit) and to paid retail.
+Approval cancels the seller order and syncs the customer order (CANCELLED once every seller
+order is cancelled). An unpaid retail seller order is not approvable one by one
+(`409 UNPAID_RETAIL_CANCEL_WHOLE_ORDER`): the buyer cancels the whole checkout with
+`cancel-unpaid`, or the payment-timeout job does.
+
+Retail stock restore (after the approval commits; idempotent; retried by the cancellation recovery job
+`commerce.cancellation.recovery-cron` if Catalog fails):
+
+- **Whole checkout cancelled** (every seller order CANCELLED): Commerce calls Catalog
+  `PUT /internal/v1/inventory/reservations/{key}/cancel-confirmed` and stamps `customer_order.stock_restored_at`.
+- **One seller order cancelled while others go on** (partial cancellation, migration V13): Commerce calls Catalog
+  `PUT /internal/v1/inventory/reservations/{key}/restore-lines` with body
+  `{restoreKey, lines: [{variantId, quantity}]}` — exactly that seller order's lines (`order_item` grouped by
+  variant) and the restore key `{reservationKey}-so{sellerOrderId}` — then stamps `seller_order.stock_restored_at`
+  and audits `STOCK_RESTORED` (detail = restore key). Until stamped, the recovery job retries with the same key.
+  `STOCK_RESTORE_DEFERRED` is no longer written. Catalog answers
+  `{restoreKey, reservationKey, reservationStatus, lines: [{variantId, quantity}]}`.
+- **Never twice**: Catalog (Catalog migration V8, table `stock_reservation_restore`) records each restore key; a retry
+  with the same key and lines returns the same result without touching stock (another payload → 409). Both
+  endpoints hold the reservation row lock: `cancel-confirmed` returns only `quantity − units already restored per
+  line`, and a per-line restore that arrives after the whole reservation is CANCELLED changes nothing (200,
+  `reservationStatus: CANCELLED`). A per-line restore can never exceed the confirmed quantity (409), name a variant
+  outside the reservation (400) or touch a reservation that is not CONFIRMED/CANCELLED (409). The endpoint is
+  internal (service token `X-Service-Name: commerce`, like the other inventory endpoints).
+- V13 stamps `seller_order.stock_restored_at` on every seller order already CANCELLED before it, so lines an operator
+  may have added back by hand under the old rule are never restored again; if such a checkout is cancelled
+  completely later, `cancel-confirmed` still returns its remaining lines as before.
+
+Approve a cancellation of goods already SHIPPING only after the goods are back, because the stock is returned to
+sale.
 
 Until a refund matrix is agreed, ADMIN explicitly records an amount and a versioned
 manual policy decision, which creates MANUAL_REVIEW. Pending and completed refunds
@@ -135,7 +174,13 @@ reduce the settlement base; `gross_amount = refunded_amount + platform_fee + sup
 
 Only the buyer opens a dispute after a successful payment. Before delivery it requires
 an overdue promised date; after delivery it must be opened within seven days of the
-last recorded delivery. A seller may respond once. The buyer or ADMIN may escalate after that
+last recorded delivery. The promised date is the latest expected delivery of the non-cancelled
+shipments, else the agreed RFQ delivery date + 1 day. Without an agreed delivery date (retail),
+the shipping SLA also applies: once the order is fully paid, the buyer may open a non-delivery
+dispute `commerce.retail.shipping-sla-days` (default 7) days after the last collection, and a
+later supplier estimate cannot postpone this. While a dispute is OPEN, ADMIN_REVIEW or
+REFUND_PENDING, the supplier cannot create/ship shipments and the buyer cannot accept the order.
+A seller may respond once. The buyer or ADMIN may escalate after that
 response or after 48 hours without one. Only ADMIN decides. `REJECT` closes the case;
 `REFUND` records the awarded amount and keeps the case open until linked manual refunds
 are confirmed with proof. An open case blocks settlement. The 48-hour deadline does not
@@ -179,6 +224,7 @@ with another command/body is rejected. Ownership and operator rights are checked
 | Method / suffix | Audience | Purpose |
 |---|---|---|
 | GET `/orders/{orderId}` | Owner, supplier, ADMIN | Context, obligations, cases, eligibility, latest 200 audit entries |
+| GET `/settlements/mine?page=&size=` | Supplier | Own seller orders' settlement state + pending/ready/paid totals (see "Seller payout view") |
 | POST `/{paymentId}/initiate` K | Buyer | Initiate server-owned obligation; cancelled/expired attempts can be replaced |
 | POST `/{paymentId}/reconcile` | Parties, ADMIN | Query payOS; no frontend success flag |
 | POST `/{paymentId}/cancel-link` | Buyer | Cancel unpaid provider link, not collected funds |
@@ -200,6 +246,136 @@ with another command/body is rejected. Ownership and operator rights are checked
 Suppliers receive no checkout URL or QR credential in the aggregate response. Error
 responses contain stable `code`, never raw SDK messages, SQL, secrets or bank payloads.
 OpenAPI schemas are generated from the controllers at Commerce `/v3/api-docs`.
+
+`POST /{paymentId}/initiate` on a payment of a RETAIL order returns
+`409 RETAIL_CUSTOMER_ORDER_PAYMENT_REQUIRED`: retail is paid once for the whole checkout through
+`POST /customer-orders/{orderId}/initiate`. Per-seller-order links are for RFQ only.
+`GET /orders/{id}` for an unknown seller order returns `404 ORDER_NOT_FOUND`.
+`cancellations` in the aggregate may hold several entries (ordered oldest first): REJECTED history
+followed by the current case.
+
+## QA hardening (08/11/2026)
+
+Rules added after the QA run on the shared stack (all in CommerceService; migration V11):
+
+| Rule | Behaviour | Error / event |
+|---|---|---|
+| Paid cancellation | Approve once confirmed refunds cover the collection (RFQ and retail); retail restores the whole checkout stock when every seller order is cancelled, otherwise exactly the cancelled seller order's lines (per-line restore, see "Retail stock restore") | `PAID_CANCELLATION_REQUIRES_REFUND_REVIEW`, `UNPAID_RETAIL_CANCEL_WHOLE_ORDER`, audit `STOCK_RESTORED` |
+| Re-request after rejection | New request allowed after REJECTED; unpaid cancel and timeout jobs ignore rejected cases | `CANCELLATION_ALREADY_EXISTS` only while a REQUESTED/APPROVED case exists |
+| Fulfillment gate | Preparation/shipping uses `paid − confirmed refunds`; blocked by any non-rejected cancellation, MANUAL_REVIEW refund, or OPEN/ADMIN_REVIEW/REFUND_PENDING dispute | 400 `Insufficient payment for fulfillment`, 409 `Fulfillment blocked by financial case` |
+| Buyer acceptance | Blocked while a dispute is unresolved | 409 |
+| Retail payment timeout | Unpaid retail checkout (AWAITING_PAYMENT) older than `commerce.retail.payment-timeout-minutes` (default 60, cron `commerce.retail.payment-timeout-cron`, default every minute) is cancelled by `SYSTEM`: open links are cancelled first (a payment made at the deadline is collected and the order proceeds), then stock is restored | cancellation reason `Quá hạn thanh toán 60 phút` |
+| RFQ deposit timeout | Unchanged, except an order with a REJECTED cancellation is now also auto-cancelled; only APPROVED cases exclude it | |
+| Retail per-seller payment | Rejected | `RETAIL_CUSTOMER_ORDER_PAYMENT_REQUIRED` |
+| Shipping SLA | Non-delivery dispute allowed `commerce.retail.shipping-sla-days` (default 7) after full payment when no delivery date was agreed | `DELIVERY_NOT_OVERDUE` before that |
+| Auto-acceptance | DELIVERED, not accepted, last delivery ≥ 7 days ago, no unresolved dispute and none opened since delivery → ACCEPTED by `SYSTEM` (cron `commerce.fulfillment.auto-accept-cron`, default every 10 minutes) | audit `ORDER_AUTO_ACCEPTED` |
+| Stock restore recovery | Failed Catalog restores (whole checkout or one seller order's lines) retried by `commerce.cancellation.recovery-cron` (existing, default every 30 s) | |
+
+Other Commerce endpoints touched by the same run: `POST /api/shipments/{id}/cancel` (supplier
+withdraws a PLANNED shipment; status `CANCELLED`, which no longer blocks the order from becoming
+DELIVERED and is ignored as a delivery promise), `expectedDeliveryAt ≥ expectedShipAt` on shipment
+create/update (400), `deliveryAddress` + `discountTotal` on `SellerOrderResponse`, ADMIN read of
+`GET /api/seller-orders/{id}`, cart stock validation (`409 INSUFFICIENT_STOCK`), unavailable cart
+lines in `unavailableItems` instead of a 409 for the whole cart (checkout then returns
+`409 CART_HAS_UNAVAILABLE_ITEMS`), self-purchase guard (`409 SELF_PURCHASE_NOT_ALLOWED`), and
+downstream/request errors as `{status, code, message, timestamp}` with a Vietnamese message and
+no internal URL: `INSUFFICIENT_STOCK`/`PRODUCT_UNAVAILABLE`/`DOWNSTREAM_CONFLICT` (409),
+`ADDRESS_NOT_FOUND`/`PRODUCT_NOT_FOUND`/`STORE_NOT_FOUND`/`ACCOUNT_NOT_FOUND` (404),
+`INVALID_REQUEST` (400), `DOWNSTREAM_UNAVAILABLE` (503), `IDEMPOTENCY_KEY_REQUIRED`,
+`MISSING_HEADER`, `MISSING_PARAMETER`, `MALFORMED_REQUEST`, `INVALID_PARAMETER` (400),
+`INTERNAL_ERROR` (500, no exception text). Finance routes keep `{code,message}` and
+`INVALID_FINANCE_REQUEST` for invalid bodies.
+
+## Shipment lines (split a seller order into several shipments by item, migration V12)
+
+A shipment carries `lines` `{orderItemId, quantity}` of its own seller order (table `shipment_line`).
+
+- `POST /api/shipments` accepts optional `lines: [{orderItemId, quantity}]`. Rules: quantity > 0
+  (`400 SHIPMENT_LINE_INVALID_QUANTITY`), each item belongs to that seller order (`400 SHIPMENT_LINE_ITEM_NOT_IN_ORDER`),
+  at most once per shipment (`400 SHIPMENT_LINE_DUPLICATE_ITEM`), and the units per item across non-cancelled
+  shipments never exceed the ordered quantity (`409 SHIPMENT_QUANTITY_EXCEEDS_REMAINING`). Errors are
+  `{status, code, message, timestamp}` with a Vietnamese message.
+- **Backward compatible**: without `lines` (or with `[]`) the shipment takes every unit not yet in a non-cancelled
+  shipment; when nothing remains → `409 NOTHING_LEFT_TO_SHIP`. A cancelled (withdrawn PLANNED) shipment gives its
+  units back. Lines cannot be edited: cancel the planned shipment and create another.
+- The seller order becomes DELIVERED only when every ordered unit is in DELIVERED shipments. While a non-cancelled
+  **legacy** shipment without lines exists (created before V12, content unknown), the old rule applies: every
+  non-cancelled shipment is delivered.
+- `ShipmentResponse.lines`: `[{orderItemId, productNameSnapshot, variantNameSnapshot, skuSnapshot, quantity}]`
+  (empty for a legacy shipment).
+- `GET /api/shipments/items?sellerOrderId=` (buyer, supplier, ADMIN — same access as the shipment list): per order
+  item `{orderItemId, productNameSnapshot, variantNameSnapshot, skuSnapshot, orderedQuantity, allocatedQuantity,
+  shippedQuantity, deliveredQuantity, remainingQuantity}` — allocated = in non-cancelled shipments, shipped = in
+  SHIPPED/DELIVERED, delivered = in DELIVERED, remaining = ordered − allocated. Legacy shipments are not counted.
+
+## Seller payout view (Doanh thu & giải ngân)
+
+`GET /api/payments/settlements/mine?page=0&size=20` (verified supplier only; others `403 SUPPLIER_REQUIRED`;
+page < 0 or size outside 1–100 → `400 INVALID_FINANCE_REQUEST`). Read-only, takes no finance lock. Returns every
+seller order of the caller's supplier profile that has a finance context, newest first:
+
+`{content: [Row], page, size, totalElements, totalPages, totals: {pendingAmount, readyAmount, paidAmount}}`
+
+Row: `sellerOrderId, sellerOrderNo, orderId, orderNo, storeName, orderStatus, placedAt, totalAmount,
+grossCollected` (successful collections), `refundedAmount` (confirmed refunds), `platformFee, netPayout,
+feeEstimated, eligible, blockingReasons` (same codes as the order summary), `settlementId, settlementStatus,
+payoutStatus, payoutReference, paidAt`.
+
+- A READY/PROCESSING/SUCCESS settlement shows its snapshot (`feeEstimated: false`). Otherwise (none yet, or ON_HOLD
+  which must be recalculated) fee and payout are estimated with the same fee function as `createSettlement`
+  (5%, `finance.settlement.rounding`) on `grossCollected − refundedAmount`; null while the rounding rule is not one
+  of HALF_UP/DOWN/UP.
+- `payoutStatus`: `PAID` (settlement SUCCESS, `paidAt` = `settled_at`), `PROCESSING` (manual transfer reserved),
+  `READY` (settlement READY, or eligible without a settlement yet), `ON_HOLD`, `BLOCKED` (not eligible yet, see
+  `blockingReasons`), `NO_PAYOUT` (cancelled seller order or fully refunded).
+- Totals over all of the supplier's seller orders (not only the page): pending = BLOCKED + ON_HOLD, ready = READY +
+  PROCESSING, paid = PAID (sums of `netPayout`). Cost is a few queries per seller order; add a summary table or cache
+  if a supplier accumulates thousands of orders.
+
+## In-app notifications (Identity, 08/11/2026)
+
+`notification/CommerceNotifier` posts to Identity `POST /internal/v1/notifications` through the existing
+`IdentityServiceClient` (`X-Service-Name: commerce`, `X-Service-Token` = `COMMERCE_TO_IDENTITY_TOKEN`). Same rules as
+RFQService's `RfqNotifier`:
+
+- Recipients are the `customer_id` / `supplier_id` of the seller order's `finance_context` (Identity resolves the
+  account); order numbers are `customer_order.order_no` (buyer) and `seller_order.seller_order_no` (supplier). No
+  extra cross-service lookup.
+- Requests are built inside the business transaction and sent only after it commits (`TransactionSynchronization`);
+  without a transaction they are sent at once. A rolled-back action notifies nobody.
+- Best effort, no retry: a lookup or Identity failure is logged (`warn`) and never fails payment, shipment,
+  cancellation, dispute or payout. A lost notification is not replayed.
+- Targets: buyer `{"kind":"ORDER","id":"<customerOrderId>"}`; supplier
+  `{"kind":"ORDER","id":"<sellerOrderId>","role":"SELLER"}`. Titles/bodies are Vietnamese, amounts as `10.001 ₫`.
+
+| Event (where) | Recipient | type | dedupKey |
+|---|---|---|---|
+| Seller-order payment collected — webhook or reconcile (`FinanceServiceImpl.collect`) | supplier | `PAYMENT_RECEIVED` (title by DEPOSIT / REMAINING / FULL) | `PAYMENT_RECEIVED:{paymentId}` |
+| same | buyer | `PAYMENT_CONFIRMED` | `PAYMENT_CONFIRMED:{paymentId}` |
+| Retail checkout payment collected (`CustomerPaymentServiceImpl.collect`) | each supplier | `PAYMENT_RECEIVED` | `PAYMENT_RECEIVED:{paymentId}` (its seller-order payment) |
+| same | buyer (once) | `PAYMENT_CONFIRMED` | `PAYMENT_CONFIRMED:CUSTOMER_PAYMENT:{customerPaymentId}` |
+| Shipment shipped (`markAsShipped`) | buyer | `SHIPMENT_SHIPPED` | `SHIPMENT_SHIPPED:{shipmentId}` |
+| Shipment delivered (`markAsDelivered`) | buyer | `SHIPMENT_DELIVERED` | `SHIPMENT_DELIVERED:{shipmentId}` |
+| Seller order became DELIVERED (same call) — reminder to accept within 7 days | buyer | `ORDER_DELIVERED` | `ORDER_DELIVERED:{sellerOrderId}` |
+| Buyer acceptance (`acceptSellerOrder`) / auto-accept job (`autoAcceptDelivered`) | supplier | `ORDER_ACCEPTED` | `ORDER_ACCEPTED:{sellerOrderId}` |
+| Cancellation requested (`requestCancellation`; not when the supplier itself asked) | supplier | `CANCELLATION_REQUESTED` | `CANCELLATION_REQUESTED:{cancellationId}` |
+| Cancellation approved (`decideCancellation`) | buyer | `ORDER_CANCELLED` | `ORDER_CANCELLED:{orderId}` (multi-store checkout: `ORDER_CANCELLED:{orderId}:{sellerOrderId}`) |
+| same | supplier | `ORDER_CANCELLED` | `SELLER_ORDER_CANCELLED:{sellerOrderId}` |
+| Cancellation rejected (`decideCancellation`) | buyer | `CANCELLATION_REJECTED` | `CANCELLATION_REJECTED:{cancellationId}` |
+| Unpaid RFQ/retail order cancelled by the timeout jobs (`cancelUnpaidOrder`, system), with the reason | buyer | `ORDER_CANCELLED` | `ORDER_CANCELLED:{orderId}` |
+| Dispute opened (`openDispute`) | supplier | `DISPUTE_OPENED` | `DISPUTE_OPENED:{disputeId}` |
+| Dispute decided, REJECT or REFUND award (`decideDispute`) | buyer + supplier | `DISPUTE_RESOLVED` | `DISPUTE_RESOLVED:{disputeId}:CUSTOMER` / `:SUPPLIER` |
+| Refund confirmed with transfer proof (`confirmRefund`) | buyer | `REFUND_CONFIRMED` | `REFUND_CONFIRMED:{refundId}` |
+| Payout confirmed paid (`confirmPayout`) | supplier | `PAYOUT_PAID` | `PAYOUT_PAID:{settlementId}` |
+
+The cancellation keys are the ones RFQService's order sync uses, so an RFQ order (one seller order per customer
+order) cancelled in Commerce is announced once, by whichever service posts first. Idempotent replays of finance
+commands and duplicate webhooks run no business action and therefore send nothing; Identity's dedup covers the rest.
+
+Not notified (yet): a buyer cancelling their own unpaid order (the supplier of a retail order is not told; RFQService
+tells the supplier of an RFQ order), the recovery job finishing an interrupted unpaid cancellation, dispute seller
+response/escalation, refund rejection, settlement creation and payout start. A payment collected after its order
+was cancelled is still reported as received (the money is real and goes to manual review).
 
 ## Events and frontend integration still to connect
 
@@ -235,8 +411,9 @@ The existing TV1/TV3 order/login mocks remain unchanged until their owners conne
 ## Verification
 
 `mvn -pl CommerceService,API-Gateway -am test` runs service tests, concurrency tests and
-real SDK signature tests without contacting payOS or moving money. H2 tests execute V1+V2
-with documented syntax adaptations; they do not substitute for SQL Server validation.
+real SDK signature tests without contacting payOS or moving money. H2 tests execute V1, V3,
+V7, V8, V10, V11, V12 and V13 with documented syntax adaptations (H2 has no filtered index, so the one-open-
+cancellation rule is enforced by the service there); they do not substitute for SQL Server validation.
 `scripts/tv5-sqlserver-check.ps1` applies the original migrations to a uniquely named local
 SQL Server test database, checks filtered uniqueness and integer-VND constraints, then
 drops only that database. It uses Windows authentication and leaves production DBs alone.

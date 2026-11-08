@@ -45,3 +45,17 @@ finance:
     rounding: ${FINANCE_FEE_ROUNDING:HALF_UP}
   dispute:
     admin-adjudication-enabled: ${FINANCE_DISPUTE_ADMIN_ENABLED:true}
+commerce:
+  rfq:
+    # Unpaid RFQ orders are cancelled by the system this many hours after placed_at.
+    deposit-timeout-hours: 48
+    deposit-timeout-cron: "0 */5 * * * *"
+  retail:
+    # Unpaid retail checkouts are cancelled by the system (stock restored) this many minutes after placed_at.
+    payment-timeout-minutes: 60
+    payment-timeout-cron: "0 * * * * *"
+    # Without an agreed delivery date, a buyer may open a non-delivery dispute this many days after full payment.
+    shipping-sla-days: 7
+  fulfillment:
+    # Delivered orders not accepted nor disputed within the 7-day dispute window are accepted by the system.
+    auto-accept-cron: "0 */10 * * * *"

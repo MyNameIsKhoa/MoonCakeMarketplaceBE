@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import vn.payos.model.webhooks.Webhook;
 
@@ -58,6 +59,13 @@ public class FinanceController {
     @GetMapping("/orders/{orderId}")
     public FinanceResponse summary(@PathVariable long orderId, Authentication authentication) {
         return service.summary(orderId, actor(authentication));
+    }
+
+    /** Supplier view "Doanh thu & giải ngân": own seller orders' settlement state plus totals. */
+    @GetMapping("/settlements/mine")
+    public FinanceResponse.SupplierPayouts mySettlements(@RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size, Authentication authentication) {
+        return service.supplierPayouts(actor(authentication), page, size);
     }
 
     @GetMapping("/customer-orders/{orderId}")

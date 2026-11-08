@@ -18,3 +18,11 @@ security:
 commerce:
   checkout:
     recovery-cron: "-"
+  rfq:
+    deposit-timeout-cron: "-"
+  retail:
+    payment-timeout-cron: "-"
+  cancellation:
+    recovery-cron: "-"
+  fulfillment:
+    auto-accept-cron: "-"

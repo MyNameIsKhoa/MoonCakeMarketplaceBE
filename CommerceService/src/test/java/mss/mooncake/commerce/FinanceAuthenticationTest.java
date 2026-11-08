@@ -70,6 +70,21 @@ class FinanceAuthenticationTest {
     }
 
     @Test
+    void supplierPayoutViewIsScopedToTheResolvedSupplierProfile() throws Exception {
+        when(identity.getSupplierSummaryByUser(101L)).thenReturn(
+                new SupplierSummaryResponse(20L, 101L, "Supplier", null, "VERIFIED"));
+        var finance = mock(FinanceService.class);
+        var mvc = MockMvcBuilders.standaloneSetup(new FinanceController(finance, resolver))
+                .setControllerAdvice(new FinanceExceptionHandler()).build();
+        var supplier = authentication(10L, "ROLE_CUSTOMER", "ROLE_SUPPLIER");
+        mvc.perform(get("/api/payments/settlements/mine").principal(supplier)).andExpect(status().isOk());
+        mvc.perform(get("/api/payments/settlements/mine").param("page", "2").param("size", "5").principal(supplier))
+                .andExpect(status().isOk());
+        verify(finance).supplierPayouts(new FinanceService.Actor(101, 10L, 20L, false), 0, 20);
+        verify(finance).supplierPayouts(new FinanceService.Actor(101, 10L, 20L, false), 2, 5);
+    }
+
+    @Test
     void supplierProfileIsResolvedUsingIdentityByUserContract() {
         when(identity.getSupplierSummaryByUser(101L)).thenReturn(
                 new SupplierSummaryResponse(20L, 101L, "Supplier", null, "VERIFIED"));
@@ -99,6 +114,30 @@ class FinanceAuthenticationTest {
         verify(fulfillment).markAsShipped(7L, 20L);
         assertThatThrownBy(() -> controller.markAsShipped(7L, authentication(10L, "ROLE_CUSTOMER")))
                 .isInstanceOf(mss.mooncake.commerce.exception.ForbiddenException.class);
+    }
+
+    @Test
+    void shipmentCancellationPassesSupplierProfileId() {
+        when(identity.getSupplierSummaryByUser(101L)).thenReturn(
+                new SupplierSummaryResponse(20L, 101L, "Supplier", null, "VERIFIED"));
+        var fulfillment = mock(mss.mooncake.commerce.service.FulfillmentApplicationService.class);
+        var controller = new mss.mooncake.commerce.controller.ShipmentController(fulfillment, resolver);
+        controller.cancelShipment(7L, authentication(10L, "ROLE_CUSTOMER", "ROLE_SUPPLIER"));
+        verify(fulfillment).cancelShipment(7L, 20L);
+        assertThatThrownBy(() -> controller.cancelShipment(7L, authentication(10L, "ROLE_CUSTOMER")))
+                .isInstanceOf(mss.mooncake.commerce.exception.ForbiddenException.class);
+    }
+
+    @Test
+    void sellerOrderDetailTellsTheQueryServiceWhenTheCallerIsAdmin() {
+        var queries = mock(mss.mooncake.commerce.service.OrderQueryService.class);
+        var controller = new mss.mooncake.commerce.controller.SellerOrderController(queries);
+        var admin = (CommercePrincipal) authentication(null, "ROLE_ADMIN").getPrincipal();
+        var buyer = (CommercePrincipal) authentication(10L, "ROLE_CUSTOMER").getPrincipal();
+        controller.get(admin, 7L);
+        controller.get(buyer, 8L);
+        verify(queries).getSellerOrder(101L, null, 7L, true);
+        verify(queries).getSellerOrder(101L, 10L, 8L, false);
     }
 
     @Test

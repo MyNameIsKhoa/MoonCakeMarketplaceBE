@@ -21,6 +21,7 @@ import mss.mooncake.commerce.dto.response.CartResponse;
 import mss.mooncake.commerce.dto.response.CartPricingResponse;
 import mss.mooncake.commerce.entity.CartEntity;
 import mss.mooncake.commerce.entity.CartItemEntity;
+import mss.mooncake.commerce.exception.CommerceException;
 import mss.mooncake.commerce.repository.CartItemRepository;
 import mss.mooncake.commerce.repository.CartRepository;
 import mss.mooncake.commerce.service.CartApplicationService;
@@ -74,13 +75,21 @@ public class CartApplicationServiceImpl implements CartApplicationService {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Catalog returned an incomplete basket");
         }
         Map<Long, List<CartItemResponse>> byStore = new LinkedHashMap<>();
+        List<CartPricingResponse.UnavailableLine> unavailable = new ArrayList<>();
         for (var item : cartItems) {
             var snapshot = byVariant.get(item.variantId());
-            if (snapshot == null || snapshot.storeId() == null || snapshot.supplierId() == null
+            if (snapshot == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Catalog returned an incomplete basket");
+            }
+            // A line that is no longer for sale is reported, not priced, so the rest of the cart stays usable.
+            if (snapshot.storeId() == null || snapshot.supplierId() == null
                     || !"ACTIVE".equals(snapshot.variantStatus())
                     || !"ACTIVE".equals(snapshot.productStatus())
                     || !"ACTIVE".equals(snapshot.storeStatus())) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "Cart contains an unavailable product");
+                unavailable.add(new CartPricingResponse.UnavailableLine(item.cartItemId(), item.variantId(),
+                        snapshot.productName(), snapshot.variantName(), snapshot.sku(), snapshot.imageUrl(),
+                        item.quantity(), "UNAVAILABLE"));
+                continue;
             }
             byStore.computeIfAbsent(snapshot.storeId(), ignored -> new ArrayList<>()).add(item);
         }
@@ -130,19 +139,30 @@ public class CartApplicationServiceImpl implements CartApplicationService {
                 storePrices.stream().map(CartPricingResponse.StorePrice::subtotal).reduce(BigDecimal.ZERO, BigDecimal::add),
                 storePrices.stream().map(CartPricingResponse.StorePrice::discountTotal).reduce(BigDecimal.ZERO, BigDecimal::add),
                 storePrices.stream().map(CartPricingResponse.StorePrice::totalAmount).reduce(BigDecimal.ZERO, BigDecimal::add),
-                storePrices);
+                storePrices, List.copyOf(unavailable));
+    }
+
+    /** Catalog's snapshot quantity is the stock still free to sell (on hand minus active holds). */
+    private static void requireStock(VariantSnapshotResponse snapshot, int quantity) {
+        if (snapshot.stockQuantity() != null && quantity > snapshot.stockQuantity()) {
+            throw new CommerceException(HttpStatus.CONFLICT, "INSUFFICIENT_STOCK",
+                    "Chỉ còn " + Math.max(0, snapshot.stockQuantity()) + " sản phẩm trong kho");
+        }
+    }
+
+    private VariantSnapshotResponse snapshot(Long variantId) {
+        List<VariantSnapshotResponse> snapshots = catalog.getVariantSnapshots(
+                new VariantSnapshotBatchRequest(List.of(variantId)));
+        if (snapshots == null || snapshots.size() != 1 || !variantId.equals(snapshots.getFirst().variantId())) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Catalog returned an invalid variant snapshot");
+        }
+        return snapshots.getFirst();
     }
 
     @Override
     @Transactional
     public CartItemChange addItem(Long customerId, AddCartItemRequest request) {
-        List<VariantSnapshotResponse> snapshots = catalog.getVariantSnapshots(
-                new VariantSnapshotBatchRequest(List.of(request.variantId())));
-        if (snapshots == null || snapshots.size() != 1
-                || !request.variantId().equals(snapshots.getFirst().variantId())) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Catalog returned an invalid variant snapshot");
-        }
-        VariantSnapshotResponse snapshot = snapshots.getFirst();
+        VariantSnapshotResponse snapshot = snapshot(request.variantId());
         if (!"ACTIVE".equals(snapshot.variantStatus()) || !"ACTIVE".equals(snapshot.productStatus())
                 || !"ACTIVE".equals(snapshot.storeStatus())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Variant is not currently for sale");
@@ -161,11 +181,14 @@ public class CartApplicationServiceImpl implements CartApplicationService {
                     created.setAddedAt(LocalDateTime.now(ZoneOffset.UTC));
                     return created;
                 });
+        int quantity;
         try {
-            item.setQuantity(Math.addExact(item.getQuantity(), request.quantity()));
+            quantity = Math.addExact(item.getQuantity(), request.quantity());
         } catch (ArithmeticException overflow) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Quantity exceeds supported range");
         }
+        requireStock(snapshot, quantity);
+        item.setQuantity(quantity);
         cart.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
         return new CartItemChange(toResponse(items.save(item)), existing.isEmpty());
     }
@@ -177,6 +200,7 @@ public class CartApplicationServiceImpl implements CartApplicationService {
         CartEntity cart = requireCart(customerId);
         CartItemEntity item = items.findByIdAndCartId(itemId, cart.getId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Cart item not found"));
+        requireStock(snapshot(item.getVariantIdRef()), quantity);
         item.setQuantity(quantity);
         cart.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
         return toResponse(items.save(item));

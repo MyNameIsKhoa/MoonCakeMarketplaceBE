@@ -24,6 +24,11 @@ public interface FinanceRepository {
     record CustomerPayment(long id, long orderId, long orderCode, String key, long amount,
             String status, String linkId, String checkoutUrl, String qrCode, Instant expiresAt) { }
     record CustomerPaymentItem(long paymentId, long sellerOrderId, long amount, String sellerOrderNo) { }
+    record StockLine(long variantId, int quantity) { }
+    /** A supplier's seller order with its settlement snapshot (null fields when none was created yet). */
+    record SupplierPayout(long sellerOrderId, String sellerOrderNo, long orderId, String orderNo, String storeName,
+            String status, Instant placedAt, Long settlementId, String settlementStatus, Long feeAmount,
+            Long payoutAmount, Long refundedAmount, String payoutReference, Instant settledAt) { }
 
     static Timestamp utc(Instant value) {
         return value == null ? null : Timestamp.valueOf(java.time.LocalDateTime.ofInstant(value, java.time.ZoneOffset.UTC));
@@ -47,6 +52,16 @@ public interface FinanceRepository {
     long parentOrderId(long sellerOrderId);
     List<String> sellerStatuses(long orderId);
     List<Long> pendingCancellationOrderIds();
+    List<Long> overdueRfqOrderIds(Instant placedBefore);
+    List<Long> overdueRetailOrderIds(Instant placedBefore);
+    /** Retail checkouts with confirmed stock still to return: fully cancelled, or with a cancelled seller order. */
+    List<Long> unrestoredCancelledRetailOrderIds();
+    /** Cancelled seller orders of the checkout whose own lines were not returned to Catalog yet. */
+    List<Long> unrestoredCancelledSellerOrderIds(long orderId);
+    /** Units per Catalog variant ordered in one seller order (what its cancellation returns to stock). */
+    List<StockLine> sellerOrderStockLines(long sellerOrderId);
+    /** DELIVERED seller orders the buyer never accepted, last delivered at or before the cutoff, never disputed since. */
+    List<Long> autoAcceptableSellerOrderIds(Instant deliveredBefore);
     void lockCustomerOrder(long orderId);
     long customerOrderOwner(long orderId);
     long customerOrderTotal(long orderId);
@@ -63,10 +78,14 @@ public interface FinanceRepository {
     List<FinanceResponse.Case> disputes(long orderId);
     java.time.Instant deliveredAt(long orderId);
     java.time.Instant expectedDeliveryAt(long orderId);
+    /** When the latest successful collection was recorded, or null if nothing was collected. */
+    java.time.Instant lastPaidAt(long orderId);
     long refunded(long orderId);
     long refundedForDispute(long disputeId);
     List<Long> pendingDisputeOrderIds(int offset, int limit);
     List<FinanceResponse.Settlement> settlements(long orderId);
+    /** Every seller order of the supplier that has a finance context, newest first. */
+    List<SupplierPayout> supplierPayouts(long supplierId);
     List<FinanceResponse.Audit> history(long orderId);
     void event(long orderId, String type, long resourceId, String actor, String detail);
     void ledger(long orderId, String key, String type, long amount);
