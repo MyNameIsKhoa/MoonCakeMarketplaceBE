@@ -59,6 +59,28 @@ public class ActorContext {
         return id;
     }
 
+    /** Supplier allowed to trade (quote, revise): VERIFIED in Identity. PENDING/REJECTED/SUSPENDED may only read. */
+    public Long verifiedSupplierId() {
+        try {
+            var summary = identity.getSupplierByUser(userId());
+            if (summary == null || !Objects.equals(summary.userId(), userId()) || summary.supplierId() == null) {
+                throw new ApiException(HttpStatus.FORBIDDEN, "SUPPLIER_REQUIRED", "Tài khoản chưa có hồ sơ nhà cung cấp");
+            }
+            if (!"VERIFIED".equals(summary.verificationStatus())) {
+                throw new ApiException(HttpStatus.FORBIDDEN, "SUPPLIER_NOT_VERIFIED", "Hồ sơ nhà cung cấp chưa được xác minh hoặc đang bị khóa");
+            }
+            return summary.supplierId();
+        } catch (FeignException.NotFound ex) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "SUPPLIER_REQUIRED", "Tài khoản chưa có hồ sơ nhà cung cấp");
+        } catch (FeignException ex) {
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "IDENTITY_UNAVAILABLE", "Không xác minh được nhà cung cấp");
+        }
+    }
+
+    public void assertVerifiedSupplierOwner(Long owner) {
+        if (!Objects.equals(verifiedSupplierId(), owner)) throw new ApiException(HttpStatus.FORBIDDEN, "NOT_RESOURCE_OWNER", "Bạn không sở hữu tài nguyên này");
+    }
+
     public Long optionalSupplierId() {
         var auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || !(auth.getPrincipal() instanceof UserPrincipal)) return null;

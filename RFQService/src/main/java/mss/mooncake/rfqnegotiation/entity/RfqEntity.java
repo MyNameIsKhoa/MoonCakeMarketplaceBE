@@ -37,4 +37,6 @@ public class RfqEntity extends BaseRfqEntity {
     @Column(name = "created_at", nullable = false) private LocalDateTime createdAt;
     @Enumerated(EnumType.STRING)
     @Column(name = "audience", nullable = false, length = 20) private RfqAudience audience = RfqAudience.ALL;
+    /** CLOSED by the system because accepted quotations reached the quantity; reopened if one of their orders is cancelled. */
+    @Column(name = "auto_closed", nullable = false) private boolean autoClosed;
 }
