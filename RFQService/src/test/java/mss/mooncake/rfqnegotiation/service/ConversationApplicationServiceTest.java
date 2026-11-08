@@ -2,6 +2,12 @@ package mss.mooncake.rfqnegotiation.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import feign.FeignException;
@@ -15,6 +21,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import mss.mooncake.rfqnegotiation.client.IdentityServiceClient;
+import mss.mooncake.rfqnegotiation.client.dto.identity.CreateNotificationRequest;
 import mss.mooncake.rfqnegotiation.client.dto.identity.SupplierSummaryResponse;
 import mss.mooncake.rfqnegotiation.client.dto.identity.UserSummaryResponse;
 import mss.mooncake.rfqnegotiation.dto.request.CreateConversationRequest;
@@ -24,6 +31,7 @@ import mss.mooncake.rfqnegotiation.entity.RfqTargetStoreEntity;
 import mss.mooncake.rfqnegotiation.enums.RfqAudience;
 import mss.mooncake.rfqnegotiation.enums.RfqStatus;
 import mss.mooncake.rfqnegotiation.exception.ApiException;
+import mss.mooncake.rfqnegotiation.notification.RfqNotifier;
 import mss.mooncake.rfqnegotiation.repository.ConversationReadStateRepository;
 import mss.mooncake.rfqnegotiation.repository.ConversationRepository;
 import mss.mooncake.rfqnegotiation.repository.MessageRepository;
@@ -64,7 +72,7 @@ class ConversationApplicationServiceTest {
     @EnableAutoConfiguration
     @EntityScan(basePackageClasses = RfqEntity.class)
     @EnableJpaRepositories(basePackageClasses = ConversationRepository.class)
-    @Import({ConversationApplicationServiceImpl.class, ActorContext.class})
+    @Import({ConversationApplicationServiceImpl.class, ActorContext.class, RfqNotifier.class})
     static class TestConfig {
         @Bean BroadcastProbe broadcastProbe() { return new BroadcastProbe(); }
     }
@@ -81,6 +89,7 @@ class ConversationApplicationServiceTest {
     @Autowired MessageRepository messages;
     @Autowired ConversationReadStateRepository reads;
     @Autowired RfqTargetStoreRepository targets;
+    @Autowired mss.mooncake.rfqnegotiation.repository.QuotationRepository quotations;
     @MockitoBean IdentityServiceClient identity;
     @Autowired BroadcastProbe broadcast;
     @Autowired PlatformTransactionManager transactionManager;
@@ -278,6 +287,24 @@ class ConversationApplicationServiceTest {
     }
 
     @Test
+    void buyerCanStillTalkToAnAcceptedSupplierAfterTheRfqClosed() {
+        RfqEntity rfq = rfqs.findById(rfqId).orElseThrow();
+        rfq.setStatus(RfqStatus.CLOSED);
+        rfqs.save(rfq);
+        assertThatThrownBy(() -> service.create(rfqId, new CreateConversationRequest(77L)))
+                .isInstanceOf(ApiException.class).extracting("code").isEqualTo("RFQ_NOT_OPEN");
+
+        var accepted = new mss.mooncake.rfqnegotiation.entity.QuotationEntity();
+        accepted.setRfqId(rfqId); accepted.setSupplierIdRef(77L); accepted.setStoreIdRef(30L); accepted.setVersionNo(1);
+        accepted.setTotalAmount(new java.math.BigDecimal("100.00")); accepted.setDepositPercent(java.math.BigDecimal.ZERO);
+        accepted.setShippingFee(java.math.BigDecimal.ZERO); accepted.setValidUntil(LocalDateTime.now().plusDays(1));
+        accepted.setProposedDeliveryDate(java.time.LocalDate.now().plusDays(10));
+        accepted.setStatus(mss.mooncake.rfqnegotiation.enums.QuotationStatus.ACCEPTED);
+        quotations.save(accepted);
+        assertThat(service.create(rfqId, new CreateConversationRequest(77L)).created()).isTrue();
+    }
+
+    @Test
     void supplierSeesTheBuyerNameKeptOnTheRfq() {
         RfqEntity rfq = rfqs.findById(rfqId).orElseThrow();
         rfq.setCustomerNameSnapshot("Công ty Demo B2B");
@@ -294,6 +321,60 @@ class ConversationApplicationServiceTest {
     void buyerNameIsAbsentForRfqsCreatedBeforeNamesWereKept() {
         Long id = createConversation();
         assertThat(service.get(id).customerName()).isNull();
+    }
+
+    @Test
+    void aBurstOfMessagesAsksForOneNotificationPerUnreadStreak() {
+        Long id = createConversation();
+        service.send(id, 101L, message("b1", "Xin chào"));
+        service.send(id, 101L, message("b2", "Cho mình hỏi giá hộp 4 bánh"));
+
+        var burst = sentNotifications();
+        assertThat(burst).hasSize(2);
+        assertThat(burst).extracting(CreateNotificationRequest::supplierId).containsOnly(77L);
+        // Same key for the whole streak: Identity keeps a single notification.
+        assertThat(burst).extracting(CreateNotificationRequest::dedupKey).containsOnly("CHAT_MESSAGE:" + id + ":0");
+        assertThat(burst.getFirst().type()).isEqualTo("CHAT_MESSAGE");
+        assertThat(burst.getFirst().title()).contains("Buyer");
+        assertThat(burst.getFirst().target()).containsEntry("kind", "CONVERSATION").containsEntry("id", id.toString());
+
+        // Once the supplier has read the conversation, the next message starts a new notification.
+        login(202L);
+        service.markRead(id);
+        service.send(id, 101L, message("b3", "Còn đó không?"));
+        assertThat(sentNotifications().getLast().dedupKey())
+                .startsWith("CHAT_MESSAGE:" + id + ":").isNotEqualTo("CHAT_MESSAGE:" + id + ":0");
+
+        // A supplier reply goes to the buyer, addressed by customer id.
+        service.send(id, 202L, message("s1", "Có ạ"));
+        var reply = sentNotifications().getLast();
+        assertThat(reply.customerId()).isEqualTo(11L);
+        assertThat(reply.supplierId()).isNull();
+        assertThat(reply.title()).contains("Bakery");
+    }
+
+    @Test
+    void rolledBackOrRetriedMessagesNotifyNobodyAndIdentityFailureNeverBlocksChat() {
+        Long id = createConversation();
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            service.send(id, 101L, message("rollback", "Will not be saved"));
+            status.setRollbackOnly();
+        });
+        verify(identity, never()).createNotification(any());
+
+        service.send(id, 101L, message("c1", "Hello"));
+        service.send(id, 101L, message("c1", "Hello"));
+        verify(identity, times(1)).createNotification(any());
+
+        doThrow(new IllegalStateException("identity down")).when(identity).createNotification(any());
+        assertThat(service.send(id, 101L, message("c2", "Still delivered")).content()).isEqualTo("Still delivered");
+        assertThat(messages.count()).isEqualTo(2);
+    }
+
+    private List<CreateNotificationRequest> sentNotifications() {
+        var captor = org.mockito.ArgumentCaptor.forClass(CreateNotificationRequest.class);
+        verify(identity, atLeast(0)).createNotification(captor.capture());
+        return captor.getAllValues();
     }
 
     private Long createConversation() {

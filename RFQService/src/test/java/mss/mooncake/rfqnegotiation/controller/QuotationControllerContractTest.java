@@ -66,6 +66,6 @@ class QuotationControllerContractTest {
     }
 
     private static QuotationAcceptedResponse accepted(String conversionStatus) {
-        return new QuotationAcceptedResponse("21", "1", "9", "4", "2", 3, null, null, conversionStatus);
+        return new QuotationAcceptedResponse("21", "1", "9", "4", "2", 3, null, null, conversionStatus, null);
     }
 }

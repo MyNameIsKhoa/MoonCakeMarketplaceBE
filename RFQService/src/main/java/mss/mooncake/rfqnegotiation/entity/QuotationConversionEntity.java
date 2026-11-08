@@ -22,4 +22,7 @@ public class QuotationConversionEntity extends BaseRfqEntity {
     @Column(name = "seller_order_id_ref") private Long sellerOrderIdRef;
     @Column(name = "accepted_at", nullable = false) private LocalDateTime acceptedAt;
     @Column(name = "updated_at", nullable = false) private LocalDateTime updatedAt;
+    /** Last order status read from Commerce for a COMPLETED conversion, and when it was read. */
+    @Column(name = "order_status", length = 30) private String orderStatus;
+    @Column(name = "order_checked_at") private LocalDateTime orderCheckedAt;
 }
