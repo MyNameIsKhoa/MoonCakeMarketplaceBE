@@ -1,9 +1,9 @@
--- SSMS local; chạy SAU Identity Flyway V3. Dữ liệu DEMO, supplier không đăng nhập được.
+-- SSMS local; chạy SAU Identity Flyway V3. Dữ liệu DEMO, supplier không đăng nhập được bằng mật khẩu mặc định.
 -- Không đại diện cho nhà bán chính thức của các thương hiệu.
 USE mss_identity;
 GO
 -- Development-only catalog owners. Run after Identity Flyway V2/V3.
--- No passwords are seeded: these accounts cannot log in. Never use on production data.
+-- No passwords are seeded: these accounts cannot log in unless configured locally. Never use on production data.
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
@@ -13,9 +13,9 @@ IF OBJECT_ID(N'dbo.app_user', N'U') IS NULL OR OBJECT_ID(N'dbo.supplier_profile'
 
 DECLARE @demo TABLE (email NVARCHAR(255) PRIMARY KEY, company_name NVARCHAR(255), tax_code NVARCHAR(100));
 INSERT INTO @demo (email, company_name, tax_code) VALUES
-    (N'trang-moc@demo.mss.invalid', N'Trăng Mộc (demo)', N'DEMO-TRANG-MOC-001'),
-    (N'nguyet-vien@demo.mss.invalid', N'Nguyệt Viên (demo)', N'DEMO-NGUYET-VIEN-001'),
-    (N'sao-nho@demo.mss.invalid', N'Sao Nhỏ (demo)', N'DEMO-SAO-NHO-001');
+    (N'trang-moc@demo.mss.invalid', N'Trăng Mộc', N'DEMO-TRANG-MOC-001'),
+    (N'nguyet-vien@demo.mss.invalid', N'Nguyệt Viên', N'DEMO-NGUYET-VIEN-001'),
+    (N'sao-nho@demo.mss.invalid', N'Sao Nhỏ', N'DEMO-SAO-NHO-001');
 
 BEGIN TRY
     BEGIN TRANSACTION;
@@ -24,7 +24,8 @@ BEGIN TRY
                WHERE u.status <> N'ACTIVE')
         THROW 51002, 'A demo email belongs to an inactive account; no existing account was changed.', 1;
     IF EXISTS (SELECT 1 FROM @demo d JOIN dbo.app_user u ON u.email = d.email
-               WHERE u.password_hash IS NOT NULL)
+               WHERE u.password_hash IS NOT NULL
+                 AND NOT EXISTS (SELECT 1 FROM dbo.supplier_profile s WHERE s.user_id = u.user_id AND s.tax_code = d.tax_code))
         THROW 51005, 'A demo email belongs to a login-capable account; refusing to grant supplier verification.', 1;
     IF EXISTS (SELECT 1 FROM @demo d JOIN dbo.supplier_profile s ON s.tax_code = d.tax_code
                JOIN dbo.app_user u ON u.user_id = s.user_id WHERE u.email <> d.email)
@@ -42,6 +43,23 @@ BEGIN TRY
     SELECT u.user_id, d.company_name, d.tax_code, N'VERIFIED'
     FROM @demo d JOIN dbo.app_user u ON u.email = d.email
     WHERE NOT EXISTS (SELECT 1 FROM dbo.supplier_profile s WHERE s.user_id = u.user_id);
+
+    UPDATE s SET company_name = d.company_name
+    FROM dbo.supplier_profile s JOIN dbo.app_user u ON u.user_id = s.user_id
+    JOIN @demo d ON d.email = u.email WHERE s.tax_code = d.tax_code;
+
+    IF OBJECT_ID(N'dbo.customer_profile', N'U') IS NOT NULL
+    BEGIN
+        INSERT INTO dbo.customer_profile (user_id, full_name)
+        SELECT u.user_id, d.company_name
+        FROM @demo d JOIN dbo.app_user u ON u.email = d.email
+        WHERE NOT EXISTS (SELECT 1 FROM dbo.customer_profile c WHERE c.user_id = u.user_id);
+
+        UPDATE c SET full_name = d.company_name
+        FROM dbo.customer_profile c JOIN dbo.app_user u ON u.user_id = c.user_id
+        JOIN @demo d ON d.email = u.email
+        WHERE c.full_name IS NULL OR c.full_name = N'' OR c.full_name LIKE N'%(demo)%';
+    END;
 
     COMMIT TRANSACTION;
 END TRY
@@ -66,18 +84,25 @@ IF OBJECT_ID(N'dbo.app_user', N'U') IS NULL OR OBJECT_ID(N'dbo.supplier_profile'
 
 DECLARE @demo TABLE (email NVARCHAR(255) PRIMARY KEY, company_name NVARCHAR(255), tax_code NVARCHAR(100));
 INSERT INTO @demo VALUES
-    (N'kinh-do@demo.mss.invalid', N'Kinh Đô — tham chiếu demo', N'DEMO-BRAND-KINH-DO'),
-    (N'nhu-lan@demo.mss.invalid', N'Như Lan — tham chiếu demo', N'DEMO-BRAND-NHU-LAN'),
-    (N'madame-huong@demo.mss.invalid', N'Madame Hương — tham chiếu demo', N'DEMO-BRAND-MADAME-HUONG'),
-    (N'brodard@demo.mss.invalid', N'Brodard — tham chiếu demo', N'DEMO-BRAND-BRODARD'),
-    (N'givral@demo.mss.invalid', N'Givral — tham chiếu demo', N'DEMO-BRAND-GIVRAL'),
-    (N'kidos@demo.mss.invalid', N'KIDO''s Bakery — tham chiếu demo', N'DEMO-BRAND-KIDOS'),
-    (N'maison@demo.mss.invalid', N'Maison — tham chiếu demo', N'DEMO-BRAND-MAISON');
+    (N'kinh-do@demo.mss.invalid', N'Kinh Đô', N'DEMO-BRAND-KINH-DO'),
+    (N'nhu-lan@demo.mss.invalid', N'Như Lan', N'DEMO-BRAND-NHU-LAN'),
+    (N'madame-huong@demo.mss.invalid', N'Madame Hương', N'DEMO-BRAND-MADAME-HUONG'),
+    (N'brodard@demo.mss.invalid', N'Brodard', N'DEMO-BRAND-BRODARD'),
+    (N'givral@demo.mss.invalid', N'Givral', N'DEMO-BRAND-GIVRAL'),
+    (N'kidos@demo.mss.invalid', N'KIDO''s Bakery', N'DEMO-BRAND-KIDOS'),
+    (N'maison@demo.mss.invalid', N'Maison', N'DEMO-BRAND-MAISON'),
+    (N'dong-khanh@demo.mss.invalid', N'Đồng Khánh', N'DEMO-BRAND-DONG-KHANH'),
+    (N'hy-lam-mon@demo.mss.invalid', N'Hỷ Lâm Môn', N'DEMO-BRAND-HY-LAM-MON'),
+    (N'duc-phat@demo.mss.invalid', N'Đức Phát', N'DEMO-BRAND-DUC-PHAT'),
+    (N'abc@demo.mss.invalid', N'ABC Bakery', N'DEMO-BRAND-ABC'),
+    (N'khiet-minh@demo.mss.invalid', N'Khiết Minh', N'DEMO-BRAND-KHIET-MINH');
 
 BEGIN TRY
     BEGIN TRANSACTION;
     IF EXISTS (SELECT 1 FROM @demo d JOIN dbo.app_user u ON u.email = d.email
-               WHERE u.status <> N'ACTIVE' OR u.password_hash IS NOT NULL)
+               WHERE u.status <> N'ACTIVE'
+                  OR (u.password_hash IS NOT NULL
+                      AND NOT EXISTS (SELECT 1 FROM dbo.supplier_profile s WHERE s.user_id = u.user_id AND s.tax_code = d.tax_code)))
         THROW 51202, 'A demo email belongs to an inactive or login-capable account.', 1;
     IF EXISTS (SELECT 1 FROM @demo d JOIN dbo.supplier_profile s ON s.tax_code = d.tax_code
                JOIN dbo.app_user u ON u.user_id = s.user_id WHERE u.email <> d.email)
@@ -95,6 +120,24 @@ BEGIN TRY
     SELECT u.user_id, d.company_name, d.tax_code, N'VERIFIED'
     FROM @demo d JOIN dbo.app_user u ON u.email = d.email
     WHERE NOT EXISTS (SELECT 1 FROM dbo.supplier_profile s WHERE s.user_id = u.user_id);
+
+    UPDATE s SET company_name = d.company_name
+    FROM dbo.supplier_profile s JOIN dbo.app_user u ON u.user_id = s.user_id
+    JOIN @demo d ON d.email = u.email WHERE s.tax_code = d.tax_code;
+
+    IF OBJECT_ID(N'dbo.customer_profile', N'U') IS NOT NULL
+    BEGIN
+        INSERT INTO dbo.customer_profile (user_id, full_name)
+        SELECT u.user_id, d.company_name
+        FROM @demo d JOIN dbo.app_user u ON u.email = d.email
+        WHERE NOT EXISTS (SELECT 1 FROM dbo.customer_profile c WHERE c.user_id = u.user_id);
+
+        UPDATE c SET full_name = d.company_name
+        FROM dbo.customer_profile c JOIN dbo.app_user u ON u.user_id = c.user_id
+        JOIN @demo d ON d.email = u.email
+        WHERE c.full_name IS NULL OR c.full_name = N'' OR c.full_name LIKE N'%demo%';
+    END;
+
     COMMIT TRANSACTION;
 END TRY
 BEGIN CATCH
