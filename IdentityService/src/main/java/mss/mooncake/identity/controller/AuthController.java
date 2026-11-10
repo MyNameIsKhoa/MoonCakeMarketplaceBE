@@ -70,7 +70,7 @@ public class AuthController {
 
     @PostMapping("/password-resets")
     public ResponseEntity<Void> resetPassword(@Valid @RequestBody PasswordResetRequest request) {
-        authEmailFlowService.resetPassword(request.token(), request.newPassword());
+        authEmailFlowService.resetPassword(request.code(), request.newPassword());
         return ResponseEntity.noContent().build();
     }
 
