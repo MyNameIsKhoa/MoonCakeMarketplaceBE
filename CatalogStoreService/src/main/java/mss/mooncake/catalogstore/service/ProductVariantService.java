@@ -25,6 +25,8 @@ public interface ProductVariantService {
      */
     VariantResponse getVariant(Long productId, Long variantId, Long userId);
 
+    VariantResponse getOwnedVariant(Long storeId, Long variantId, Long userId);
+
     /**
      * CA13 — tạo variant ở trạng thái DRAFT. Owner store; SKU trùng trả 409;
      * giá/tồn kho không âm.

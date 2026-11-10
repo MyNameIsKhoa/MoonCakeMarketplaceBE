@@ -11,6 +11,12 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import java.util.Arrays;
+import java.util.List;
 
 @Configuration
 @EnableWebSecurity
@@ -29,12 +35,14 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http
                 .csrf(csrf -> csrf.disable())
+                .cors(cors -> cors.configurationSource(catalogImageCorsConfigurationSource()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
                 .authorizeHttpRequests(auth -> auth
                         // 403 của Spring Security được forward sang /error; JWT filter không chạy lại ở lượt ERROR,
                         // nếu /error cần auth thì user đã đăng nhập bị trả 401 thay vì 403.
                         .requestMatchers("/error").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/uploads/catalog/**").permitAll()
                         // Public read: GET /api/stores và GET /api/stores/{id}
                         .requestMatchers(HttpMethod.GET, "/api/stores", "/api/stores/**").permitAll()
                         // Public read catalog (CA01, CA02, CA06, CA07, CA11, CA12, CA16, CA17).
@@ -68,6 +76,21 @@ public class SecurityConfig {
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterAfter(internalServiceTokenFilter, JwtAuthenticationFilter.class)
                 .build();
+    }
+
+    @Value("${app.cors.allowed-origins:http://localhost:3000,http://localhost:5173}")
+    private String allowedOrigins;
+
+    @Bean
+    CorsConfigurationSource catalogImageCorsConfigurationSource() {
+        CorsConfiguration cors = new CorsConfiguration();
+        cors.setAllowedOrigins(Arrays.stream(allowedOrigins.split(",")).map(String::trim)
+                .filter(origin -> !origin.isEmpty()).toList());
+        cors.setAllowedMethods(List.of("GET", "OPTIONS"));
+        cors.setAllowedHeaders(List.of("Accept", "Origin"));
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/uploads/catalog/**", cors);
+        return source;
     }
 
     @Bean

@@ -11,6 +11,7 @@ import mss.mooncake.rfqnegotiation.client.dto.catalog.StoreSummaryResponse;
 import mss.mooncake.rfqnegotiation.client.dto.identity.*;
 import mss.mooncake.rfqnegotiation.client.dto.commerce.OrderResponse;
 import mss.mooncake.rfqnegotiation.dto.request.AcceptQuotationRequest;
+import mss.mooncake.rfqnegotiation.dto.request.CreateOrderFromAcceptedQuotationRequest;
 import mss.mooncake.rfqnegotiation.entity.*;
 import mss.mooncake.rfqnegotiation.enums.*;
 import mss.mooncake.rfqnegotiation.exception.ApiException;
@@ -43,6 +44,7 @@ class QuotationAcceptanceIntegrationTest {
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
                 new UserPrincipal(11L,"buyer@test.vn",List.of()), null, List.of()));
         when(identity.getUserSummary(11L)).thenReturn(new UserSummaryResponse(11L,101L,"Buyer","buyer@test.vn","0123456789"));
+        when(identity.getSupplierByUser(11L)).thenThrow(feignError(404));
         when(identity.getSupplierSummary(202L)).thenReturn(new SupplierSummaryResponse(202L,22L,"Supplier","TAX","VERIFIED"));
         when(identity.getAddressSummary(301L)).thenReturn(new AddressSummaryResponse(301L,101L,"Buyer","0123456789","Street",null,null,"HCM"));
         when(catalog.getStoreSummary(401L)).thenReturn(new StoreSummaryResponse(401L,202L,"STORE","Shop","shop",null,"ACTIVE"));
@@ -69,6 +71,59 @@ class QuotationAcceptanceIntegrationTest {
         var replay=service.acceptQuotation(id,new AcceptQuotationRequest(1,301L),"accept-one");
         assertThat(replay).isEqualTo(first); assertThat(conversions.count()).isEqualTo(1);
         verify(commerce,times(1)).createOrderFromAcceptedQuotation(any());
+    }
+    @Test void sendsTheSavedVariantImageAndReusesItOnClientAndRecoveryRetries() {
+        var item=items.findByQuotationIdOrderByIdAsc(id).getFirst();
+        item.setVariantIdRef(50L); item.setImageUrlSnapshot("/images/saved-variant.jpg"); items.save(item);
+        when(commerce.createOrderFromAcceptedQuotation(any())).thenThrow(new IllegalStateException("timeout"));
+        service.acceptQuotation(id,new AcceptQuotationRequest(1,301L),"image-retry");
+        String persisted=conversions.findByQuotationId(id).orElseThrow().getSnapshotJson();
+        // Even an accidental later item change cannot change the durable conversion payload.
+        item.setImageUrlSnapshot("/images/changed-later.jpg"); items.save(item);
+        when(commerce.getOrderByQuotation(id)).thenThrow(feignError(404));
+        service.acceptQuotation(id,new AcceptQuotationRequest(1,301L),"image-retry");
+        service.recoverPendingConversions();
+
+        var sent=org.mockito.ArgumentCaptor.forClass(CreateOrderFromAcceptedQuotationRequest.class);
+        verify(commerce,times(3)).createOrderFromAcceptedQuotation(sent.capture());
+        assertThat(sent.getAllValues()).allSatisfy(payload -> {
+            assertThat(payload).isEqualTo(sent.getAllValues().getFirst());
+            assertThat(payload.items().getFirst().imageUrlSnapshot()).isEqualTo("/images/saved-variant.jpg");
+        });
+        assertThat(conversions.findByQuotationId(id).orElseThrow().getSnapshotJson()).isEqualTo(persisted);
+        verify(catalog,never()).getProductSnapshot(any(),any());
+    }
+    @Test void legacyCustomItemUsesTheSharedPlaceholderWhenFirstAccepted() {
+        assertThat(items.findByQuotationIdOrderByIdAsc(id).getFirst().getImageUrlSnapshot()).isNull();
+        service.acceptQuotation(id,new AcceptQuotationRequest(1,301L),"legacy-custom");
+        var sent=org.mockito.ArgumentCaptor.forClass(CreateOrderFromAcceptedQuotationRequest.class);
+        verify(commerce).createOrderFromAcceptedQuotation(sent.capture());
+        assertThat(sent.getValue().items().getFirst().imageUrlSnapshot()).isEqualTo("/images/placeholders/custom-order.svg");
+        assertThat(items.findByQuotationIdOrderByIdAsc(id).getFirst().getImageUrlSnapshot()).isNull();
+    }
+    @Test void historicalVariantWithoutImageStaysNullWithoutLiveCatalogLookup() {
+        var item=items.findByQuotationIdOrderByIdAsc(id).getFirst();
+        item.setVariantIdRef(50L); items.save(item);
+        service.acceptQuotation(id,new AcceptQuotationRequest(1,301L),"legacy-variant");
+        var sent=org.mockito.ArgumentCaptor.forClass(CreateOrderFromAcceptedQuotationRequest.class);
+        verify(commerce).createOrderFromAcceptedQuotation(sent.capture());
+        assertThat(sent.getValue().items().getFirst().imageUrlSnapshot()).isNull();
+        verify(catalog,never()).getProductSnapshot(any(),any());
+    }
+    @Test void recoveryOfAPreMigrationCustomConversionPreservesItsNullImage() {
+        when(commerce.createOrderFromAcceptedQuotation(any())).thenThrow(new IllegalStateException("timeout"));
+        service.acceptQuotation(id,new AcceptQuotationRequest(1,301L),"old-conversion");
+        var conversion=conversions.findByQuotationId(id).orElseThrow();
+        String oldSnapshot=conversion.getSnapshotJson().replace("\"imageUrlSnapshot\":\"/images/placeholders/custom-order.svg\"", "\"imageUrlSnapshot\":null");
+        assertThat(oldSnapshot).isNotEqualTo(conversion.getSnapshotJson());
+        conversion.setSnapshotJson(oldSnapshot); conversions.save(conversion);
+        clearInvocations(commerce);
+        when(commerce.getOrderByQuotation(id)).thenThrow(feignError(404));
+        service.recoverPendingConversions();
+        var sent=org.mockito.ArgumentCaptor.forClass(CreateOrderFromAcceptedQuotationRequest.class);
+        verify(commerce).createOrderFromAcceptedQuotation(sent.capture());
+        assertThat(sent.getValue().items().getFirst().imageUrlSnapshot()).isNull();
+        assertThat(conversions.findByQuotationId(id).orElseThrow().getSnapshotJson()).isEqualTo(oldSnapshot);
     }
     @Test void preservesIntentWhenCommerceOutcomeIsUnknownAndRecoversFromLookup() {
         when(commerce.createOrderFromAcceptedQuotation(any())).thenThrow(new IllegalStateException("timeout"));

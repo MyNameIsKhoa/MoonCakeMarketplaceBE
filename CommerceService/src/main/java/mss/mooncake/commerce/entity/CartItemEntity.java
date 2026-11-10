@@ -15,6 +15,11 @@ public class CartItemEntity extends BaseCommerceEntity {
     @Column(name = "quantity", nullable = false) private Integer quantity;
     @Column(name = "added_at", nullable = false) private LocalDateTime addedAt;
 
+    @Column(name = "selected", nullable = false) private boolean selected;
+
+    public boolean isSelected() { return selected; }
+    public void setSelected(boolean selected) { this.selected = selected; }
+
     public Long getCartId() { return cartId; }
     public void setCartId(Long cartId) { this.cartId = cartId; }
     public Long getVariantIdRef() { return variantIdRef; }

@@ -15,6 +15,8 @@ public interface SellerOrderRepository extends JpaRepository<SellerOrderEntity, 
 
     List<SellerOrderEntity> findByOrderIdOrderByIdAsc(Long orderId);
 
+    List<SellerOrderEntity> findByOrderIdInOrderByIdAsc(List<Long> orderIds);
+
     List<SellerOrderEntity> findBySupplierIdRef(Long supplierIdRef);
 
     Page<SellerOrderEntity> findBySupplierIdRef(Long supplierIdRef, Pageable pageable);

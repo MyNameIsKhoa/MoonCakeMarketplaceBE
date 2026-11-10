@@ -148,10 +148,11 @@ public class GlobalExceptionHandler {
 
     private static String springErrorMessage(int status) {
         return switch (status) {
+            case 413 -> "Ảnh tải lên vượt quá giới hạn 5 MiB.";
             case 404 -> "Không tìm thấy đường dẫn yêu cầu.";
             case 405 -> "Phương thức HTTP không được hỗ trợ cho đường dẫn này.";
             case 406 -> "Định dạng phản hồi yêu cầu không được hỗ trợ.";
-            case 415 -> "Content-Type không được hỗ trợ. Vui lòng gửi dữ liệu dạng application/json.";
+            case 415 -> "Content-Type không được hỗ trợ. Vui lòng gửi application/json hoặc multipart/form-data theo đường dẫn yêu cầu.";
             default -> "Yêu cầu không hợp lệ.";
         };
     }

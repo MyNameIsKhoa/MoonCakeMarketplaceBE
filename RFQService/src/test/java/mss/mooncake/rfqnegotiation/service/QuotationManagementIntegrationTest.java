@@ -14,6 +14,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import mss.mooncake.rfqnegotiation.client.CatalogServiceClient;
 import mss.mooncake.rfqnegotiation.client.dto.catalog.StoreSummaryResponse;
+import mss.mooncake.rfqnegotiation.client.dto.catalog.ProductSnapshotResponse;
 import mss.mooncake.rfqnegotiation.dto.request.CreateQuotationRequest;
 import mss.mooncake.rfqnegotiation.dto.request.QuotationItemRequest;
 import mss.mooncake.rfqnegotiation.dto.request.ReviseQuotationRequest;
@@ -73,6 +74,34 @@ class QuotationManagementIntegrationTest {
         rfq.setExpiresAt(LocalDateTime.now(ZoneOffset.UTC).plusDays(1));
         rfq.setCreatedAt(LocalDateTime.now(ZoneOffset.UTC));
         rfqId = rfqs.saveAndFlush(rfq).getId();
+    }
+
+    @Test
+    void savesImagesPerVersionAndReplaysWithoutRefreshingCatalog() {
+        when(catalog.getProductSnapshot(40L, 50L)).thenReturn(snapshot("/images/original.jpg"));
+        var base = request();
+        var request = new CreateQuotationRequest(base.storeId(), base.depositPercent(), base.validUntil(), base.leadTimeDays(),
+                base.proposedDeliveryDate(), base.shippingMethod(), base.shippingFee(), base.paymentTerms(),
+                List.of(new QuotationItemRequest(40L, 50L, "Ignored", null, 10, new BigDecimal("100.00"), BigDecimal.ZERO, null)));
+        var original = service.create(rfqId, "catalog-original", request);
+        Long originalId = Long.valueOf(original.quotationId());
+        when(catalog.getProductSnapshot(40L, 50L)).thenReturn(snapshot("/images/revised.jpg"));
+        var revision = new ReviseQuotationRequest(1, request.depositPercent(), request.validUntil(), request.leadTimeDays(),
+                request.proposedDeliveryDate(), request.shippingMethod(), request.shippingFee(), request.paymentTerms(), request.items());
+        var revised = service.revise(originalId, "catalog-revision", revision);
+
+        assertThat(original.items().getFirst().imageUrlSnapshot()).isEqualTo("/images/original.jpg");
+        assertThat(revised.items().getFirst().imageUrlSnapshot()).isEqualTo("/images/revised.jpg");
+        when(catalog.getProductSnapshot(40L, 50L)).thenThrow(new IllegalStateException("Catalog unavailable"));
+        assertThat(service.get(originalId).items().getFirst().imageUrlSnapshot()).isEqualTo("/images/original.jpg");
+        assertThat(service.create(rfqId, "catalog-original", request).items().getFirst().imageUrlSnapshot()).isEqualTo("/images/original.jpg");
+        assertThat(service.revise(originalId, "catalog-revision", revision).items().getFirst().imageUrlSnapshot()).isEqualTo("/images/revised.jpg");
+        assertThat(items.findByQuotationIdOrderByIdAsc(originalId).getFirst().getImageUrlSnapshot()).isEqualTo("/images/original.jpg");
+    }
+
+    private ProductSnapshotResponse snapshot(String imageUrl) {
+        return new ProductSnapshotResponse(40L, 50L, "Mooncake", "Lotus", "SKU-50", BigDecimal.TEN,
+                30L, 20L, "P-40", imageUrl, "ACTIVE");
     }
 
     @Test

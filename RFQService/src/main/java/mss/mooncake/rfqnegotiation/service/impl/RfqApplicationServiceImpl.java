@@ -105,14 +105,15 @@ public class RfqApplicationServiceImpl implements RfqApplicationService {
             throw ApiException.badRequest("INVALID_SEARCH", "q must contain at most 255 characters");
         }
         Long customerId = mine ? actor.customerId() : null;
+        Long supplierId = mine ? null : actor.supplierId();
         LocalDateTime now = now();
-        // Public feed hides OPEN RFQs past expiresAt: they no longer take quotations. Detail stays readable.
+        // Supplier feed hides expired OPEN RFQs; published detail stays readable.
         Specification<RfqEntity> listed = (root, query, cb) -> cb.or(cb.equal(root.get("status"), RfqStatus.CLOSED),
                 cb.and(cb.equal(root.get("status"), RfqStatus.OPEN),
                         cb.or(cb.isNull(root.get("expiresAt")), cb.greaterThan(root.get("expiresAt"), now))));
         Specification<RfqEntity> filter = mine
                 ? (root, query, cb) -> cb.equal(root.get("customerIdRef"), customerId)
-                : listed.and(visibleInFeed(invitedSupplierId()));
+                : listed.and(visibleInFeed(supplierId));
         if (status != null) {
             filter = filter.and((root, query, cb) -> cb.equal(root.get("status"), status));
         }
@@ -128,9 +129,11 @@ public class RfqApplicationServiceImpl implements RfqApplicationService {
     @Override
     @Transactional(readOnly = true)
     public RfqResponse get(Long rfqId) {
+        actor.userId();
+        Long supplierId = actor.optionalSupplierId();
         RfqEntity rfq = rfqs.findById(rfqId).orElseThrow(this::notFound);
-        boolean owner = rfq.getCustomerIdRef().equals(actor.optionalCustomerId());
-        if (!owner && rfq.getStatus() != RfqStatus.OPEN && rfq.getStatus() != RfqStatus.CLOSED) {
+        boolean owner = supplierId == null && rfq.getCustomerIdRef().equals(actor.optionalCustomerId());
+        if (!owner && (supplierId == null || (rfq.getStatus() != RfqStatus.OPEN && rfq.getStatus() != RfqStatus.CLOSED))) {
             throw notFound();
         }
         if (rfq.getAudience() == RfqAudience.ALL) {
@@ -141,7 +144,6 @@ public class RfqApplicationServiceImpl implements RfqApplicationService {
             return response(rfq, true, invited);
         }
         // An uninvited supplier gets the same 404 as a missing RFQ; an invited one sees only its own stores.
-        Long supplierId = actor.optionalSupplierId();
         List<RfqTargetStoreEntity> own = invited.stream()
                 .filter(target -> target.getSupplierIdRef().equals(supplierId)).toList();
         if (own.isEmpty()) {
@@ -271,15 +273,6 @@ public class RfqApplicationServiceImpl implements RfqApplicationService {
             throw ApiException.conflict("STORE_NOT_ACTIVE", "Store " + storeId + " is not active");
         }
         return store;
-    }
-
-    /** Caller's supplier for feed invitations. Any lookup failure only hides invitations; the public feed still works. */
-    private Long invitedSupplierId() {
-        try {
-            return actor.optionalSupplierId();
-        } catch (ApiException ex) {
-            return null;
-        }
     }
 
     /** Public RFQs, plus SELECTED_STORES RFQs that invite one of the caller's stores. */

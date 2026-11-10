@@ -2,7 +2,6 @@ package mss.mooncake.rfqnegotiation.controller;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
-import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.net.URI;
@@ -24,7 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/rfqs")
-@Tag(name = "RFQs", description = "TV4: public RFQs and customer ownership")
+@Tag(name = "RFQs", description = "TV4: authenticated supplier feed and customer-owned RFQs")
 public class RfqController {
     private final RfqApplicationService service;
 
@@ -33,9 +32,9 @@ public class RfqController {
     }
 
     @GetMapping
-    @SecurityRequirements
     @Operation(operationId = "rfqListRfqs", summary = "Search published RFQs or the customer's RFQs",
-            description = "Public by default. mine=true requires an authenticated customer and returns that customer's RFQs.")
+            description = "Requires authentication. Default feed is supplier-only, including unverified suppliers (read-only). "
+                    + "mine=true requires a customer profile without a supplier profile and returns only that customer's RFQs.")
     public PageResponse<RfqResponse> list(@RequestParam(required = false) String q,
                                          @RequestParam(defaultValue = "false") boolean mine,
                                          @RequestParam(required = false) RfqStatus status,
@@ -46,8 +45,9 @@ public class RfqController {
     }
 
     @GetMapping("/{rfqId}")
-    @SecurityRequirements
-    @Operation(operationId = "rfqGetRfq", summary = "Read a published RFQ; private fields are visible to its owner")
+    @Operation(operationId = "rfqGetRfq", summary = "Read an owned RFQ or an eligible supplier RFQ",
+            description = "Requires authentication. Supplier mode wins for dual-profile accounts. Suppliers see published public "
+                    + "or invited RFQs with private fields hidden; customers see only their own RFQs.")
     public RfqResponse get(@PathVariable Long rfqId) {
         return service.get(rfqId);
     }

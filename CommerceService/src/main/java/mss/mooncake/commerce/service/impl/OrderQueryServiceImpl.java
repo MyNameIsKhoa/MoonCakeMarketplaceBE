@@ -1,11 +1,16 @@
 package mss.mooncake.commerce.service.impl;
 
 import feign.FeignException;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import mss.mooncake.commerce.client.IdentityServiceClient;
+import mss.mooncake.commerce.client.CatalogServiceClient;
+import mss.mooncake.commerce.client.dto.catalog.VariantSnapshotBatchRequest;
+import mss.mooncake.commerce.client.dto.catalog.VariantSnapshotResponse;
 import mss.mooncake.commerce.client.dto.identity.SupplierSummaryResponse;
 import mss.mooncake.commerce.dto.response.DeliveryAddressResponse;
 import mss.mooncake.commerce.dto.response.OrderDetailResponse;
@@ -38,23 +43,38 @@ public class OrderQueryServiceImpl implements OrderQueryService {
     private final OrderItemRepository items;
     private final IdentityServiceClient identity;
     private final CancellationRepository cancellations;
+    private final CatalogServiceClient catalog;
 
     public OrderQueryServiceImpl(CustomerOrderRepository orders, DeliveryAddressRepository addresses,
                                  SellerOrderRepository sellerOrders, OrderItemRepository items,
-                                 IdentityServiceClient identity, CancellationRepository cancellations) {
+                                 IdentityServiceClient identity, CancellationRepository cancellations,
+                                 CatalogServiceClient catalog) {
         this.orders = orders;
         this.addresses = addresses;
         this.sellerOrders = sellerOrders;
         this.items = items;
         this.identity = identity;
         this.cancellations = cancellations;
+        this.catalog = catalog;
     }
 
     @Override
     @Transactional(readOnly = true)
     public Page<OrderSummaryResponse> listCustomerOrders(Long customerId, Pageable pageable) {
         if (pageable.getPageSize() > 100) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "size must be <= 100");
-        return orders.findByCustomerIdRef(customerId, pageable).map(this::summary);
+        Page<CustomerOrderEntity> page = orders.findByCustomerIdRef(customerId, pageable);
+        List<SellerOrderEntity> sellers = page.isEmpty() ? List.of()
+                : sellerOrders.findByOrderIdInOrderByIdAsc(page.map(CustomerOrderEntity::getId).getContent());
+        Map<Long, List<SellerOrderEntity>> sellersByOrder = sellers.stream()
+                .collect(Collectors.groupingBy(SellerOrderEntity::getOrderId));
+        List<Long> sellerIds = sellers.stream().map(SellerOrderEntity::getId).toList();
+        Map<Long, Long> itemCounts = sellers.isEmpty() ? Map.of()
+                : items.findBySellerOrderIdIn(sellerIds).stream()
+                        .collect(Collectors.groupingBy(OrderItemEntity::getSellerOrderId, Collectors.counting()));
+        Set<Long> cancelled = sellers.isEmpty() ? Set.of()
+                : Set.copyOf(cancellations.sellerOrderIdsWithCancellation(sellerIds));
+        return page.map(order -> summary(order, sellersByOrder.getOrDefault(order.getId(), List.of()),
+                itemCounts, cancelled));
     }
 
     @Override
@@ -69,6 +89,8 @@ public class OrderQueryServiceImpl implements OrderQueryService {
         Map<Long, List<OrderItemEntity>> itemsBySeller = sellers.isEmpty() ? Map.of()
                 : items.findBySellerOrderIdIn(sellers.stream().map(SellerOrderEntity::getId).toList())
                         .stream().collect(Collectors.groupingBy(OrderItemEntity::getSellerOrderId));
+        Map<Long, VariantSnapshotResponse> displayImages = displayImages(itemsBySeller.values().stream()
+                .flatMap(List::stream).toList());
         return new OrderDetailResponse(order.getId(), order.getOrderNo(), order.getSourceType(),
                 order.getRfqIdRef(), order.getStatus(), order.getPlacedAt(), order.getSubtotal(),
                 order.getDiscountTotal(), order.getShippingTotal(), order.getGrandTotal(),
@@ -76,7 +98,7 @@ public class OrderQueryServiceImpl implements OrderQueryService {
                         address.getRecipientPhone(), address.getAddressLine(), address.getWard(),
                         address.getDistrict(), address.getCity()),
                 sellers.stream().map(seller -> mapSeller(seller,
-                        itemsBySeller.getOrDefault(seller.getId(), List.of()), address)).toList());
+                        itemsBySeller.getOrDefault(seller.getId(), List.of()), address, displayImages)).toList());
     }
 
     @Override
@@ -105,7 +127,7 @@ public class OrderQueryServiceImpl implements OrderQueryService {
             }
         }
         return mapSeller(seller, items.findBySellerOrderIdIn(List.of(sellerOrderId)),
-                addresses.findByOrderId(seller.getOrderId()).orElse(null));
+                addresses.findByOrderId(seller.getOrderId()).orElse(null), Map.of());
     }
 
     private SupplierSummaryResponse supplierForUser(Long userId, HttpStatus missingStatus) {
@@ -120,21 +142,56 @@ public class OrderQueryServiceImpl implements OrderQueryService {
         throw new ResponseStatusException(missingStatus, "Supplier context unavailable");
     }
 
-    private OrderSummaryResponse summary(CustomerOrderEntity order) {
+    private OrderSummaryResponse summary(CustomerOrderEntity order, List<SellerOrderEntity> sellers,
+                                          Map<Long, Long> itemCounts, Set<Long> cancelled) {
         return new OrderSummaryResponse(order.getId(), order.getOrderNo(), order.getSourceType(),
                 order.getRfqIdRef(), order.getStatus(), order.getPlacedAt(), order.getSubtotal(),
-                order.getDiscountTotal(), order.getShippingTotal(), order.getGrandTotal());
+                order.getDiscountTotal(), order.getShippingTotal(), order.getGrandTotal(), sellers.size(),
+                Math.toIntExact(sellers.stream().mapToLong(seller -> itemCounts.getOrDefault(seller.getId(), 0L)).sum()),
+                sellers.stream().map(SellerOrderEntity::getStatus).distinct().toList(),
+                sellers.stream().anyMatch(seller -> cancelled.contains(seller.getId())));
+    }
+
+    private Map<Long, VariantSnapshotResponse> displayImages(List<OrderItemEntity> lines) {
+        List<Long> variantIds = lines.stream().filter(item -> item.getImageUrlSnapshot() == null
+                        || item.getImageUrlSnapshot().isBlank())
+                .map(OrderItemEntity::getVariantIdRef).filter(Objects::nonNull).distinct().toList();
+        Map<Long, VariantSnapshotResponse> images = new HashMap<>();
+        try {
+            for (int start = 0; start < variantIds.size(); start += 100) {
+                List<Long> batch = variantIds.subList(start, Math.min(start + 100, variantIds.size()));
+                List<VariantSnapshotResponse> snapshots = catalog.getVariantSnapshots(new VariantSnapshotBatchRequest(batch));
+                if (snapshots == null) continue;
+                for (VariantSnapshotResponse snapshot : snapshots) {
+                    if (snapshot != null && batch.contains(snapshot.variantId())) {
+                        images.put(snapshot.variantId(), snapshot);
+                    }
+                }
+            }
+        } catch (FeignException unavailable) {
+            // Display enrichment is optional; historical order details remain readable during Catalog outages.
+        }
+        return images;
     }
 
     private SellerOrderResponse mapSeller(SellerOrderEntity seller, List<OrderItemEntity> lines,
-                                          DeliveryAddressEntity address) {
+                                          DeliveryAddressEntity address, Map<Long, VariantSnapshotResponse> displayImages) {
         return new SellerOrderResponse(seller.getId(), seller.getOrderId(), seller.getSellerOrderNo(),
                 seller.getStoreIdRef(), seller.getSupplierIdRef(), seller.getQuotationIdRef(),
                 seller.getStoreNameSnapshot(), seller.getSupplierNameSnapshot(), seller.getStatus(),
                 seller.getSubtotal(), seller.getShippingFee(), seller.getTotalAmount(),
                 seller.getDepositPercent(), seller.getDepositAmount(), seller.getRemainingAmount(),
                 seller.getRemainingDueAt(), seller.getDeliveryDateSnapshot(), seller.getShippingMethodSnapshot(),
-                seller.getPaymentTermsSnapshot(), lines.stream().map(this::mapItem).toList(),
+                seller.getPaymentTermsSnapshot(), lines.stream().map(item -> {
+                    VariantSnapshotResponse snapshot = item.getVariantIdRef() == null ? null
+                            : displayImages.get(item.getVariantIdRef());
+                    String imageUrl = item.getImageUrlSnapshot();
+                    if ((imageUrl == null || imageUrl.isBlank()) && snapshot != null
+                            && seller.getStoreIdRef().equals(snapshot.storeId())) {
+                        imageUrl = snapshot.imageUrl();
+                    }
+                    return mapItem(item, imageUrl);
+                }).toList(),
                 lines.stream().map(OrderItemEntity::getDiscountAmount).filter(java.util.Objects::nonNull)
                         .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add),
                 address == null ? null : new SellerOrderResponse.DeliveryAddress(address.getRecipientName(),
@@ -142,10 +199,10 @@ public class OrderQueryServiceImpl implements OrderQueryService {
                         address.getDistrict(), address.getCity()));
     }
 
-    private OrderItemResponse mapItem(OrderItemEntity item) {
+    private OrderItemResponse mapItem(OrderItemEntity item, String imageUrl) {
         return new OrderItemResponse(item.getId(), item.getVariantIdRef(), item.getProductCodeSnapshot(),
                 item.getProductNameSnapshot(), item.getSkuSnapshot(), item.getVariantNameSnapshot(),
                 item.getImageUrlSnapshot(), item.getQuantity(), item.getUnitPrice(),
-                item.getDiscountAmount(), item.getSubtotal());
+                item.getDiscountAmount(), item.getSubtotal(), imageUrl);
     }
 }

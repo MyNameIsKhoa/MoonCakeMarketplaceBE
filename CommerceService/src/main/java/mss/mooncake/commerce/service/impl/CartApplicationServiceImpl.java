@@ -56,8 +56,7 @@ public class CartApplicationServiceImpl implements CartApplicationService {
     }
 
     @Override
-    public CartPricingResponse priceCart(Long customerId) {
-        List<CartItemResponse> cartItems = getCart(customerId).items();
+    public CartPricingResponse priceCart(List<CartItemResponse> cartItems, boolean checkAvailability) {
         if (cartItems.isEmpty()) {
             return new CartPricingResponse(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, List.of());
         }
@@ -88,7 +87,13 @@ public class CartApplicationServiceImpl implements CartApplicationService {
                     || !"ACTIVE".equals(snapshot.storeStatus())) {
                 unavailable.add(new CartPricingResponse.UnavailableLine(item.cartItemId(), item.variantId(),
                         snapshot.productName(), snapshot.variantName(), snapshot.sku(), snapshot.imageUrl(),
-                        item.quantity(), "UNAVAILABLE"));
+                        item.quantity(), "UNAVAILABLE", null));
+                continue;
+            }
+            if (checkAvailability && snapshot.availableQuantity() != null && item.quantity() > snapshot.availableQuantity()) {
+                unavailable.add(new CartPricingResponse.UnavailableLine(item.cartItemId(), item.variantId(),
+                        snapshot.productName(), snapshot.variantName(), snapshot.sku(), snapshot.imageUrl(),
+                        item.quantity(), "INSUFFICIENT_STOCK", snapshot.availableQuantity()));
                 continue;
             }
             byStore.computeIfAbsent(snapshot.storeId(), ignored -> new ArrayList<>()).add(item);
@@ -128,7 +133,7 @@ public class CartApplicationServiceImpl implements CartApplicationService {
                 return new CartPricingResponse.LinePrice(item.cartItemId(), item.variantId(),
                         snapshot.productName(), snapshot.variantName(), snapshot.sku(), snapshot.imageUrl(),
                         item.quantity(), line.unitPrice(), line.lineSubtotal(), line.discountAmount(),
-                        line.lineTotal());
+                        line.lineTotal(), item.selected(), snapshot.availableQuantity());
             }).toList();
             storePrices.add(new CartPricingResponse.StorePrice(storeId, store.supplierIdRef(), store.name(),
                     priced.subtotal(), priced.discountTotal(), priced.totalAmount(),
@@ -144,9 +149,9 @@ public class CartApplicationServiceImpl implements CartApplicationService {
 
     /** Catalog's snapshot quantity is the stock still free to sell (on hand minus active holds). */
     private static void requireStock(VariantSnapshotResponse snapshot, int quantity) {
-        if (snapshot.stockQuantity() != null && quantity > snapshot.stockQuantity()) {
+        if (snapshot.availableQuantity() != null && quantity > snapshot.availableQuantity()) {
             throw new CommerceException(HttpStatus.CONFLICT, "INSUFFICIENT_STOCK",
-                    "Chỉ còn " + Math.max(0, snapshot.stockQuantity()) + " sản phẩm trong kho");
+                    "Chỉ còn " + Math.max(0, snapshot.availableQuantity()) + " sản phẩm trong kho");
         }
     }
 
@@ -208,6 +213,19 @@ public class CartApplicationServiceImpl implements CartApplicationService {
 
     @Override
     @Transactional
+    public void select(Long customerId, List<Long> itemIds) {
+        var requested = new java.util.HashSet<>(itemIds);
+        if (requested.size() != itemIds.size()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Duplicate cart items");
+        var cart = requireCart(customerId);
+        var lines = items.findByCartIdOrderByIdAsc(cart.getId());
+        if (lines.stream().filter(line -> requested.contains(line.getId())).count() != requested.size()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Giỏ hàng đã thay đổi. Vui lòng tải lại.");
+        }
+        lines.forEach(line -> line.setSelected(requested.contains(line.getId())));
+    }
+
+    @Override
+    @Transactional
     public void removeItem(Long customerId, Long itemId) {
         CartEntity cart = requireCart(customerId);
         CartItemEntity item = items.findByIdAndCartId(itemId, cart.getId())
@@ -248,6 +266,6 @@ public class CartApplicationServiceImpl implements CartApplicationService {
     }
 
     private CartItemResponse toResponse(CartItemEntity item) {
-        return new CartItemResponse(item.getId(), item.getVariantIdRef(), item.getQuantity());
+        return new CartItemResponse(item.getId(), item.getVariantIdRef(), item.getQuantity(), item.isSelected());
     }
 }

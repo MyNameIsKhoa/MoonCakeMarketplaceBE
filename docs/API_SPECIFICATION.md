@@ -27,7 +27,7 @@ Mỗi dịch vụ sở hữu cơ sở dữ liệu riêng. Giao tiếp đồng b�
 | Commerce | OR01–OR06, OR08–OR11 đã có controller/backend đọc-ghi cơ bản | OR07, OR12 và các API TV5/TV6 trong mục 5 chưa triển khai đầy đủ |
 | RFQ & Negotiation | `POST /api/quotations/{quotationId}/accept` nhận version/addressId và buyer principal, nhưng conversion vẫn trả 501 | Các API RFQ, báo giá còn lại và hội thoại/WebSocket trong mục 6 |
 
-“Có controller” chỉ xác nhận route đã khai báo, **không xác nhận nghiệp vụ đã hoàn chỉnh hoặc sẵn sàng production**. `GET /api/cart` chỉ trả ID/quantity; `POST /api/cart/pricing` gọi Catalog IN07/IN08 để trả giá/tổng theo store nhưng không giữ kho hay tạo đơn. Order read hiện chưa có dữ liệu từ checkout thực tế. Các API nội bộ đã có controller gồm IN01–IN09, IN11 và IN12; IN10 chưa có. Gateway đã định tuyến `/api/seller-orders/**` về Commerce. Trạng thái này là ảnh chụp mã nguồn ngày cập nhật; khi triển khai thêm phải cập nhật tài liệu cùng contract và test.
+“Có controller” chỉ xác nhận route đã khai báo, **không xác nhận nghiệp vụ đã hoàn chỉnh hoặc sẵn sàng production**. `GET /api/cart` trả các dòng và trạng thái chọn. `POST /api/cart/pricing` trả giá, tồn khả dụng và dòng không thể mua; `POST /api/checkout/preview` tính đúng các dòng khách chọn trước khi đặt hàng. Các API nội bộ đã có controller gồm IN01–IN09, IN11 và IN12; IN10 chưa có. Gateway đã định tuyến `/api/seller-orders/**` về Commerce. Trạng thái này là ảnh chụp mã nguồn ngày cập nhật; khi triển khai thêm phải cập nhật tài liệu cùng contract và test.
 
 ## 2. Quy ước API
 
@@ -89,7 +89,7 @@ Kết quả thành công hiện trả dữ liệu trực tiếp. `application/pr
 | ID14 | `POST /api/auth/email/verification-requests` | Gửi lại email xác minh; trả 202 | Công khai |
 | ID15 | `POST /api/auth/email/verify` | Xác minh email bằng token một lần; trả 204 | Công khai |
 | ID16 | `POST /api/auth/password-reset-requests` | Yêu cầu email đặt lại mật khẩu; trả 202 | Công khai |
-| ID17 | `POST /api/auth/password-resets` | Đặt mật khẩu mới bằng token một lần; trả 204 | Công khai |
+| ID17 | `POST /api/auth/password-resets` | Đặt mật khẩu mới bằng email và OTP 6 chữ số dùng một lần; trả 204 | Công khai, xác thực bằng OTP |
 | ID03 | `GET /api/users/me` | Xem hồ sơ cá nhân | Người dùng |
 | ID04 | `PATCH /api/users/me` | Cập nhật hồ sơ cá nhân | Người dùng |
 | ID05 | `GET /api/addresses` | Xem danh sách địa chỉ | Khách hàng |
@@ -136,7 +136,7 @@ Nhà cung cấp không tự thay đổi kết quả xác minh hoặc quyền qu�
 | CA03* | `POST /api/categories` | Tạo danh mục | Quản trị |
 | CA04* | `PATCH /api/categories/{categoryId}` | Cập nhật danh mục | Quản trị |
 | CA05* | `DELETE /api/categories/{categoryId}` | Xóa danh mục khi đủ điều kiện | Quản trị |
-| CA06 | `GET /api/products` | Tìm sản phẩm theo `q`, `storeId`, `categoryId`, `mine` | Công khai hoặc chủ cửa hàng |
+| CA06 | `GET /api/products` | Tìm sản phẩm theo `q`, `storeId`, `categoryId`, `mine`. Trả `purchasable` và giá thấp nhất của biến thể còn hàng | Công khai hoặc chủ cửa hàng |
 | CA07 | `GET /api/products/{productId}` | Xem chi tiết sản phẩm | Công khai hoặc chủ cửa hàng |
 | CA08 | `POST /api/products` | Tạo sản phẩm trong cửa hàng | Nhà cung cấp |
 | CA09 | `PATCH /api/products/{productId}` | Cập nhật sản phẩm | Nhà cung cấp |
@@ -146,6 +146,8 @@ Nhà cung cấp không tự thay đổi kết quả xác minh hoặc quyền qu�
 | CA13 | `POST /api/products/{productId}/variants` | Thêm biến thể | Nhà cung cấp |
 | CA14 | `PATCH /api/products/{productId}/variants/{variantId}` | Cập nhật biến thể, giá và tồn kho theo quy tắc | Nhà cung cấp |
 | CA15* | `DELETE /api/products/{productId}/variants/{variantId}` | Xóa hoặc ngừng bán biến thể theo chính sách | Nhà cung cấp |
+| CA22 | `POST /api/products/{productId}/images` | Tải ảnh JPEG/PNG tối đa 5 MiB, trả URL để lưu vào biến thể | Nhà cung cấp đã xác minh, sở hữu sản phẩm |
+| CA23 | `GET /uploads/catalog/{filename}` | Xem ảnh đã tải theo tên file server cấp | Công khai |
 | AD06* | `POST /api/products/{productId}/moderation` | Kiểm duyệt sản phẩm | Quản trị |
 
 Chức năng tìm kiếm dùng `GET /api/products` với tham số truy vấn. API phải kiểm tra biến thể thuộc đúng sản phẩm và cửa hàng.
@@ -175,14 +177,25 @@ Hỗ trợ `PERCENT_DISCOUNT`, `FIXED_DISCOUNT`, `BUY_X_GET_Y`. Sản phẩm đi
 | OR04 | `DELETE /api/cart/items/{cartItemId}` | Xóa một mục trong giỏ | Khách hàng |
 | OR05 | `DELETE /api/cart/items` | Xóa toàn bộ mục trong giỏ | Khách hàng |
 | OR06 | `POST /api/cart/pricing` | Tính thử giá, khuyến mãi và tổng tiền | Khách hàng |
-| OR07 | `POST /api/checkout` | Đặt hàng, tách đơn theo cửa hàng | Khách hàng |
-
-OR06 không nhận giá hoặc danh sách item từ client: server đọc toàn bộ cart active của principal, gọi IN07/IN08 theo store và trả `subtotal`, `discountTotal`, `totalAmount`, `stores[]` với line snapshot. Preview không giữ tồn kho; OR07 phải tính lại giá và reserve trước khi tạo đơn.
+| OR07 | `POST /api/checkout` | Đặt các dòng đã xác nhận giá, tách đơn theo gian hàng | Khách hàng |
+| | `PATCH /api/cart/selection` | Lưu toàn bộ danh sách ID dòng đang được chọn. Danh sách rỗng bỏ chọn tất cả | Khách hàng |
+| | `POST /api/checkout/preview` | Tính tiền, khuyến mãi, phí giao và trả `quote` cho các dòng được chọn | Khách hàng |
 | OR08 | `GET /api/orders` | Xem lịch sử đơn hàng | Khách hàng |
 | OR09 | `GET /api/orders/{orderId}` | Xem chi tiết đơn hàng tổng | Khách hàng |
 | OR10 | `GET /api/seller-orders` | Xem danh sách đơn của nhà cung cấp | Nhà cung cấp |
 | OR11 | `GET /api/seller-orders/{sellerOrderId}` | Xem phần đơn theo cửa hàng | Khách hàng hoặc nhà cung cấp liên quan |
 | OR12* | `POST /api/seller-orders/{sellerOrderId}/prepare` | Bắt đầu chuẩn bị hàng khi đủ điều kiện | Nhà cung cấp |
+
+Preview nhận `{ cartItemIds, quantity? }`. `quantity` chỉ dùng khi mua ngay một dòng và không được vượt số lượng trong dòng đó.
+Khi đặt, gửi `{ addressId, selection: { cartItemIds, quantity? }, quote }` và header `Idempotency-Key`. Khi giá hoặc phí thay đổi, lấy lại preview để khách xác nhận.
+Commerce chỉ trừ các dòng và số lượng đã đặt sau khi xác nhận giữ kho. Retry gửi nguyên nội dung và khóa cũ. Khóa kết quả được giữ tối thiểu 30 phút sau khi kết thúc.
+
+Khi sửa báo giá cũ, chủ gian hàng có thể gọi `GET /api/stores/{storeId}/variants/{variantId}` để lấy lại `productId` của biến thể.
+Chi tiết biến thể trả `availableQuantity` đã trừ lượng đang được giữ. RFQ xác minh quyền sở hữu biến thể trước khi lưu báo giá.
+
+Admin tra cứu tài chính bằng `GET /api/payments/orders/by-number?sellerOrderNo=...`. Số tiền còn có thể hoàn của giao dịch được trả qua `refundableAmount` cho admin.
+
+OR06 không nhận giá hoặc danh sách item từ client: server đọc toàn bộ cart active của principal, gọi IN07/IN08 theo store và trả `subtotal`, `discountTotal`, `totalAmount`, `stores[]` với line snapshot. Preview không giữ tồn kho; OR07 phải tính lại giá và reserve trước khi tạo đơn.
 
 `orderId` là đơn hàng tổng; `sellerOrderId` là phần đơn của một cửa hàng. Giá, thông tin sản phẩm và địa chỉ giao hàng được lưu tại thời điểm đặt hàng. Nhà cung cấp chỉ xem phần đơn thuộc cửa hàng của mình.
 
@@ -258,8 +271,8 @@ Thời điểm dự kiến và thực tế được lưu riêng. Một phần đ
 
 | Mã | Phương thức và endpoint | Chức năng | Quyền |
 |---|---|---|---|
-| RQ01 | `GET /api/rfqs` | Tìm yêu cầu báo giá công khai và yêu cầu gửi riêng cho cửa hàng của người gọi; hỗ trợ `mine` | Công khai; khách hàng khi `mine=true` |
-| RQ02 | `GET /api/rfqs/{rfqId}` | Xem nội dung yêu cầu báo giá | Công khai hoặc chủ yêu cầu; yêu cầu gửi riêng chỉ chủ yêu cầu và nhà cung cấp được mời |
+| RQ01 | `GET /api/rfqs` | Sàn yêu cầu cho nhà cung cấp; `mine=true` lấy yêu cầu của khách hàng hiện tại | Đăng nhập; chế độ nhà cung cấp và khách hàng tách biệt |
+| RQ02 | `GET /api/rfqs/{rfqId}` | Xem nội dung yêu cầu báo giá | Chủ yêu cầu hoặc nhà cung cấp đủ quyền; yêu cầu gửi riêng giới hạn đúng bên được mời |
 | RQ03 | `POST /api/rfqs` | Tạo yêu cầu báo giá; `targetStoreIds` (1–20) để chỉ gửi cho cửa hàng chọn | Khách hàng |
 | RQ04* | `PATCH /api/rfqs/{rfqId}` | Cập nhật nội dung khi được phép | Khách hàng |
 | RQ05* | `POST /api/rfqs/{rfqId}/publish` | Công bố yêu cầu đang ở bản nháp | Khách hàng |
@@ -332,7 +345,7 @@ IN09 đã có DTO cho định danh RFQ/báo giá/phiên bản, khách hàng, nh�
 
 Endpoint IN11 `GET /internal/v1/seller-orders/{sellerOrderId}/payment-context` hiện có trong mã nguồn. Chức năng này phục vụ trao đổi trong Commerce và được thiết kế sử dụng lời gọi service nội bộ; không bắt buộc gọi HTTP giữa TV3, TV5 và TV6.
 
-IN12 hiện có contract và migration Catalog, nhưng chưa được checkout/payment gọi. `expiresAt` do Commerce cung cấp với TTL giữ kho 15 phút; Catalog trả `EXPIRED` khi hết hạn và không cho confirm. Dùng cùng key/payload khi retry; xem chi tiết tại `docs/contracts/README.md`.
+Checkout gọi IN12 để giữ và xác nhận tồn kho cho các dòng khách chọn. `expiresAt` do Commerce cung cấp với TTL giữ kho 15 phút; Catalog trả `EXPIRED` khi hết hạn và không cho confirm. Dùng cùng key/payload khi retry; xem chi tiết tại `docs/contracts/README.md`.
 
 ## 8. Dữ liệu request và response chính
 

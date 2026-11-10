@@ -4,6 +4,7 @@ import mss.mooncake.commerce.client.dto.identity.UserSummaryResponse;
 import mss.mooncake.commerce.client.dto.identity.SupplierSummaryResponse;
 import mss.mooncake.commerce.client.dto.identity.AddressSummaryResponse;
 import mss.mooncake.commerce.client.dto.identity.CreateNotificationRequest;
+import mss.mooncake.commerce.client.dto.identity.PayoutAccountResponse;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -26,4 +27,10 @@ public interface IdentityServiceClient {
 
     @PostMapping("/internal/v1/notifications")
     void createNotification(@RequestBody CreateNotificationRequest request);
+
+    @GetMapping("/internal/v1/payout-accounts/customers/{customerId}")
+    PayoutAccountResponse getCustomerPayoutAccount(@PathVariable Long customerId);
+
+    @GetMapping("/internal/v1/payout-accounts/suppliers/{supplierId}")
+    PayoutAccountResponse getSupplierPayoutAccount(@PathVariable Long supplierId);
 }

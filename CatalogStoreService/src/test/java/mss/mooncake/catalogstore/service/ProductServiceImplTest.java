@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.util.List;
 import java.util.Optional;
 import mss.mooncake.catalogstore.dto.request.CreateProductRequest;
@@ -29,12 +30,13 @@ import mss.mooncake.catalogstore.exception.ResourceNotFoundException;
 import mss.mooncake.catalogstore.repository.CategoryRepository;
 import mss.mooncake.catalogstore.repository.ProductRepository;
 import mss.mooncake.catalogstore.repository.ProductVariantRepository;
+import mss.mooncake.catalogstore.repository.StockReservationLineRepository;
 import mss.mooncake.catalogstore.service.impl.ProductServiceImpl;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
@@ -51,8 +53,38 @@ class ProductServiceImplTest {
     @Mock private CategoryRepository categoryRepository;
     @Mock private StoreAccessService storeAccessService;
 
-    @InjectMocks
+    @Mock private StockReservationLineRepository reservationLines;
     private ProductServiceImpl productService;
+
+    @BeforeEach
+    void setUp() {
+        productService = new ProductServiceImpl(productRepository, variantRepository, categoryRepository,
+                storeAccessService, reservationLines, Clock.systemUTC());
+    }
+
+    @Test
+    void listUsesRemainingStockAndPricesOnlyPurchasableVariants() {
+        var pageable = PageRequest.of(0, 10);
+        when(productRepository.findAll(any(Specification.class), eq(pageable)))
+                .thenReturn(new PageImpl<>(List.of(product(5L, ProductStatus.ACTIVE), product(6L, ProductStatus.ACTIVE))));
+        when(variantRepository.findByProductIdInOrderByIdAsc(List.of(5L, 6L))).thenReturn(List.of(
+                variant(7L, 5L, "100", ProductStatus.ACTIVE, null),
+                variant(8L, 5L, "200", ProductStatus.ACTIVE, null),
+                variant(9L, 6L, "150", ProductStatus.ACTIVE, null)));
+        var heldSeven = org.mockito.Mockito.mock(StockReservationLineRepository.HeldQuantity.class);
+        var heldNine = org.mockito.Mockito.mock(StockReservationLineRepository.HeldQuantity.class);
+        when(heldSeven.getVariantId()).thenReturn(7L);
+        when(heldSeven.getQuantity()).thenReturn(10L);
+        when(heldNine.getVariantId()).thenReturn(9L);
+        when(heldNine.getQuantity()).thenReturn(10L);
+        when(reservationLines.heldQuantities(anyList(), any())).thenReturn(List.of(heldSeven, heldNine));
+
+        var products = productService.searchProducts(null, null, null, false, null, pageable).items();
+        assertThat(products.getFirst().purchasable()).isTrue();
+        assertThat(products.getFirst().minPrice()).isEqualByComparingTo("200");
+        assertThat(products.getLast().purchasable()).isFalse();
+        assertThat(products.getLast().minPrice()).isNull();
+    }
 
     // ── Fixtures ──────────────────────────────────────────────────────────────────
 

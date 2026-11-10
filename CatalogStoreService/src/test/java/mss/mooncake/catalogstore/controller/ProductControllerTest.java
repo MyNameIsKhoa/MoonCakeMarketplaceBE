@@ -98,7 +98,7 @@ class ProductControllerTest {
         var expected = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by("id")));
         when(productService.searchProducts(eq("nướng"), isNull(), eq(3L), eq(false), isNull(), eq(expected)))
                 .thenReturn(new PageResponse<>(List.of(new ProductSummaryResponse(5L, 1L, 3L, "PRD-ABCDEF12",
-                        "Bánh nướng", "ACTIVE", new BigDecimal("100000"), null)), 0, 20, 1, 1));
+                        "Bánh nướng", "ACTIVE", new BigDecimal("100000"), null, true)), 0, 20, 1, 1));
 
         mockMvc.perform(get("/api/products").param("q", "nướng").param("categoryId", "3"))
                 .andExpect(status().isOk())

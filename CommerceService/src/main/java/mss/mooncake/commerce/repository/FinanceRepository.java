@@ -29,6 +29,8 @@ public interface FinanceRepository {
     record SupplierPayout(long sellerOrderId, String sellerOrderNo, long orderId, String orderNo, String storeName,
             String status, Instant placedAt, Long settlementId, String settlementStatus, Long feeAmount,
             Long payoutAmount, Long refundedAmount, String payoutReference, Instant settledAt) { }
+    record TransferDestination(String kind, long id, long amount, String status, String reference,
+            String bankBin, String bankName, String accountNumber, String accountHolder) { }
 
     static Timestamp utc(Instant value) {
         return value == null ? null : Timestamp.valueOf(java.time.LocalDateTime.ofInstant(value, java.time.ZoneOffset.UTC));
@@ -48,6 +50,8 @@ public interface FinanceRepository {
     long nextOrderCode();
     String customerOrderNumber(long orderId);
     String sellerOrderNumber(long sellerOrderId);
+    Long sellerOrderIdByNumber(String sellerOrderNo);
+    java.util.Map<Long, Long> reservedRefundAmounts(long sellerOrderId);
     boolean active(long orderId);
     long parentOrderId(long sellerOrderId);
     List<String> sellerStatuses(long orderId);
@@ -84,6 +88,7 @@ public interface FinanceRepository {
     long refundedForDispute(long disputeId);
     List<Long> pendingDisputeOrderIds(int offset, int limit);
     List<FinanceResponse.Settlement> settlements(long orderId);
+    List<TransferDestination> transferDestinations(long orderId);
     /** Every seller order of the supplier that has a finance context, newest first. */
     List<SupplierPayout> supplierPayouts(long supplierId);
     List<FinanceResponse.Audit> history(long orderId);

@@ -164,7 +164,7 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
         RfqEntity rfq = rfqs.findById(rfqId)
                 .orElseThrow(() -> ApiException.notFound("RFQ_NOT_FOUND", "Không tìm thấy yêu cầu báo giá"));
         Specification<QuotationEntity> spec = (root, query, cb) -> cb.equal(root.get("rfqId"), rfqId);
-        if (!Objects.equals(actor.optionalCustomerId(), rfq.getCustomerIdRef())) {
+        if (actor.optionalSupplierId() != null || !Objects.equals(actor.optionalCustomerId(), rfq.getCustomerIdRef())) {
             Long supplierId = actor.supplierId();
             ensureInvited(rfq, rfqId, supplierId);
             spec = spec.and((root, query, cb) -> cb.equal(root.get("supplierIdRef"), supplierId));
@@ -201,7 +201,7 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
         QuotationEntity quotation = requiredQuotation(quotationId);
         RfqEntity rfq = rfqs.findById(quotation.getRfqId())
                 .orElseThrow(() -> ApiException.notFound("RFQ_NOT_FOUND", "Không tìm thấy yêu cầu báo giá"));
-        if (!Objects.equals(actor.optionalCustomerId(), rfq.getCustomerIdRef())) {
+        if (actor.optionalSupplierId() != null || !Objects.equals(actor.optionalCustomerId(), rfq.getCustomerIdRef())) {
             actor.assertSupplierOwner(quotation.getSupplierIdRef());
         }
         return response(quotation);
@@ -310,6 +310,7 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
         }
         String name = text(line.itemNameSnapshot());
         String sku = text(line.skuSnapshot());
+        String imageUrl = QuotationItemEntity.CUSTOM_ORDER_IMAGE_URL;
         if (line.variantId() != null) {
             if (line.variantId() <= 0 || line.productId() == null || line.productId() <= 0) {
                 throw ApiException.badRequest("PRODUCT_REQUIRED_FOR_VARIANT", "Cần productId hợp lệ khi chọn biến thể");
@@ -332,6 +333,10 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
             }
             if (text(snapshot.variantName()) != null) name = name + " - " + snapshot.variantName().strip();
             sku = text(snapshot.sku());
+            imageUrl = text(snapshot.imageUrl());
+            if (imageUrl != null && imageUrl.length() > 500) {
+                throw ApiException.unavailable("CATALOG_INVALID_RESPONSE", "Catalog image URL exceeds 500 characters");
+            }
         } else if (line.productId() != null) {
             throw ApiException.badRequest("VARIANT_REQUIRED_FOR_PRODUCT", "Mục sản phẩm cần chọn biến thể; mục tùy chỉnh bỏ cả hai ID");
         }
@@ -348,6 +353,7 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
         item.setVariantIdRef(line.variantId());
         item.setItemNameSnapshot(name);
         item.setSkuSnapshot(sku);
+        item.setImageUrlSnapshot(imageUrl);
         item.setQuantity(line.quantity());
         item.setUnitPrice(unitPrice);
         item.setDiscountAmount(discount);

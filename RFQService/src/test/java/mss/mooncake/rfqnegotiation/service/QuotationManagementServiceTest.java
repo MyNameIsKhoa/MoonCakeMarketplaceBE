@@ -110,6 +110,7 @@ class QuotationManagementServiceTest {
         assertThat(result.status()).isEqualTo(QuotationStatus.SUBMITTED);
         assertThat(result.totalAmount()).isEqualTo("235000.00");
         assertThat(result.items().getFirst().subtotal()).isEqualTo("225000.00");
+        assertThat(result.items().getFirst().imageUrlSnapshot()).isEqualTo("/images/placeholders/custom-order.svg");
         assertThat(result.submittedAt()).endsWith("Z");
         verify(commands).save(any(QuotationCommandEntity.class));
         verify(transactionManager).commit(any());
@@ -142,7 +143,6 @@ class QuotationManagementServiceTest {
     void uninvitedSupplierCannotListQuotationsOfSelectedStoreRfq() {
         rfq.setAudience(RfqAudience.SELECTED_STORES);
         when(rfqs.findById(1L)).thenReturn(Optional.of(rfq));
-        when(actor.optionalCustomerId()).thenReturn(99L);
         when(targets.existsByRfqIdAndSupplierIdRef(1L, 20L)).thenReturn(false);
 
         assertCode(() -> service.listForRfq(1L, 0, 20, null), "RFQ_NOT_FOUND");
@@ -192,7 +192,7 @@ class QuotationManagementServiceTest {
     void usesCatalogSnapshotForVariantAndKeepsNegotiatedPrice() {
         when(catalog.getProductSnapshot(40L, 50L)).thenReturn(new ProductSnapshotResponse(
                 40L, 50L, "Bánh trung thu", "Đậu xanh", "CAT-001", new BigDecimal("999999.00"),
-                30L, 20L, "P-001", null, "ACTIVE"));
+                30L, 20L, "P-001", "/images/catalog/variant-50.jpg", "ACTIVE"));
         var line = new QuotationItemRequest(40L, 50L, "Tên giả", "SKU giả", 2,
                 new BigDecimal("100.00"), BigDecimal.ZERO, null);
 
@@ -201,6 +201,16 @@ class QuotationManagementServiceTest {
         assertThat(result.items().getFirst().itemNameSnapshot()).isEqualTo("Bánh trung thu - Đậu xanh");
         assertThat(result.items().getFirst().skuSnapshot()).isEqualTo("CAT-001");
         assertThat(result.items().getFirst().unitPrice()).isEqualTo("100.00");
+        assertThat(result.items().getFirst().imageUrlSnapshot()).isEqualTo("/images/catalog/variant-50.jpg");
+    }
+
+    @Test
+    void rejectsCatalogImageThatCannotFitTheOrderSnapshot() {
+        when(catalog.getProductSnapshot(40L, 50L)).thenReturn(new ProductSnapshotResponse(
+                40L, 50L, "Bánh", "Đậu xanh", "SKU", BigDecimal.TEN, 30L, 20L, null, "x".repeat(501), "ACTIVE"));
+        var line = new QuotationItemRequest(40L, 50L, null, null, 2, BigDecimal.TEN, BigDecimal.ZERO, null);
+        assertCode(() -> service.create(1L, "long-image", request(line)), "CATALOG_INVALID_RESPONSE");
+        verify(quotations, never()).saveAndFlush(any());
     }
 
     @Test

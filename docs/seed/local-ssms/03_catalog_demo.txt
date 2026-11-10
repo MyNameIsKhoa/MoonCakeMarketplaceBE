@@ -1,6 +1,6 @@
 -- SSMS LOCAL ONLY: mss_identity and mss_catalog_store must be on the SAME SQL Server instance.
 -- Chạy sau 02_identity_demo.txt, khi Catalog Flyway V6 đã tạo xong bảng.
--- URL ảnh phục vụ từ FE Vite (/images/demo/...).
+-- URL ảnh phục vụ từ FE Vite (/images/demo/...). Sau file này chạy 04_catalog_product_promotions.txt.
 USE mss_catalog_store;
 GO
 IF DB_ID(N'mss_identity') IS NULL THROW 51320, 'Missing mss_identity database on this SQL Server.', 1;
@@ -91,7 +91,8 @@ BEGIN TRY
         THROW 51103, 'A demo category is inactive; no existing category was changed.', 1;
 
     IF EXISTS (SELECT 1 FROM @stores d JOIN dbo.store s ON s.store_code = d.store_code
-               WHERE s.supplier_id_ref <> d.supplier_id_ref OR s.slug <> d.slug OR s.status <> N'ACTIVE'
+               WHERE s.supplier_id_ref <> d.supplier_id_ref
+                  OR s.slug NOT IN (d.slug, SUBSTRING(d.slug, 6, 255)) OR s.status <> N'ACTIVE'
                   OR s.logo_url IS NULL OR s.banner_url IS NULL)
         THROW 51104, 'An existing demo store has different ownership, slug or status.', 1;
     IF EXISTS (SELECT 1 FROM @stores d JOIN dbo.store s ON s.slug = d.slug WHERE s.store_code <> d.store_code)
@@ -216,7 +217,8 @@ BEGIN TRY
                WHERE c.category_id IS NULL OR c.status <> N'ACTIVE')
         THROW 51303, 'Run the base demo category seed first.', 1;
     IF EXISTS (SELECT 1 FROM @stores d JOIN dbo.store s ON s.store_code = d.store_code
-               WHERE s.supplier_id_ref <> d.supplier_id_ref OR s.slug <> d.slug OR s.status <> N'ACTIVE')
+               WHERE s.supplier_id_ref <> d.supplier_id_ref
+                  OR s.slug NOT IN (d.slug, SUBSTRING(d.slug, 6, 255)) OR s.status <> N'ACTIVE')
         THROW 51304, 'An existing demo brand store conflicts with the seed.', 1;
     IF EXISTS (SELECT 1 FROM @stores d JOIN dbo.store s ON s.slug = d.slug WHERE s.store_code <> d.store_code)
         THROW 51305, 'A demo brand slug belongs to another store.', 1;

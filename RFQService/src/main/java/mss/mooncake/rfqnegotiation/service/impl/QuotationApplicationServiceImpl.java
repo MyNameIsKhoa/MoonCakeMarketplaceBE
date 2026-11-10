@@ -129,7 +129,7 @@ public class QuotationApplicationServiceImpl implements QuotationApplicationServ
                     "Ngày giao " + DeliveryDateRule.format(q.getProposedDeliveryDate()) + " quá gần để kịp thanh toán phần còn lại (hạn 3 ngày trước ngày giao). "
                     + "Hãy nhắn nhà cung cấp gửi phiên bản mới với ngày giao từ " + DeliveryDateRule.format(DeliveryDateRule.earliestWithRemaining(now)) + " trở đi.");
             var lines=items.findByQuotationIdOrderByIdAsc(q.getId()).stream().map(i -> new CreateOrderFromAcceptedQuotationRequest.Item(
-                    i.getVariantIdRef(),null,i.getItemNameSnapshot(),null,i.getSkuSnapshot(),null,
+                    i.getVariantIdRef(),null,i.getItemNameSnapshot(),null,i.getSkuSnapshot(),i.orderImageUrl(),
                     i.getQuantity(),i.getUnitPrice(),i.getDiscountAmount(),i.getSubtotal())).toList();
             if (lines.isEmpty()) throw ApiException.conflict("EMPTY_QUOTATION", "Báo giá không có sản phẩm");
             BigDecimal subtotal=lines.stream().map(CreateOrderFromAcceptedQuotationRequest.Item::subtotal).reduce(BigDecimal.ZERO,BigDecimal::add);
@@ -208,7 +208,7 @@ public class QuotationApplicationServiceImpl implements QuotationApplicationServ
     @Override public QuotationAcceptedResponse getOrderLink(Long id) {
         var q=quotation(id); var rfq=rfqs.findById(q.getRfqId()).orElseThrow();
         Long customerId=actor.optionalCustomerId();
-        if (!Objects.equals(customerId,rfq.getCustomerIdRef())) actor.assertSupplierOwner(q.getSupplierIdRef());
+        if (actor.optionalSupplierId()!=null || !Objects.equals(customerId,rfq.getCustomerIdRef())) actor.assertSupplierOwner(q.getSupplierIdRef());
         return response(conversions.findByQuotationId(id).orElseThrow(() -> ApiException.notFound("CONVERSION_NOT_FOUND", "Chưa có yêu cầu tạo đơn cho báo giá")));
     }
     @Override public void recoverPendingConversions() {

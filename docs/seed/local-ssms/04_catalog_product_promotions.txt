@@ -1,0 +1,153 @@
+-- Run in SSMS against the LOCAL instance after 02_identity_demo.txt and 03_catalog_demo.txt.
+-- Re-runnable. Keeps store/product IDs, store_code, product_code, SKU, email and order snapshots.
+-- Only the 15 seeded shops are touched; seller-created promotions are not changed.
+USE mss_catalog_store;
+GO
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+IF DB_NAME() <> N'mss_catalog_store'
+    THROW 51500, 'Connect to mss_catalog_store before running this seed.', 1;
+
+IF OBJECT_ID(N'dbo.store', N'U') IS NULL OR OBJECT_ID(N'dbo.product_variant', N'U') IS NULL
+   OR OBJECT_ID(N'dbo.promotion', N'U') IS NULL OR OBJECT_ID(N'dbo.promotion_rule', N'U') IS NULL
+    THROW 51501, 'Run Catalog Flyway migrations and the catalog seed first.', 1;
+
+DECLARE @offers TABLE (
+    store_code NVARCHAR(100) PRIMARY KEY,
+    sku NVARCHAR(100) NOT NULL,
+    old_name NVARCHAR(255) NOT NULL,
+    name NVARCHAR(255) NOT NULL,
+    buy_quantity INT NOT NULL,
+    gift_quantity INT NOT NULL,
+    previous_name NVARCHAR(255) NOT NULL
+);
+INSERT INTO @offers VALUES
+    (N'DEMO-TRANG-MOC', N'DEMO-TM-THAP-CAM-150', N'Ưu đãi Mùa Đoàn Viên: Giảm 10% khi mua từ 2 hộp', N'Trăng Mộc: Bánh thập cẩm mua 1 tặng 1', 1, 1, N'Trăng Mộc: Bánh thập cẩm giảm 10%'),
+    (N'DEMO-NGUYET-VIEN', N'DEMO-NV-LAVA-150', N'Khuyến mãi Trăng Rằm: Giảm 12% đơn từ 2 sản phẩm', N'Nguyệt Viên: Bánh lava mua 2 tặng 1', 2, 1, N'Nguyệt Viên: Bánh lava giảm 12%'),
+    (N'DEMO-SAO-NHO', N'DEMO-SN-SUA-DUA-80', N'Ưu đãi bánh thiếu nhi: Giảm 20.000đ khi mua từ 3 hộp', N'Sao Nhỏ: Bánh mini sữa dừa mua 2 tặng 1', 2, 1, N'Sao Nhỏ: Bánh mini sữa dừa giảm 10%'),
+    (N'DEMO-BRAND-KINH-DO', N'DEMO-KD-TRANG-VANG-4', N'Mùa Trăng Vàng: Giảm 10% khi mua từ 2 sản phẩm', N'Kinh Đô: Hộp Trăng Vàng mua 1 tặng 1', 1, 1, N'Kinh Đô: Hộp Trăng Vàng giảm 10%'),
+    (N'DEMO-BRAND-NHU-LAN', N'DEMO-NL-THAP-CAM-200', N'Ưu đãi Sài Gòn xưa: Giảm 30.000đ cho đơn từ 3 bánh', N'Như Lan: Bánh thập cẩm mua 2 tặng 1', 2, 1, N'Như Lan: Bánh thập cẩm giảm 8%'),
+    (N'DEMO-BRAND-MADAME-HUONG', N'DEMO-MH-COM-SEN-150', N'Quà biếu Phố Cổ: Giảm 8% khi mua từ 2 hộp', N'Madame Hương: Bánh cốm sen mua 3 tặng 1', 3, 1, N'Madame Hương: Bánh cốm sen giảm 8%'),
+    (N'DEMO-BRAND-BRODARD', N'DEMO-BD-HAI-SAN-200', N'Ưu đãi Hoàng Gia: Giảm 50.000đ khi mua từ 2 bánh', N'Brodard: Bánh hải sản mua 2 tặng 1', 2, 1, N'Brodard: Bánh hải sản giảm 10%'),
+    (N'DEMO-BRAND-GIVRAL', N'DEMO-GV-HAT-SEN-200', N'Ưu đãi bánh tươi Givral: Giảm 8% khi mua từ 2 sản phẩm', N'Givral: Bánh hạt sen mua 2 tặng 1', 2, 1, N'Givral: Bánh hạt sen giảm 8%'),
+    (N'DEMO-BRAND-KIDOS', N'DEMO-KIDOS-MATCHA-150', N'Đón trăng KIDO: Giảm 10% khi mua từ 2 bánh', N'KIDO''s Bakery: Bánh trà xanh mua 1 tặng 1', 1, 1, N'KIDO''s Bakery: Bánh trà xanh giảm 10%'),
+    (N'DEMO-BRAND-MAISON', N'DEMO-MAISON-HOP-QUA-4', N'Ưu đãi hộp quà Maison: Giảm 80.000đ khi mua từ 2 hộp', N'Maison: Hộp quà mua 2 tặng 1', 2, 1, N'Maison: Hộp quà giảm 10%'),
+    (N'DEMO-BRAND-DONG-KHANH', N'DEMO-DK-MTCC-1', N'Tết Trung Thu Chợ Lớn: Giảm 25.000đ đơn từ 3 bánh', N'Đồng Khánh: Bánh matcha mua 3 tặng 1', 3, 1, N'Đồng Khánh: Bánh matcha giảm 8%'),
+    (N'DEMO-BRAND-HY-LAM-MON', N'DEMO-HLM-SDLD-1', N'Ưu đãi gia truyền: Giảm 10% khi mua từ 2 sản phẩm', N'Hỷ Lâm Môn: Bánh mini sữa dừa mua 1 tặng 1', 1, 1, N'Hỷ Lâm Môn: Bánh mini sữa dừa giảm 10%'),
+    (N'DEMO-BRAND-DUC-PHAT', N'DEMO-DP-TCJB-1', N'Đoàn viên Đức Phát: Giảm 20.000đ khi mua từ 2 bánh', N'Đức Phát: Bánh thập cẩm mua 2 tặng 1', 2, 1, N'Đức Phát: Bánh thập cẩm giảm 8%'),
+    (N'DEMO-BRAND-ABC', N'DEMO-ABC-LVTM-1', N'Mùa trăng ABC Bakery: Giảm 5% toàn bộ sản phẩm', N'ABC Bakery: Bánh lava mua 1 tặng 1', 1, 1, N'ABC Bakery: Bánh lava giảm 5%'),
+    (N'DEMO-BRAND-KHIET-MINH', N'DEMO-KM-CDX-1', N'Thanh tịnh mùa trăng: Giảm 10% khi mua từ 3 bánh chay', N'Khiết Minh: Bánh chay đậu xanh mua 2 tặng 1', 2, 1, N'Khiết Minh: Bánh chay đậu xanh giảm 10%');
+
+-- A partial seed must fail before changing anything. Every SKU must belong to its intended store.
+IF (SELECT COUNT(*) FROM @offers o
+    JOIN dbo.store s ON s.store_code = o.store_code AND s.status = N'ACTIVE'
+    JOIN dbo.product p ON p.store_id = s.store_id AND p.status = N'ACTIVE'
+    JOIN dbo.product_variant v ON v.product_id = p.product_id AND v.sku = o.sku AND v.status = N'ACTIVE'
+    WHERE v.base_price > 0) <> (SELECT COUNT(*) FROM @offers)
+    THROW 51502, 'Missing/inactive seeded store or SKU; run the earlier seeds or inspect the changed product.', 1;
+
+IF EXISTS (SELECT 1 FROM @offers o JOIN dbo.store s ON s.store_code = o.store_code
+    JOIN dbo.store other ON other.slug = SUBSTRING(s.slug, 6, 255) AND other.store_id <> s.store_id
+    WHERE s.slug LIKE N'demo-%')
+    THROW 51503, 'A clean store slug is already used by another store.', 1;
+
+IF EXISTS (SELECT 1 FROM @offers o JOIN dbo.store s ON s.store_code = o.store_code
+    JOIN dbo.promotion pr ON pr.store_id = s.store_id AND pr.name = o.name
+    GROUP BY s.store_id, o.name HAVING COUNT(*) > 1)
+    THROW 51504, 'Duplicate named promotion; resolve it before re-running this seed.', 1;
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    UPDATE s SET slug = SUBSTRING(s.slug, 6, 255), name = REPLACE(s.name, N' (demo)', N'')
+    FROM dbo.store s JOIN @offers o ON o.store_code = s.store_code WHERE s.slug LIKE N'demo-%';
+    UPDATE s SET name = REPLACE(s.name, N' (demo)', N'')
+    FROM dbo.store s JOIN @offers o ON o.store_code = s.store_code WHERE s.name LIKE N'% (demo)';
+    UPDATE s SET description = REPLACE(s.description, N' (demo)', N'')
+    FROM dbo.store s JOIN @offers o ON o.store_code = s.store_code
+    WHERE s.description LIKE N'% (demo)%';
+    UPDATE p SET name = REPLACE(p.name, N' (demo)', N'')
+    FROM dbo.product p JOIN dbo.store s ON s.store_id = p.store_id
+    JOIN @offers o ON o.store_code = s.store_code WHERE p.name LIKE N'% (demo)';
+    UPDATE p SET description = REPLACE(p.description, N' (demo)', N'')
+    FROM dbo.product p JOIN dbo.store s ON s.store_id = p.store_id
+    JOIN @offers o ON o.store_code = s.store_code WHERE p.description LIKE N'% (demo)%';
+    UPDATE v SET variant_name = REPLACE(v.variant_name, N' (demo)', N'')
+    FROM dbo.product_variant v JOIN dbo.product p ON p.product_id = v.product_id
+    JOIN dbo.store s ON s.store_id = p.store_id
+    JOIN @offers o ON o.store_code = s.store_code WHERE v.variant_name LIKE N'% (demo)';
+
+    -- Retire only the old store-wide seed rule; do not touch seller-created promotions.
+    UPDATE pr SET status = N'DISABLED'
+    FROM dbo.promotion pr JOIN dbo.store s ON s.store_id = pr.store_id
+    JOIN @offers o ON o.store_code = s.store_code AND o.old_name = pr.name
+    WHERE EXISTS (SELECT 1 FROM dbo.promotion_rule r
+                  WHERE r.promotion_id = pr.promotion_id AND r.target_variant_id IS NULL);
+
+    -- Retire the previous product discounts only when the rule matches the old seed.
+    UPDATE pr SET status = N'DISABLED'
+    FROM dbo.promotion pr JOIN dbo.store s ON s.store_id = pr.store_id
+    JOIN @offers o ON o.store_code = s.store_code AND o.previous_name = pr.name
+    JOIN dbo.product_variant v ON v.sku = o.sku
+    WHERE (SELECT COUNT(*) FROM dbo.promotion_rule r WHERE r.promotion_id = pr.promotion_id) = 1
+      AND EXISTS (SELECT 1 FROM dbo.promotion_rule r WHERE r.promotion_id = pr.promotion_id
+          AND r.rule_type = N'PERCENT_DISCOUNT' AND r.target_variant_id = v.variant_id AND r.min_quantity = 1);
+
+    DECLARE @starts DATETIME2(0) = DATEADD(DAY, -1, SYSUTCDATETIME());
+    DECLARE @ends DATETIME2(0) = DATEADD(DAY, 30, SYSUTCDATETIME());
+    UPDATE pr SET start_at = @starts, end_at = @ends, status = N'ACTIVE'
+    FROM dbo.promotion pr JOIN dbo.store s ON s.store_id = pr.store_id
+    JOIN @offers o ON o.store_code = s.store_code AND o.name = pr.name;
+    INSERT INTO dbo.promotion (store_id, name, start_at, end_at, status)
+    SELECT s.store_id, o.name, @starts, @ends, N'ACTIVE'
+    FROM @offers o JOIN dbo.store s ON s.store_code = o.store_code
+    WHERE NOT EXISTS (SELECT 1 FROM dbo.promotion pr WHERE pr.store_id = s.store_id AND pr.name = o.name);
+
+    IF EXISTS (SELECT 1 FROM @offers o JOIN dbo.store s ON s.store_code = o.store_code
+        JOIN dbo.promotion pr ON pr.store_id = s.store_id AND pr.name = o.name
+        JOIN dbo.promotion_rule r ON r.promotion_id = pr.promotion_id
+        GROUP BY pr.promotion_id HAVING COUNT(*) > 1)
+        THROW 51505, 'A seeded product promotion has multiple rules; no rule was overwritten.', 1;
+
+    UPDATE r SET target_variant_id = v.variant_id, reward_variant_id = v.variant_id,
+        rule_type = N'BUY_X_GET_Y', min_quantity = o.buy_quantity,
+        discount_percent = NULL, discount_amount = NULL, reward_quantity = o.gift_quantity
+    FROM dbo.promotion_rule r JOIN dbo.promotion pr ON pr.promotion_id = r.promotion_id
+    JOIN dbo.store s ON s.store_id = pr.store_id
+    JOIN @offers o ON o.store_code = s.store_code AND o.name = pr.name
+    JOIN dbo.product p ON p.store_id = s.store_id
+    JOIN dbo.product_variant v ON v.product_id = p.product_id AND v.sku = o.sku;
+
+    INSERT INTO dbo.promotion_rule (promotion_id, target_variant_id, reward_variant_id,
+                                    rule_type, min_quantity, discount_percent, discount_amount, reward_quantity)
+    SELECT pr.promotion_id, v.variant_id, v.variant_id, N'BUY_X_GET_Y', o.buy_quantity, NULL, NULL, o.gift_quantity
+    FROM @offers o JOIN dbo.store s ON s.store_code = o.store_code
+    JOIN dbo.product p ON p.store_id = s.store_id
+    JOIN dbo.product_variant v ON v.product_id = p.product_id AND v.sku = o.sku
+    JOIN dbo.promotion pr ON pr.store_id = s.store_id AND pr.name = o.name
+    WHERE NOT EXISTS (SELECT 1 FROM dbo.promotion_rule r WHERE r.promotion_id = pr.promotion_id);
+
+    IF (SELECT COUNT(*) FROM @offers o JOIN dbo.store s ON s.store_code = o.store_code
+        JOIN dbo.promotion pr ON pr.store_id = s.store_id AND pr.name = o.name AND pr.status = N'ACTIVE'
+        JOIN dbo.promotion_rule r ON r.promotion_id = pr.promotion_id AND r.min_quantity = o.buy_quantity
+        JOIN dbo.product_variant v ON v.variant_id = r.target_variant_id AND v.sku = o.sku
+        WHERE r.rule_type = N'BUY_X_GET_Y' AND r.reward_variant_id = v.variant_id
+          AND r.reward_quantity = o.gift_quantity)
+        <> (SELECT COUNT(*) FROM @offers)
+        THROW 51506, 'Promotion verification failed; transaction rolled back.', 1;
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+SELECT s.name AS shop, s.slug, p.name AS product, v.sku, pr.name AS promotion,
+       r.min_quantity AS buy_quantity, r.reward_quantity AS gift_quantity, pr.start_at, pr.end_at
+FROM @offers o JOIN dbo.store s ON s.store_code = o.store_code
+JOIN dbo.product p ON p.store_id = s.store_id
+JOIN dbo.product_variant v ON v.product_id = p.product_id AND v.sku = o.sku
+JOIN dbo.promotion pr ON pr.store_id = s.store_id AND pr.name = o.name
+JOIN dbo.promotion_rule r ON r.promotion_id = pr.promotion_id AND r.target_variant_id = v.variant_id
+ORDER BY s.name;

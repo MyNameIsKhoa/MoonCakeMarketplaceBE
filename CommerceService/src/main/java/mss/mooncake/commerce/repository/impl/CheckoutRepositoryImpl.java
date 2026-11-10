@@ -42,7 +42,7 @@ public class CheckoutRepositoryImpl implements CheckoutRepository {
                         rs.getLong("cart_id"), rs.getLong("address_id_ref"), rs.getString("idempotency_key"),
                         rs.getString("cart_fingerprint"), rs.getString("reservation_key"),
                         rs.getTimestamp("reservation_expires_at").toLocalDateTime(), rs.getString("status"),
-                        rs.getObject("order_id", Long.class)), customerId, key).stream().findFirst().orElse(null);
+                        rs.getObject("order_id", Long.class), rs.getString("selection_request")), customerId, key).stream().findFirst().orElse(null);
     }
 
     @Override
@@ -52,18 +52,21 @@ public class CheckoutRepositoryImpl implements CheckoutRepository {
                         rs.getLong("cart_id"), rs.getLong("address_id_ref"), rs.getString("idempotency_key"),
                         rs.getString("cart_fingerprint"), rs.getString("reservation_key"),
                         rs.getTimestamp("reservation_expires_at").toLocalDateTime(), rs.getString("status"),
-                        rs.getObject("order_id", Long.class)));
+                        rs.getObject("order_id", Long.class), rs.getString("selection_request")));
     }
 
     @Override
     public void purgeExpiredKeys() {
+        db.update("UPDATE checkout_attempt SET status='FAILED',updated_at=SYSUTCDATETIME() "
+                + "WHERE status='CREATED' AND reservation_expires_at<=SYSUTCDATETIME()");
         db.update("DELETE FROM checkout_attempt WHERE status IN ('COMPLETED','FAILED') "
                 + "AND updated_at < DATEADD(MINUTE,-30,SYSUTCDATETIME())");
     }
 
     @Transactional
     @Override
-    public Attempt start(long customerId, long cartId, long addressId, String key, String fingerprint) {
+    public Attempt start(long customerId, long cartId, long addressId, String key, String fingerprint,
+                         String selectionRequest) {
         String reservationKey = "checkout-" + UUID.randomUUID();
         LocalDateTime expiry = LocalDateTime.now(ZoneOffset.UTC).plusMinutes(15).withNano(0);
         if (db.update("UPDATE cart SET updated_at=updated_at WHERE cart_id=? AND customer_id_ref=? AND status='ACTIVE'",
@@ -72,9 +75,9 @@ public class CheckoutRepositoryImpl implements CheckoutRepository {
             throw new IllegalStateException("Cart changed before checkout attempt");
         db.update("""
                 INSERT INTO checkout_attempt(customer_id_ref,cart_id,address_id_ref,idempotency_key,
-                cart_fingerprint,reservation_key,reservation_expires_at,status)
-                VALUES(?,?,?,?,?,?,?,'CREATED')
-                """, customerId, cartId, addressId, key, fingerprint, reservationKey, expiry);
+                cart_fingerprint,reservation_key,reservation_expires_at,status,selection_request)
+                VALUES(?,?,?,?,?,?,?,'CREATED',?)
+                """, customerId, cartId, addressId, key, fingerprint, reservationKey, expiry, selectionRequest);
         return byKey(customerId, key);
     }
 
@@ -154,10 +157,43 @@ public class CheckoutRepositoryImpl implements CheckoutRepository {
         db.update("UPDATE seller_order SET status='AWAITING_PAYMENT' WHERE order_id=?", attempt.orderId());
         db.update("UPDATE customer_order SET status='AWAITING_PAYMENT',stock_reservation_key=? WHERE order_id=?",
                 attempt.reservationKey(), attempt.orderId());
-        db.update("UPDATE cart SET status='CHECKED_OUT' WHERE cart_id=?", attempt.cartId());
+        if (attempt.selectionRequest() == null) {
+            db.update("UPDATE cart SET status='CHECKED_OUT' WHERE cart_id=?", attempt.cartId());
+        } else {
+            consumePurchasedItems(attempt);
+        }
         db.update("UPDATE checkout_attempt SET status='COMPLETED',updated_at=SYSUTCDATETIME() WHERE attempt_id=?",
                 attempt.id());
     }
+
+    private void consumePurchasedItems(Attempt attempt) {
+        var purchased = db.query("""
+                SELECT ci.cart_item_id, ci.quantity, oi.quantity AS purchased_quantity
+                FROM cart_item ci
+                JOIN order_item oi ON oi.variant_id_ref=ci.variant_id_ref
+                JOIN seller_order so ON so.seller_order_id=oi.seller_order_id
+                WHERE ci.cart_id=? AND so.order_id=?
+                """, (rs, n) -> new PurchasedLine(rs.getLong(1), rs.getInt(2), rs.getInt(3)),
+                attempt.cartId(), attempt.orderId());
+        int expected = attempt.selectionRequest().split(":", 3)[0].split(",").length;
+        if (purchased.size() != expected) throw new IllegalStateException("Purchased cart lines changed");
+        for (var line : purchased) {
+            if (line.purchased() > line.quantity()) throw new IllegalStateException("Purchased quantity changed");
+            if (line.quantity() == line.purchased()) {
+                db.update("DELETE FROM cart_item WHERE cart_id=? AND cart_item_id=?", attempt.cartId(), line.id());
+            } else {
+                db.update("UPDATE cart_item SET quantity=? WHERE cart_id=? AND cart_item_id=?",
+                        line.quantity() - line.purchased(), attempt.cartId(), line.id());
+            }
+        }
+        db.update("""
+                UPDATE cart SET status=CASE WHEN EXISTS (SELECT 1 FROM cart_item WHERE cart_id=?)
+                    THEN 'ACTIVE' ELSE 'CHECKED_OUT' END, updated_at=SYSUTCDATETIME()
+                WHERE cart_id=? AND status='CHECKOUT_PENDING'
+                """, attempt.cartId(), attempt.cartId());
+    }
+
+    private record PurchasedLine(long id, int quantity, int purchased) { }
 
     @Transactional
     @Override
@@ -182,8 +218,8 @@ public class CheckoutRepositoryImpl implements CheckoutRepository {
 
     @Override
     public String cartFingerprint(long cartId) {
-        String contents = db.query("SELECT variant_id_ref,quantity FROM cart_item WHERE cart_id=? ORDER BY variant_id_ref",
-                (rs, n) -> rs.getLong(1) + ":" + rs.getInt(2) + ";", cartId).stream()
+        String contents = db.query("SELECT cart_item_id,variant_id_ref,quantity FROM cart_item WHERE cart_id=? ORDER BY cart_item_id",
+                (rs, n) -> rs.getLong(1) + ":" + rs.getLong(2) + ":" + rs.getInt(3) + ";", cartId).stream()
                 .reduce("", String::concat);
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")

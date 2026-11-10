@@ -51,8 +51,12 @@ public class ProductVariantServiceImpl implements ProductVariantService {
 
     /** Map variant → VariantResponse. */
     private VariantResponse toVariantResponse(ProductVariantEntity v) {
+        return toVariantResponse(v, reservationLines.heldQuantity(v.getId(), LocalDateTime.now(clock)));
+    }
+
+    private VariantResponse toVariantResponse(ProductVariantEntity v, long held) {
         return new VariantResponse(v.getId(), v.getProductId(), v.getSku(), v.getVariantName(), v.getImageUrl(),
-                v.getBasePrice(), v.getStockQuantity(), v.getStatus().name());
+                v.getBasePrice(), v.getStockQuantity(), Math.max(0, v.getStockQuantity() - held), v.getStatus().name());
     }
 
     private ProductEntity requireProduct(Long productId) {
@@ -123,15 +127,18 @@ public class ProductVariantServiceImpl implements ProductVariantService {
     @Override
     public PageResponse<VariantResponse> getVariants(Long productId, Long userId, Pageable pageable) {
         ProductEntity product = requireProduct(productId);
-        if (isOwner(product, userId)) {
-            return PageResponse.of(variantRepository.findByProductId(productId, pageable),
-                    this::toVariantResponse);
-        }
-        if (!isPublished(product)) {
+        boolean owner = isOwner(product, userId);
+        if (!owner && !isPublished(product)) {
             throw new ResourceNotFoundException("Không tìm thấy sản phẩm với id: " + productId);
         }
-        return PageResponse.of(variantRepository.findByProductIdAndStatus(productId, ProductStatus.ACTIVE, pageable),
-                this::toVariantResponse);
+        var page = owner ? variantRepository.findByProductId(productId, pageable)
+                : variantRepository.findByProductIdAndStatus(productId, ProductStatus.ACTIVE, pageable);
+        var ids = page.getContent().stream().map(ProductVariantEntity::getId).toList();
+        java.util.Map<Long, Long> held = ids.isEmpty() ? java.util.Map.of()
+                : reservationLines.heldQuantities(ids, LocalDateTime.now(clock)).stream()
+                        .collect(java.util.stream.Collectors.toMap(StockReservationLineRepository.HeldQuantity::getVariantId,
+                                StockReservationLineRepository.HeldQuantity::getQuantity));
+        return PageResponse.of(page, variant -> toVariantResponse(variant, held.getOrDefault(variant.getId(), 0L)));
     }
 
     @Override
@@ -142,6 +149,17 @@ public class ProductVariantServiceImpl implements ProductVariantService {
                 || (isPublished(product) && variant.getStatus() == ProductStatus.ACTIVE);
         if (!visible) {
             throw new ResourceNotFoundException("Không tìm thấy biến thể " + variantId + " của sản phẩm " + productId);
+        }
+        return toVariantResponse(variant);
+    }
+
+    @Override
+    public VariantResponse getOwnedVariant(Long storeId, Long variantId, Long userId) {
+        storeAccessService.requireOwnedStore(storeId, userId);
+        var variant = variantRepository.findById(variantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy biến thể"));
+        if (!storeId.equals(requireProduct(variant.getProductId()).getStoreId())) {
+            throw new ResourceNotFoundException("Không tìm thấy biến thể trong gian hàng");
         }
         return toVariantResponse(variant);
     }
@@ -165,7 +183,7 @@ public class ProductVariantServiceImpl implements ProductVariantService {
         variant.setBasePrice(request.basePrice());
         variant.setStockQuantity(request.stockQuantity());
         variant.setStatus(ProductStatus.DRAFT);
-        return toVariantResponse(saveUniqueSku(variant));
+        return toVariantResponse(saveUniqueSku(variant), 0);
     }
 
     @Override
@@ -198,9 +216,10 @@ public class ProductVariantServiceImpl implements ProductVariantService {
         // Tồn kho đặt giá trị tuyệt đối từ màn quản lý của supplier; trừ kho khi bán đi qua IN12 confirm.
         // Khóa dòng variant (cùng thứ tự khóa với IN12 reserve) rồi mới đếm hold, để không thể giảm tồn
         // xuống dưới lượng khách đang giữ trong lúc checkout.
+        Long held = null;
         if (request.stockQuantity() != null) {
             variantRepository.lockByIds(List.of(variantId));
-            long held = reservationLines.heldQuantity(variantId, LocalDateTime.now(clock));
+            held = reservationLines.heldQuantity(variantId, LocalDateTime.now(clock));
             if (request.stockQuantity() < held) {
                 throw new ConflictException("Không thể đặt tồn kho " + request.stockQuantity()
                         + " thấp hơn lượng đang được giữ cho đơn hàng (" + held + ").");
@@ -212,6 +231,7 @@ public class ProductVariantServiceImpl implements ProductVariantService {
             validateStatusTransition(product, variant, next);
             variant.setStatus(next);
         }
-        return toVariantResponse(saveUniqueSku(variant));
+        var saved = saveUniqueSku(variant);
+        return held == null ? toVariantResponse(saved) : toVariantResponse(saved, held);
     }
 }

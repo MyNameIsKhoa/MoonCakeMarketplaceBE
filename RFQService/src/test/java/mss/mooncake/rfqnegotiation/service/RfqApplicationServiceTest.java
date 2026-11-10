@@ -63,6 +63,7 @@ class RfqApplicationServiceTest {
     void setUp() {
         validators = Validation.buildDefaultValidatorFactory();
         service = new RfqApplicationServiceImpl(rfqs, quotations, targets, catalog, actor, validators.getValidator(), notifier);
+        lenient().when(actor.optionalSupplierId()).thenReturn(null);
     }
 
     @AfterEach
@@ -167,7 +168,6 @@ class RfqApplicationServiceTest {
         RfqEntity rfq = entity(RfqStatus.OPEN);
         rfq.setAudience(RfqAudience.SELECTED_STORES);
         when(rfqs.findById(91L)).thenReturn(Optional.of(rfq));
-        when(actor.optionalCustomerId()).thenReturn(18L);
         when(actor.optionalSupplierId()).thenReturn(22L, 20L);
         when(targets.findByRfqIdOrderByIdAsc(91L)).thenReturn(List.of(
                 new RfqTargetStoreEntity(91L, 30L, 20L, "Kinh Do"), new RfqTargetStoreEntity(91L, 31L, 21L, "Givral")));
@@ -195,7 +195,7 @@ class RfqApplicationServiceTest {
     @Test
     void publicDetailOmitsCustomerAndPrivateDeliveryAndCustomizationData() {
         when(rfqs.findById(91L)).thenReturn(Optional.of(entity(RfqStatus.OPEN)));
-        when(actor.optionalCustomerId()).thenReturn(null);
+        when(actor.optionalSupplierId()).thenReturn(20L);
         RfqResponse detail = service.get(91L);
         assertThat(detail.customerId()).isNull();
         assertThat(detail.deliveryLocation()).isNull();

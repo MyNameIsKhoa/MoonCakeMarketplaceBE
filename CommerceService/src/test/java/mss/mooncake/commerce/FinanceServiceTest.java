@@ -26,6 +26,7 @@ import java.util.concurrent.Executors;
 import mss.mooncake.commerce.client.IdentityServiceClient;
 import mss.mooncake.commerce.client.PaymentProvider;
 import mss.mooncake.commerce.client.dto.identity.CreateNotificationRequest;
+import mss.mooncake.commerce.client.dto.identity.PayoutAccountResponse;
 import mss.mooncake.commerce.notification.CommerceNotifier;
 import mss.mooncake.commerce.client.dto.catalog.StockReservationRequest;
 import mss.mooncake.commerce.client.dto.catalog.StockRestoreRequest;
@@ -76,7 +77,8 @@ class FinanceServiceTest {
         for (String file : new String[]{"V1__commerce_physical_schema.sql", "V3__tv5_finance.sql",
                 "V7__customer_order_payment.sql", "V8__seller_order_acceptance_timestamp.sql",
                 "V10__dispute_workflow.sql", "V11__cancellation_retry_and_stock_restore.sql",
-                "V12__shipment_line.sql", "V13__seller_order_stock_restore.sql"}) {
+                "V12__shipment_line.sql", "V13__seller_order_stock_restore.sql",
+                "V14__manual_transfer_destination.sql"}) {
             var resource = new ClassPathResource("db/migration/" + file);
             String sql = resource.getContentAsString(StandardCharsets.UTF_8)
                     .replace("dbo.", "").replace("SYSUTCDATETIME()", "CURRENT_TIMESTAMP")
@@ -121,13 +123,27 @@ class FinanceServiceTest {
         transaction = new TransactionTemplate(manager);
         integration = new FinanceIntegrationServiceImpl(repository);
         provider = mock(PaymentProvider.class);
+        identity = mock(IdentityServiceClient.class);
+        stubAccounts();
         customerPayments = new CustomerPaymentServiceImpl(repository, provider, manager);
-        service = new FinanceServiceImpl(repository, provider, manager, "TOTAL_COLLECTED", "HALF_UP", true, customerPayments, integration);
+        service = new FinanceServiceImpl(repository, provider, manager, "TOTAL_COLLECTED", "HALF_UP", true,
+                customerPayments, integration, 7, CommerceNotifier.disabled(), identity);
         when(provider.create(anyLong(), anyLong(), any(), anyString())).thenAnswer(call -> new PaymentProvider.Link(
                 call.getArgument(0), call.getArgument(1), "link-" + call.getArgument(0), "https://pay.payos.vn/test", "qr"));
     }
 
     private String key() { return "test-key-" + (++sequence); }
+
+    private void stubAccounts() {
+        when(identity.getCustomerPayoutAccount(10L)).thenReturn(
+                new PayoutAccountResponse("CUSTOMER", "970436", "Vietcombank", "123456789", "Buyer"));
+        when(identity.getSupplierPayoutAccount(20L)).thenReturn(
+                new PayoutAccountResponse("SUPPLIER", "970422", "MBBank", "987654321", "Supplier"));
+    }
+
+    private void prepareRefund(long orderId, long refundId) {
+        service.prepareRefundTransfer(orderId, refundId, key(), ADMIN);
+    }
 
     /** Retail checkout: paid only through the one customer-order payment. */
     private void retail() {
@@ -497,7 +513,7 @@ class FinanceServiceTest {
 
     private FinanceService financeWith(CustomerPaymentServiceImpl payments) {
         return new FinanceServiceImpl(repository, provider, new DataSourceTransactionManager(datasource),
-                "TOTAL_COLLECTED", "HALF_UP", true, payments, integration);
+                "TOTAL_COLLECTED", "HALF_UP", true, payments, integration, 7, CommerceNotifier.disabled(), identity);
     }
 
     /** A retail checkout paid in full through its one customer-order payment link. */
@@ -528,6 +544,7 @@ class FinanceServiceTest {
                 .findFirst().orElseThrow().id();
         finance.requestRefund(sellerOrderId, paymentId, repository.paid(sellerOrderId), "Hoàn tiền hủy đơn",
                 "cancel-refund-v1", key(), ADMIN);
+        finance.prepareRefundTransfer(sellerOrderId, repository.refunds(sellerOrderId).getLast().id(), key(), ADMIN);
         finance.confirmRefund(sellerOrderId, repository.refunds(sellerOrderId).getLast().id(),
                 "bank-refund-" + sellerOrderId, "https://proof.test/refund", key(), ADMIN);
     }
@@ -554,6 +571,7 @@ class FinanceServiceTest {
         assertThatThrownBy(() -> finance.decideCancellation(1, cancellationId, true, "Duyệt hủy", key(), ADMIN))
                 .hasMessage("PAID_CANCELLATION_REQUIRES_REFUND_REVIEW");
         org.mockito.Mockito.verifyNoInteractions(catalog);
+        finance.prepareRefundTransfer(1, repository.refunds(1).getFirst().id(), key(), ADMIN);
         finance.confirmRefund(1, repository.refunds(1).getFirst().id(), "bank-refund-1",
                 "https://proof.test/refund", key(), ADMIN);
 
@@ -866,7 +884,7 @@ class FinanceServiceTest {
         paidRetailCheckout(payments, financeWith(payments), false);
         paidDaysAgo(4);
         var threeDaySla = new FinanceServiceImpl(repository, provider, new DataSourceTransactionManager(datasource),
-                "TOTAL_COLLECTED", "HALF_UP", true, payments, integration, 3);
+                "TOTAL_COLLECTED", "HALF_UP", true, payments, integration, 3, CommerceNotifier.disabled(), identity);
 
         threeDaySla.openDispute(1, "Chưa nhận được hàng", null, key(), BUYER);
 
@@ -1275,10 +1293,30 @@ class FinanceServiceTest {
         assertThatThrownBy(() -> service.requestRefund(1, paymentId, 7000, "reason", "policy-v1", key(), ADMIN))
                 .hasMessage("REFUND_EXCEEDS_AVAILABLE_AMOUNT");
         long id = repository.refunds(1).getFirst().id();
+        prepareRefund(1, id);
         String key = key();
         service.confirmRefund(1, id, "bank-refund-1", "https://evidence.test/1", key, ADMIN);
         service.confirmRefund(1, id, "bank-refund-1", "https://evidence.test/1", key, ADMIN);
         assertThat(repository.count("SELECT COUNT(*) FROM finance_ledger WHERE entry_type='REFUNDED'")).isEqualTo(1);
+    }
+
+    @Test
+    void refundTransferQrUsesFrozenRecipientAndExactAmount() {
+        long paymentId = fullPayment();
+        service.requestRefund(1, paymentId, 1000, "Damaged cake", "manual-v1", key(), ADMIN);
+        long refundId = repository.refunds(1).getFirst().id();
+        assertThatThrownBy(() -> service.confirmRefund(1, refundId, "bank-1", "https://proof.test/1", key(), ADMIN))
+                .hasMessage("REFUND_DESTINATION_REQUIRED");
+        service.prepareRefundTransfer(1, refundId, key(), ADMIN);
+        var transfer = service.transferInstructions(1, ADMIN).transfers().getFirst();
+        assertThat(transfer.amount()).isEqualTo(1000);
+        assertThat(transfer.accountNumber()).isEqualTo("123456789");
+        assertThat(transfer.qrImageUrl()).contains("amount=1000&addInfo=MSSREFUND" + refundId);
+        when(identity.getCustomerPayoutAccount(10L)).thenReturn(
+                new PayoutAccountResponse("CUSTOMER", "970422", "MBBank", "111111111", "Changed"));
+        service.prepareRefundTransfer(1, refundId, key(), ADMIN);
+        assertThat(service.transferInstructions(1, ADMIN).transfers().getFirst().accountNumber()).isEqualTo("123456789");
+        assertThatThrownBy(() -> service.transferInstructions(1, BUYER)).hasMessage("FINANCE_ADMIN_REQUIRED");
     }
 
     @Test
@@ -1293,6 +1331,10 @@ class FinanceServiceTest {
         String key = key();
         service.beginPayout(1, settlement.settlementId(), key, ADMIN);
         service.beginPayout(1, settlement.settlementId(), key, ADMIN);
+        var transfer = service.transferInstructions(1, ADMIN).transfers().getFirst();
+        assertThat(transfer.amount()).isEqualTo(9501);
+        assertThat(transfer.accountNumber()).isEqualTo("987654321");
+        assertThat(transfer.qrImageUrl()).contains("amount=9501&addInfo=MSSPAYOUT" + settlement.settlementId());
         assertThat(repository.payment(paymentId).hold()).isEqualTo("HELD");
         String confirmation = key();
         service.confirmPayout(1, settlement.settlementId(), "bank-settlement-1", "https://evidence.test/payout", confirmation, ADMIN);
@@ -1350,6 +1392,7 @@ class FinanceServiceTest {
         service.requestRefund(1, paymentId, 2000, disputeId, "Award", "dispute-v1", key(), ADMIN);
         assertThat(repository.disputes(1).getFirst().status()).isEqualTo("REFUND_PENDING");
         long refundId = repository.refunds(1).getFirst().id();
+        prepareRefund(1, refundId);
         service.confirmRefund(1, refundId, "bank-refund-2", "https://proof.test/2", key(), ADMIN);
         assertThat(repository.disputes(1).getFirst().status()).isEqualTo("RESOLVED");
         assertThatThrownBy(() -> service.openDispute(1, " damaged goods ", null, key(), BUYER))
@@ -1359,7 +1402,7 @@ class FinanceServiceTest {
         new JdbcTemplate(datasource).update("UPDATE finance_context SET received=0 WHERE seller_order_id=1");
         new JdbcTemplate(datasource).update("UPDATE seller_order SET status='DELIVERED' WHERE seller_order_id=1");
         var netService = new FinanceServiceImpl(repository, provider, new DataSourceTransactionManager(datasource),
-                "NET_AFTER_REFUND", "HALF_UP", true, customerPayments, integration);
+                "NET_AFTER_REFUND", "HALF_UP", true, customerPayments, integration, 7, CommerceNotifier.disabled(), identity);
         netService.createSettlement(1, key(), ADMIN);
         var settled = repository.settlements(1).getFirst();
         assertThat(settled.grossAmount()).isEqualTo(10001);
@@ -1381,12 +1424,13 @@ class FinanceServiceTest {
         service.escalateDispute(1, disputeId, key(), BUYER);
         service.decideDispute(1, disputeId, "REFUND", 10001L, "Full refund", key(), ADMIN);
         service.requestRefund(1, paymentId, 10001, disputeId, "Award", "dispute-v1", key(), ADMIN);
+        prepareRefund(1, repository.refunds(1).getFirst().id());
         service.confirmRefund(1, repository.refunds(1).getFirst().id(),
                 "bank-full-refund", "https://proof.test/full", key(), ADMIN);
         new JdbcTemplate(datasource).update("UPDATE shipment SET delivered_at=? WHERE seller_order_id=1",
                 java.sql.Timestamp.valueOf(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC).minusDays(8)));
         var netService = new FinanceServiceImpl(repository, provider, new DataSourceTransactionManager(datasource),
-                "NET_AFTER_REFUND", "HALF_UP", true, customerPayments, integration);
+                "NET_AFTER_REFUND", "HALF_UP", true, customerPayments, integration, 7, CommerceNotifier.disabled(), identity);
         assertThat(netService.summary(1, BUYER).eligibility().blockingReasons()).contains("FULLY_REFUNDED");
         assertThatThrownBy(() -> netService.createSettlement(1, key(), ADMIN)).hasMessage("SETTLEMENT_NOT_ELIGIBLE");
     }
@@ -1441,7 +1485,7 @@ class FinanceServiceTest {
                         FinanceResponse.SupplierPayouts.Row::netPayout, FinanceResponse.SupplierPayouts.Row::feeEstimated,
                         FinanceResponse.SupplierPayouts.Row::eligible, FinanceResponse.SupplierPayouts.Row::payoutStatus)
                 .containsExactly(10001L, 0L, 500L, 9501L, true, true, "READY");
-        assertThat(page.totals()).isEqualTo(new FinanceResponse.SupplierPayouts.Totals(0, 9501, 0));
+        assertThat(page.totals()).isEqualTo(new FinanceResponse.SupplierPayouts.Totals(0, 9501, 0, 0));
 
         service.createSettlement(1, key(), ADMIN);
         long settlementId = repository.settlements(1).getFirst().settlementId();
@@ -1456,7 +1500,7 @@ class FinanceServiceTest {
         var settled = service.supplierPayouts(supplier, 0, 1);
         assertThat(settled.content()).extracting(FinanceResponse.SupplierPayouts.Row::sellerOrderId).containsExactly(2L);
         assertThat(settled.totalPages()).isEqualTo(2);
-        assertThat(settled.totals()).isEqualTo(new FinanceResponse.SupplierPayouts.Totals(0, 0, 9501));
+        assertThat(settled.totals()).isEqualTo(new FinanceResponse.SupplierPayouts.Totals(0, 0, 0, 9501));
         var paid = service.supplierPayouts(supplier, 1, 1).content().getFirst();
         assertThat(paid.payoutStatus()).isEqualTo("PAID");
         assertThat(paid.netPayout()).isEqualTo(9501);
@@ -1472,7 +1516,7 @@ class FinanceServiceTest {
         var pending = service.supplierPayouts(supplier, 0, 20);
         assertThat(pending.content().getFirst().payoutStatus()).isEqualTo("BLOCKED");
         assertThat(pending.content().getFirst().netPayout()).isEqualTo(9501);
-        assertThat(pending.totals()).isEqualTo(new FinanceResponse.SupplierPayouts.Totals(9501, 0, 0));
+        assertThat(pending.totals()).isEqualTo(new FinanceResponse.SupplierPayouts.Totals(9501, 0, 0, 0));
 
         assertThatThrownBy(() -> service.supplierPayouts(BUYER, 0, 20)).hasMessage("SUPPLIER_REQUIRED");
         assertThatThrownBy(() -> service.supplierPayouts(ADMIN, 0, 20)).hasMessage("SUPPLIER_REQUIRED");
@@ -1574,6 +1618,7 @@ class FinanceServiceTest {
     /** Rebuilds service and customerPayments with a notifier that posts to a mocked Identity client. */
     private CustomerPaymentServiceImpl notifying() {
         identity = mock(IdentityServiceClient.class);
+        stubAccounts();
         var notifier = new CommerceNotifier(identity, repository);
         var manager = new DataSourceTransactionManager(datasource);
         @SuppressWarnings("unchecked")
@@ -1584,7 +1629,7 @@ class FinanceServiceTest {
                 mock(mss.mooncake.commerce.client.CatalogServiceClient.class), finance, integration, 48, 60, notifier);
         customerPayments = payments;
         service = new FinanceServiceImpl(repository, provider, manager, "TOTAL_COLLECTED", "HALF_UP", true,
-                payments, integration, 7, notifier);
+                payments, integration, 7, notifier, identity);
         return payments;
     }
 
@@ -1751,6 +1796,7 @@ class FinanceServiceTest {
 
         service.requestRefund(1, paymentId, 4000, disputeId, "Award", "dispute-v1", key(), ADMIN);
         long refundId = repository.refunds(1).getFirst().id();
+        prepareRefund(1, refundId);
         service.confirmRefund(1, refundId, "bank-refund-1", "https://proof.test/refund", key(), ADMIN);
 
         var refund = notification("REFUND_CONFIRMED:" + refundId);

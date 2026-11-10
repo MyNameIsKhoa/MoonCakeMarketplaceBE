@@ -1,12 +1,17 @@
 package mss.mooncake.commerce.service;
 
 import mss.mooncake.commerce.dto.response.FinanceResponse;
+import mss.mooncake.commerce.dto.response.TransferInstructionResponse;
 import vn.payos.model.webhooks.Webhook;
 
 public interface FinanceService {
     record Actor(long userId, Long customerId, Long supplierId, boolean admin) { }
 
     FinanceResponse summary(long orderId, Actor actor);
+    FinanceResponse summaryByNumber(String sellerOrderNo, Actor actor);
+    TransferInstructionResponse transferInstructions(long orderId, Actor actor);
+    void prepareRefundTransfer(long orderId, long refundId, String commandKey, Actor actor);
+    void preparePayoutTransfer(long orderId, long settlementId, String commandKey, Actor actor);
     FinanceResponse.Payment initiate(long paymentId, String commandKey, Actor actor);
     void webhook(Webhook webhook);
     FinanceResponse.Payment reconcile(long paymentId, Actor actor, boolean cancel);

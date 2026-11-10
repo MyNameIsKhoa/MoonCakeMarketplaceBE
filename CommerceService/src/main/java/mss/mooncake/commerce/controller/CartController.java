@@ -1,6 +1,7 @@
 package mss.mooncake.commerce.controller;
 
 import jakarta.validation.Valid;
+import mss.mooncake.commerce.dto.request.CartSelectionRequest;
 import mss.mooncake.commerce.dto.request.AddCartItemRequest;
 import mss.mooncake.commerce.dto.request.UpdateCartItemRequest;
 import mss.mooncake.commerce.dto.response.CartItemResponse;
@@ -36,7 +37,14 @@ public class CartController {
 
     @PostMapping("/pricing")
     public CartPricingResponse price(@AuthenticationPrincipal CommercePrincipal principal) {
-        return carts.priceCart(customerId(principal));
+        return carts.priceCart(carts.getCart(customerId(principal)).items(), true);
+    }
+
+    @PatchMapping("/selection")
+    public ResponseEntity<Void> select(@AuthenticationPrincipal CommercePrincipal principal,
+                                       @Valid @RequestBody CartSelectionRequest request) {
+        carts.select(customerId(principal), request.cartItemIds());
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/items")

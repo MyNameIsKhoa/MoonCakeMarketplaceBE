@@ -1,6 +1,8 @@
 package mss.mooncake.catalogstore.service.impl;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -22,6 +24,7 @@ import mss.mooncake.catalogstore.exception.ResourceNotFoundException;
 import mss.mooncake.catalogstore.repository.CategoryRepository;
 import mss.mooncake.catalogstore.repository.ProductRepository;
 import mss.mooncake.catalogstore.repository.ProductVariantRepository;
+import mss.mooncake.catalogstore.repository.StockReservationLineRepository;
 import mss.mooncake.catalogstore.service.ProductService;
 import mss.mooncake.catalogstore.service.StoreAccessService;
 import org.springframework.data.domain.Page;
@@ -38,39 +41,57 @@ public class ProductServiceImpl implements ProductService {
     private final ProductVariantRepository variantRepository;
     private final CategoryRepository categoryRepository;
     private final StoreAccessService storeAccessService;
+    private final StockReservationLineRepository reservationLines;
+    private final Clock clock;
 
     public ProductServiceImpl(ProductRepository productRepository,
             ProductVariantRepository variantRepository,
             CategoryRepository categoryRepository,
-            StoreAccessService storeAccessService) {
+            StoreAccessService storeAccessService, StockReservationLineRepository reservationLines, Clock clock) {
         this.productRepository = productRepository;
         this.variantRepository = variantRepository;
         this.categoryRepository = categoryRepository;
         this.storeAccessService = storeAccessService;
+        this.reservationLines = reservationLines;
+        this.clock = clock;
     }
 
     // ─── Helpers
     // ──────────────────────────────────────────────────────────────────
 
     /** Map variant → VariantResponse. */
-    private VariantResponse toVariantResponse(ProductVariantEntity v) {
+    private VariantResponse toVariantResponse(ProductVariantEntity v, Map<Long, Long> held) {
         return new VariantResponse(v.getId(), v.getProductId(), v.getSku(), v.getVariantName(), v.getImageUrl(),
-                v.getBasePrice(), v.getStockQuantity(), v.getStatus().name());
+                v.getBasePrice(), v.getStockQuantity(), available(v, held), v.getStatus().name());
     }
 
     /** Map product + variants → ProductResponse. */
     private ProductResponse toProductResponse(ProductEntity p, List<ProductVariantEntity> variants) {
+        var held = heldQuantities(variants);
         return new ProductResponse(p.getId(), p.getStoreId(), p.getCategoryId(), p.getProductCode(), p.getName(),
                 p.getDescription(), p.getStatus().name(), p.getCreatedAt(), p.getUpdatedAt(),
-                variants.stream().map(this::toVariantResponse).toList());
+                variants.stream().map(v -> toVariantResponse(v, held)).toList());
     }
 
-    /** Item listing: minPrice/imageUrl chỉ tính trên variant ACTIVE; null nếu chưa có variant ACTIVE. */
-    private ProductSummaryResponse toSummary(ProductEntity p, List<ProductVariantEntity> variants) {
+    private Map<Long, Long> heldQuantities(List<ProductVariantEntity> variants) {
+        if (variants.isEmpty()) return Map.of();
+        return reservationLines.heldQuantities(variants.stream().map(ProductVariantEntity::getId).toList(),
+                LocalDateTime.now(clock)).stream().collect(Collectors.toMap(
+                        StockReservationLineRepository.HeldQuantity::getVariantId,
+                        StockReservationLineRepository.HeldQuantity::getQuantity));
+    }
+
+    private long available(ProductVariantEntity variant, Map<Long, Long> held) {
+        return Math.max(0, variant.getStockQuantity() - held.getOrDefault(variant.getId(), 0L));
+    }
+
+    private ProductSummaryResponse toSummary(ProductEntity p, List<ProductVariantEntity> variants,
+                                             Map<Long, Long> held) {
         List<ProductVariantEntity> active = variants.stream()
                 .filter(v -> v.getStatus() == ProductStatus.ACTIVE)
                 .toList();
         BigDecimal minPrice = active.stream()
+                .filter(v -> available(v, held) > 0)
                 .map(ProductVariantEntity::getBasePrice)
                 .min(Comparator.naturalOrder())
                 .orElse(null);
@@ -80,7 +101,7 @@ public class ProductServiceImpl implements ProductService {
                 .findFirst()
                 .orElse(null);
         return new ProductSummaryResponse(p.getId(), p.getStoreId(), p.getCategoryId(), p.getProductCode(),
-                p.getName(), p.getStatus().name(), minPrice, imageUrl);
+                p.getName(), p.getStatus().name(), minPrice, imageUrl, p.getStatus() == ProductStatus.ACTIVE && minPrice != null);
     }
 
     /** Sinh product_code unique trong store dạng "PRD-XXXXXXXX". */
@@ -156,8 +177,9 @@ public class ProductServiceImpl implements ProductService {
                 : variantRepository.findByProductIdInOrderByIdAsc(productIds).stream()
                         .collect(Collectors.groupingBy(ProductVariantEntity::getProductId));
 
+        var held = heldQuantities(variantsByProduct.values().stream().flatMap(List::stream).toList());
         return PageResponse.of(page,
-                p -> toSummary(p, variantsByProduct.getOrDefault(p.getId(), List.of())));
+                p -> toSummary(p, variantsByProduct.getOrDefault(p.getId(), List.of()), held));
     }
 
     @Override

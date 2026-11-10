@@ -6,4 +6,4 @@ public record VariantSnapshotResponse(Long variantId, Long productId, Long store
                                       String productCode, String productName, String variantName,
                                       String sku, String imageUrl, BigDecimal basePrice,
                                       Integer stockQuantity, String variantStatus,
-                                      String productStatus, String storeStatus) { }
+                                      String productStatus, String storeStatus, Integer availableQuantity) { }

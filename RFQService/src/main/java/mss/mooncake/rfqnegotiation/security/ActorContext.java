@@ -50,10 +50,14 @@ public class ActorContext {
         userId();
         Long id = optionalCustomerId();
         if (id == null) throw new ApiException(HttpStatus.FORBIDDEN, "CUSTOMER_REQUIRED", "Tài khoản chưa có hồ sơ khách hàng");
+        if (optionalSupplierId() != null) {
+            throw ApiException.forbidden("CUSTOMER_MODE_REQUIRED", "Khu vực B2B của tài khoản này dùng chế độ nhà cung cấp");
+        }
         return id;
     }
 
     public Long supplierId() {
+        userId();
         Long id = optionalSupplierId();
         if (id == null) throw new ApiException(HttpStatus.FORBIDDEN, "SUPPLIER_REQUIRED", "Tài khoản chưa có hồ sơ nhà cung cấp");
         return id;

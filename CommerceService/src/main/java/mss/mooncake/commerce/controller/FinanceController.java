@@ -7,6 +7,7 @@ import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import mss.mooncake.commerce.dto.response.FinanceResponse;
 import mss.mooncake.commerce.dto.response.CustomerPaymentResponse;
+import mss.mooncake.commerce.dto.response.TransferInstructionResponse;
 import mss.mooncake.commerce.service.FinanceService;
 import mss.mooncake.commerce.service.CustomerPaymentService;
 import mss.mooncake.commerce.service.FinanceActorResolver;
@@ -56,9 +57,20 @@ public class FinanceController {
         return actors.resolve(authentication);
     }
 
+    @GetMapping("/orders/by-number")
+    public FinanceResponse summaryByNumber(@RequestParam @NotBlank @Size(max = 100) String sellerOrderNo,
+                                           Authentication authentication) {
+        return service.summaryByNumber(sellerOrderNo, actor(authentication));
+    }
+
     @GetMapping("/orders/{orderId}")
     public FinanceResponse summary(@PathVariable long orderId, Authentication authentication) {
         return service.summary(orderId, actor(authentication));
+    }
+
+    @GetMapping("/orders/{orderId}/transfer-instructions")
+    public TransferInstructionResponse transferInstructions(@PathVariable long orderId, Authentication authentication) {
+        return service.transferInstructions(orderId, actor(authentication));
     }
 
     /** Supplier view "Doanh thu & giải ngân": own seller orders' settlement state plus totals. */
@@ -193,6 +205,14 @@ public class FinanceController {
         return service.summary(orderId, actor);
     }
 
+    @PostMapping("/orders/{orderId}/refunds/{id}/prepare-transfer")
+    public TransferInstructionResponse prepareRefundTransfer(@PathVariable long orderId, @PathVariable long id,
+            @RequestHeader("Idempotency-Key") String key, Authentication authentication) {
+        var actor = actor(authentication);
+        service.prepareRefundTransfer(orderId, id, key, actor);
+        return service.transferInstructions(orderId, actor);
+    }
+
     @PostMapping("/orders/{orderId}/refunds/{id}/confirm")
     public FinanceResponse confirmRefund(@PathVariable long orderId, @PathVariable long id, @Valid @RequestBody Proof body,
             @RequestHeader("Idempotency-Key") String key, Authentication authentication) {
@@ -215,6 +235,14 @@ public class FinanceController {
         var actor = actor(authentication);
         service.beginPayout(orderId, id, key, actor);
         return service.summary(orderId, actor);
+    }
+
+    @PostMapping("/orders/{orderId}/settlements/{id}/prepare-transfer")
+    public TransferInstructionResponse preparePayoutTransfer(@PathVariable long orderId, @PathVariable long id,
+            @RequestHeader("Idempotency-Key") String key, Authentication authentication) {
+        var actor = actor(authentication);
+        service.preparePayoutTransfer(orderId, id, key, actor);
+        return service.transferInstructions(orderId, actor);
     }
 
     @PostMapping("/orders/{orderId}/settlements/{id}/confirm")

@@ -34,3 +34,16 @@ Set `APP_FRONTEND_URL` to the public origin of the frontend. `/verify-email` rea
 Set `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, and optionally `MAIL_FROM` in the backend `.env`. For Gmail SMTP, use a Gmail App Password with 2-Step Verification enabled. Other SMTP providers can use the same settings. `OutboundEmailService.send(recipient, subject, body)` sends a plain-text message through the configured SMTP server. The auth demo Compose file uses Mailpit on port 8025 for local testing.
 
 Verification, resend, and password-reset flows require a working SMTP connection. When SMTP is missing or delivery fails, the API responds `503`; a new registration rolls back so it cannot leave an unusable, unverified account. Google login itself does not require an email OTP.
+
+## SQL Server migration V8
+
+V8 separates adding `failed_attempts` and adding its CHECK constraint with `GO`.
+SQL Server otherwise compiles the CHECK before the new column exists and raises error 207.
+If startup failed with that error and Flyway is still at V7, rebuild Identity resources and restart;
+the failed transaction has rolled back, so no database reset or Flyway repair is needed.
+
+`IdentitySqlServerMigrationTest` verifies the actual Flyway upgrade from a populated V7 database,
+the default value, rejection of negative attempts, and a second migration run with nothing pending.
+Enable it with `TEST_SQLSERVER_URL`, `TEST_SQLSERVER_USERNAME`, and `TEST_SQLSERVER_PASSWORD`.
+The SQL login needs permission to create/drop the isolated random test database;
+the test does not migrate or clean an application database.

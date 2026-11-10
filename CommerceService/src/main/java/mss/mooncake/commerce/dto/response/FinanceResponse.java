@@ -12,7 +12,14 @@ public record FinanceResponse(Context context, List<Payment> payments, List<Case
             Instant disputeDeadlineAt) { }
     public record Payment(long paymentId, long sellerOrderId, String paymentType, long amount,
             String status, String holdStatus, Instant dueAt, Instant expiresAt,
-            String checkoutUrl, String qrCode) { }
+            String checkoutUrl, String qrCode, Long refundableAmount) {
+        public Payment(long paymentId, long sellerOrderId, String paymentType, long amount,
+                       String status, String holdStatus, Instant dueAt, Instant expiresAt,
+                       String checkoutUrl, String qrCode) {
+            this(paymentId, sellerOrderId, paymentType, amount, status, holdStatus, dueAt, expiresAt,
+                    checkoutUrl, qrCode, null);
+        }
+    }
     public record Case(long id, String status, String reason, Long amount, String evidenceUrl,
             String resolution, String sellerResponse, Instant openedAt, Instant respondedAt,
             Instant escalatedAt, String decisionType, Long disputeId) {
@@ -45,7 +52,7 @@ public record FinanceResponse(Context context, List<Payment> payments, List<Case
                 Long platformFee, Long netPayout, boolean feeEstimated, boolean eligible, List<String> blockingReasons,
                 Long settlementId, String settlementStatus, String payoutStatus, String payoutReference,
                 Instant paidAt) { }
-        public record Totals(long pendingAmount, long readyAmount, long paidAmount) { }
+        public record Totals(long pendingAmount, long readyAmount, long processingAmount, long paidAmount) { }
     }
     public record Audit(long auditId, String eventType, long resourceId, String actor, String detail, Instant createdAt) { }
 }

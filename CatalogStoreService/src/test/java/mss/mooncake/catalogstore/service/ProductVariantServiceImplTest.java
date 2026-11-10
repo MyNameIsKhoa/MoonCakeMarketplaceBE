@@ -205,12 +205,14 @@ class ProductVariantServiceImplTest {
             when(reservationLines.heldQuantity(7L, NOW)).thenReturn(6L);
             when(variantRepository.saveAndFlush(v)).thenReturn(v);
 
-            assertThat(variantService.updateVariant(PRODUCT_ID, 7L,
-                    new UpdateVariantRequest(null, null, null, null, 6, null), OWNER).stockQuantity()).isEqualTo(6);
+            var updated = variantService.updateVariant(PRODUCT_ID, 7L,
+                    new UpdateVariantRequest(null, null, null, null, 6, null), OWNER);
+            assertThat(updated.stockQuantity()).isEqualTo(6);
+            assertThat(updated.availableQuantity()).isZero();
 
             variantService.updateVariant(PRODUCT_ID, 7L,
                     new UpdateVariantRequest(null, "Tên mới", null, null, null, null), OWNER);
-            verify(reservationLines).heldQuantity(7L, NOW); // chỉ lần cập nhật có stockQuantity
+            verify(reservationLines, org.mockito.Mockito.times(2)).heldQuantity(7L, NOW);
         }
 
         @Test

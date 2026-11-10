@@ -9,8 +9,12 @@ import java.time.Duration;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import feign.FeignException;
+import mss.mooncake.commerce.client.IdentityServiceClient;
+import mss.mooncake.commerce.client.dto.identity.PayoutAccountResponse;
 import mss.mooncake.commerce.client.PaymentProvider;
 import mss.mooncake.commerce.dto.response.FinanceResponse;
+import mss.mooncake.commerce.dto.response.TransferInstructionResponse;
 import mss.mooncake.commerce.exception.FinanceException;
 import mss.mooncake.commerce.notification.CommerceNotifier;
 import mss.mooncake.commerce.repository.FinanceRepository;
@@ -43,6 +47,7 @@ public class FinanceServiceImpl implements FinanceService {
     private final FinanceIntegrationService integration;
     private final long shippingSlaDays;
     private final CommerceNotifier notifier;
+    private final IdentityServiceClient identity;
 
     @Autowired
     public FinanceServiceImpl(FinanceRepository repository, PaymentProvider provider,
@@ -51,7 +56,8 @@ public class FinanceServiceImpl implements FinanceService {
             @Value("${finance.settlement.rounding:}") String rounding,
             @Value("${finance.dispute.admin-adjudication-enabled:false}") boolean adjudicationEnabled,
             CustomerPaymentService customerPayments, FinanceIntegrationService integration,
-            @Value("${commerce.retail.shipping-sla-days:7}") long shippingSlaDays, CommerceNotifier notifier) {
+            @Value("${commerce.retail.shipping-sla-days:7}") long shippingSlaDays, CommerceNotifier notifier,
+            IdentityServiceClient identity) {
         this.repository = repository;
         this.provider = provider;
         this.transaction = new TransactionTemplate(manager);
@@ -62,6 +68,15 @@ public class FinanceServiceImpl implements FinanceService {
         this.integration = integration;
         this.shippingSlaDays = shippingSlaDays;
         this.notifier = notifier;
+        this.identity = identity;
+    }
+
+    public FinanceServiceImpl(FinanceRepository repository, PaymentProvider provider,
+            PlatformTransactionManager manager, String feeBasis, String rounding, boolean adjudicationEnabled,
+            CustomerPaymentService customerPayments, FinanceIntegrationService integration,
+            long shippingSlaDays, CommerceNotifier notifier) {
+        this(repository, provider, manager, feeBasis, rounding, adjudicationEnabled, customerPayments,
+                integration, shippingSlaDays, notifier, null);
     }
 
     /** Without in-app notifications, for tests that do not check them. */
@@ -105,10 +120,30 @@ public class FinanceServiceImpl implements FinanceService {
         if (!actor.admin()) { throw new FinanceException(HttpStatus.FORBIDDEN, "FINANCE_ADMIN_REQUIRED"); }
     }
 
+    private FinanceResponse.Payment paymentResponse(Payment payment, Context context, Actor actor, long reserved) {
+        if (actor.admin()) {
+            long available = "SUCCESS".equals(payment.status()) && "HELD".equals(payment.hold())
+                    ? Math.max(0, payment.amount() - reserved) : 0;
+            return new FinanceResponse.Payment(payment.id(), payment.orderId(), payment.type(), payment.amount(),
+                    payment.status(), payment.hold(), payment.dueAt(), payment.expiresAt(),
+                    isBuyer(context, actor) ? payment.checkoutUrl() : null,
+                    isBuyer(context, actor) ? payment.response().qrCode() : null, available);
+        }
+        return paymentResponse(payment, context, actor);
+    }
+
     private FinanceResponse.Payment paymentResponse(Payment payment, Context context, Actor actor) {
         if (isBuyer(context, actor)) { return payment.response(); }
         return new FinanceResponse.Payment(payment.id(), payment.orderId(), payment.type(), payment.amount(),
                 payment.status(), payment.hold(), payment.dueAt(), payment.expiresAt(), null, null);
+    }
+
+    @Override
+    public FinanceResponse summaryByNumber(String sellerOrderNo, Actor actor) {
+        admin(actor);
+        Long id = repository.sellerOrderIdByNumber(sellerOrderNo.strip());
+        if (id == null) throw new FinanceException(HttpStatus.NOT_FOUND, "SELLER_ORDER_NOT_FOUND");
+        return summary(id, actor);
     }
 
     public FinanceResponse summary(long orderId, Actor actor) {
@@ -116,13 +151,83 @@ public class FinanceServiceImpl implements FinanceService {
             var context = repository.lock(orderId);
             access(context, actor, false);
             Instant deliveredAt = context.delivered() ? repository.deliveredAt(orderId) : null;
+            var reserved = actor.admin() ? repository.reservedRefundAmounts(orderId) : java.util.Map.<Long, Long>of();
             return new FinanceResponse(new FinanceResponse.Context(orderId, context.total(), context.deposit(),
                     context.deliveryDate(), context.accepted(), repository.paid(orderId),
                     FinanceIntegrationService.remainingDue(context.deliveryDate()),
                     deliveredAt == null ? null : deliveredAt.plus(Duration.ofDays(7))),
-                    repository.payments(orderId).stream().map(p -> paymentResponse(p, context, actor)).toList(),
+                    repository.payments(orderId).stream().map(p -> paymentResponse(p, context, actor, reserved.getOrDefault(p.id(), 0L))).toList(),
                     repository.cancellations(orderId), repository.refunds(orderId), repository.disputes(orderId),
                     repository.settlements(orderId), eligibility(context), repository.history(orderId));
+        });
+    }
+
+    @Override
+    public TransferInstructionResponse transferInstructions(long orderId, Actor actor) {
+        admin(actor);
+        repository.context(orderId);
+        return new TransferInstructionResponse(repository.transferDestinations(orderId).stream().map(row -> {
+            String memo = "REFUND".equals(row.kind()) ? "MSSREFUND" + row.id() : "MSSPAYOUT" + row.id();
+            String qr = row.bankBin() == null ? null : "https://img.vietqr.io/image/"
+                    + row.bankBin() + "-" + row.accountNumber() + "-compact2.png?amount=" + row.amount()
+                    + "&addInfo=" + memo;
+            return new TransferInstructionResponse.Transfer(row.kind(), row.id(), row.amount(), row.status(),
+                    memo, row.bankBin(), row.bankName(), row.accountNumber(), row.accountHolder(), qr);
+        }).toList());
+    }
+
+    private PayoutAccountResponse destination(boolean customer, long id) {
+        if (identity == null) throw new FinanceException(HttpStatus.SERVICE_UNAVAILABLE, "IDENTITY_UNAVAILABLE");
+        try {
+            var account = customer ? identity.getCustomerPayoutAccount(id) : identity.getSupplierPayoutAccount(id);
+            require(account != null && (customer ? "CUSTOMER" : "SUPPLIER").equals(account.ownerKind())
+                    && account.bankBin() != null && account.bankBin().matches("[0-9]{6}")
+                    && account.accountNumber() != null && account.accountNumber().matches("[0-9]{6,19}")
+                    && account.bankName() != null && !account.bankName().isBlank()
+                    && account.accountHolder() != null && !account.accountHolder().isBlank(), "RECIPIENT_ACCOUNT_INVALID");
+            return account;
+        } catch (FeignException.NotFound missing) {
+            throw new FinanceException(HttpStatus.CONFLICT, "RECIPIENT_ACCOUNT_MISSING");
+        } catch (FeignException unavailable) {
+            throw new FinanceException(HttpStatus.SERVICE_UNAVAILABLE, "IDENTITY_UNAVAILABLE");
+        }
+    }
+
+    @Override
+    public void prepareRefundTransfer(long orderId, long refundId, String commandKey, Actor actor) {
+        admin(actor);
+        var account = destination(true, repository.context(orderId).customerId());
+        command(orderId, commandKey, "refund-transfer:" + refundId, actor, () -> {
+            var refund = repository.transferDestinations(orderId).stream()
+                    .filter(row -> "REFUND".equals(row.kind()) && row.id() == refundId).findFirst()
+                    .orElseThrow(() -> new FinanceException(HttpStatus.CONFLICT, "REFUND_NOT_PENDING"));
+            if (refund.bankBin() != null) return; // A retry never silently redirects an approved transfer.
+            repository.update("""
+                    UPDATE refund SET bank_bin=?,bank_name=?,bank_account_number=?,bank_account_holder=?,bank_snapshot_at=?
+                    WHERE refund_id=? AND bank_bin IS NULL
+                    """, account.bankBin(), account.bankName(), account.accountNumber(), account.accountHolder(),
+                    FinanceRepository.utc(Instant.now()), refundId);
+            repository.event(orderId, "REFUND_DESTINATION_SNAPSHOTTED", refundId, Long.toString(actor.userId()),
+                    "bankBin=" + account.bankBin());
+        });
+    }
+
+    @Override
+    public void preparePayoutTransfer(long orderId, long settlementId, String commandKey, Actor actor) {
+        admin(actor);
+        var account = destination(false, repository.context(orderId).supplierId());
+        command(orderId, commandKey, "payout-transfer:" + settlementId, actor, () -> {
+            var payout = repository.transferDestinations(orderId).stream()
+                    .filter(row -> "PAYOUT".equals(row.kind()) && row.id() == settlementId).findFirst()
+                    .orElseThrow(() -> new FinanceException(HttpStatus.CONFLICT, "PAYOUT_NOT_PROCESSING"));
+            if (payout.bankBin() != null) return;
+            repository.update("""
+                    UPDATE settlement SET bank_bin=?,bank_name=?,bank_account_number=?,bank_account_holder=?,bank_snapshot_at=?
+                    WHERE settlement_id=? AND bank_bin IS NULL
+                    """, account.bankBin(), account.bankName(), account.accountNumber(), account.accountHolder(),
+                    FinanceRepository.utc(Instant.now()), settlementId);
+            repository.event(orderId, "PAYOUT_DESTINATION_SNAPSHOTTED", settlementId, Long.toString(actor.userId()),
+                    "bankBin=" + account.bankBin());
         });
     }
 
@@ -595,7 +700,7 @@ public class FinanceServiceImpl implements FinanceService {
                     INSERT INTO refund(payment_id,amount,reason,status,requested_at,idempotency_key,policy_snapshot,dispute_id)
                     VALUES(?,?,?,'MANUAL_REVIEW',?,?,?,?)
                     """, paymentId, amount, reason, FinanceRepository.utc(Instant.now()), commandKey, policy, disputeId);
-            repository.update("UPDATE refund SET transfer_reference=? WHERE refund_id=?", "mss-refund-" + id, id);
+            repository.update("UPDATE refund SET transfer_reference=? WHERE refund_id=?", "MSSREFUND" + id, id);
             repository.event(orderId, "REFUND_REVIEW_REQUESTED", id, Long.toString(actor.userId()), policy);
         });
     }
@@ -608,6 +713,8 @@ public class FinanceServiceImpl implements FinanceService {
             var refund = repository.refunds(orderId).stream().filter(r -> r.id() == id).findFirst().orElseThrow(
                     () -> new FinanceException(HttpStatus.NOT_FOUND, "REFUND_NOT_FOUND"));
             require("MANUAL_REVIEW".equals(refund.status()), "REFUND_NOT_PENDING");
+            require(repository.transferDestinations(orderId).stream().anyMatch(t -> "REFUND".equals(t.kind())
+                    && t.id() == id && t.bankBin() != null), "REFUND_DESTINATION_REQUIRED");
             repository.update("UPDATE refund SET status='SUCCESS',transfer_reference=?,evidence_url=?,refunded_at=? WHERE refund_id=?",
                     reference, evidence, FinanceRepository.utc(Instant.now()), id);
             repository.ledger(orderId, "refund:" + id, "REFUNDED", refund.amount());
@@ -671,12 +778,14 @@ public class FinanceServiceImpl implements FinanceService {
         var rows = repository.supplierPayouts(actor.supplierId()).stream().map(this::payoutRow).toList();
         long pending = 0;
         long ready = 0;
+        long processing = 0;
         long paid = 0;
         for (var row : rows) {
             long amount = row.netPayout() == null ? 0 : row.netPayout();
             switch (row.payoutStatus()) {
                 case "PAID" -> paid += amount;
-                case "READY", "PROCESSING" -> ready += amount;
+                case "READY" -> ready += amount;
+                case "PROCESSING" -> processing += amount;
                 case "BLOCKED", "ON_HOLD" -> pending += amount;
                 default -> { }
             }
@@ -684,7 +793,7 @@ public class FinanceServiceImpl implements FinanceService {
         int from = (int) Math.min((long) page * size, rows.size());
         return new FinanceResponse.SupplierPayouts(rows.subList(from, Math.min(from + size, rows.size())), page, size,
                 rows.size(), (rows.size() + size - 1) / size,
-                new FinanceResponse.SupplierPayouts.Totals(pending, ready, paid));
+                new FinanceResponse.SupplierPayouts.Totals(pending, ready, processing, paid));
     }
 
     private FinanceResponse.SupplierPayouts.Row payoutRow(FinanceRepository.SupplierPayout order) {
@@ -715,6 +824,7 @@ public class FinanceServiceImpl implements FinanceService {
 
     public void beginPayout(long orderId, long id, String commandKey, Actor actor) {
         admin(actor);
+        var account = destination(false, repository.context(orderId).supplierId());
         command(orderId, commandKey, "payout:" + id, actor, () -> {
             var context = repository.context(orderId);
             require(eligibility(context).eligible(), "SETTLEMENT_NOT_ELIGIBLE");
@@ -727,9 +837,12 @@ public class FinanceServiceImpl implements FinanceService {
                             + settlement.feeAmount() + settlement.supplierPayoutAmount()
                     && feeBasis.equals(settlement.feeBasis()) && rounding.equals(settlement.roundingRule()),
                     "SETTLEMENT_SNAPSHOT_STALE");
-            repository.update("UPDATE settlement SET status='PROCESSING',payout_reference=? WHERE settlement_id=?",
-                    "mss-settlement-" + id, id);
-            repository.event(orderId, "PAYOUT_MANUAL_PROCESSING", id, Long.toString(actor.userId()), "reference=mss-settlement-" + id);
+            repository.update("""
+                    UPDATE settlement SET status='PROCESSING',payout_reference=?,bank_bin=?,bank_name=?,
+                    bank_account_number=?,bank_account_holder=?,bank_snapshot_at=? WHERE settlement_id=?
+                    """, "MSSPAYOUT" + id, account.bankBin(), account.bankName(), account.accountNumber(),
+                    account.accountHolder(), FinanceRepository.utc(Instant.now()), id);
+            repository.event(orderId, "PAYOUT_MANUAL_PROCESSING", id, Long.toString(actor.userId()), "reference=MSSPAYOUT" + id);
         });
     }
 
@@ -741,6 +854,8 @@ public class FinanceServiceImpl implements FinanceService {
             var settlement = repository.settlements(orderId).stream().filter(s -> s.settlementId() == id).findFirst().orElseThrow(
                     () -> new FinanceException(HttpStatus.NOT_FOUND, "SETTLEMENT_NOT_FOUND"));
             require("PROCESSING".equals(settlement.status()), "PAYOUT_NOT_PROCESSING");
+            require(repository.transferDestinations(orderId).stream().anyMatch(t -> "PAYOUT".equals(t.kind())
+                    && t.id() == id && t.bankBin() != null), "PAYOUT_DESTINATION_REQUIRED");
             repository.update("UPDATE settlement SET status='SUCCESS',payout_reference=?,evidence_url=?,settled_at=? WHERE settlement_id=?",
                     reference, evidence, FinanceRepository.utc(Instant.now()), id);
             repository.update("UPDATE payment SET hold_status='RELEASED' WHERE seller_order_id=? AND status='SUCCESS' AND hold_status='HELD'", orderId);

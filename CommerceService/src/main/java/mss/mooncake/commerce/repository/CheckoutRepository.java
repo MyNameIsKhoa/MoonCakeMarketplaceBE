@@ -11,14 +11,14 @@ import mss.mooncake.commerce.dto.response.RetailCheckoutResponse;
 public interface CheckoutRepository {
     record Attempt(long id, long customerId, long cartId, long addressId, String key,
                    String fingerprint, String reservationKey, LocalDateTime expiresAt,
-                   String status, Long orderId) { }
+                   String status, Long orderId, String selectionRequest) { }
 
     record Store(CartPricingResponse.StorePrice price, BigDecimal fee, String supplierName) { }
 
     Attempt byKey(long customerId, String key);
     List<Attempt> pending();
     void purgeExpiredKeys();
-    Attempt start(long customerId, long cartId, long addressId, String key, String fingerprint);
+    Attempt start(long customerId, long cartId, long addressId, String key, String fingerprint, String selectionRequest);
     boolean failCreated(Attempt attempt);
     void persistPending(Attempt attempt, AddressSummaryResponse address, List<Store> stores, String fingerprint);
     void complete(Attempt attempt);

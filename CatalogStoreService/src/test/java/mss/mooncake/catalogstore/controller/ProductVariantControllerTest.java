@@ -76,7 +76,7 @@ class ProductVariantControllerTest {
     }
 
     private static VariantResponse variant() {
-        return new VariantResponse(7L, 5L, "SKU-7", "Hộp 4 bánh", null, new BigDecimal("250000"), 20, "DRAFT");
+        return new VariantResponse(7L, 5L, "SKU-7", "Hộp 4 bánh", null, new BigDecimal("250000"), 20, 20, "DRAFT");
     }
 
     private String json(Object body) throws Exception {

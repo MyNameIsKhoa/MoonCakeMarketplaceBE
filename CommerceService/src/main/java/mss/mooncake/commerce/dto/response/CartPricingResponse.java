@@ -5,7 +5,7 @@ import java.util.List;
 
 /**
  * Totals and {@code stores} cover only purchasable lines. Lines whose variant, product or store is no
- * longer for sale are listed in {@code unavailableItems} (never priced) and block checkout until removed.
+ * longer for sale or short on stock are listed in {@code unavailableItems}.
  */
 public record CartPricingResponse(BigDecimal subtotal, BigDecimal discountTotal, BigDecimal totalAmount,
                                   List<StorePrice> stores, List<UnavailableLine> unavailableItems) {
@@ -20,9 +20,10 @@ public record CartPricingResponse(BigDecimal subtotal, BigDecimal discountTotal,
 
     public record LinePrice(Long cartItemId, Long variantId, String productName, String variantName,
                             String sku, String imageUrl, Integer quantity, BigDecimal unitPrice,
-                            BigDecimal subtotal, BigDecimal discountAmount, BigDecimal lineTotal) { }
+                            BigDecimal subtotal, BigDecimal discountAmount, BigDecimal lineTotal,
+                            boolean selected, Integer availableQuantity) { }
 
     /** {@code reason} is {@code UNAVAILABLE}: the variant, product or store is not active. */
     public record UnavailableLine(Long cartItemId, Long variantId, String productName, String variantName,
-                                  String sku, String imageUrl, Integer quantity, String reason) { }
+                                  String sku, String imageUrl, Integer quantity, String reason, Integer availableQuantity) { }
 }

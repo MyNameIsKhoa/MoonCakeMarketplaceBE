@@ -46,7 +46,7 @@ class CartControllerIntegrationTest {
             VariantSnapshotBatchRequest request = invocation.getArgument(0);
             return List.of(new VariantSnapshotResponse(request.variantIds().getFirst(), 1L, 1L, 1L,
                     "P", "Product", "Variant", "SKU", null, new BigDecimal("100"), 10,
-                    "ACTIVE", "ACTIVE", "ACTIVE"));
+                    "ACTIVE", "ACTIVE", "ACTIVE", 10));
         });
         mvc = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
     }

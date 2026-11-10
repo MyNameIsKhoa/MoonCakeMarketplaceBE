@@ -65,14 +65,14 @@ class CommerceErrorHandlingTest {
     @Test
     void insufficientCatalogStockDuringCheckoutIsAConflictWithoutTheInternalUrl() throws Exception {
         var checkout = mock(RetailCheckoutService.class);
-        when(checkout.place(anyLong(), anyLong(), anyLong(), anyString())).thenThrow(downstream(
+        when(checkout.place(anyLong(), anyLong(), anyLong(), anyString(), org.mockito.ArgumentMatchers.any(), anyString())).thenThrow(downstream(
                 CATALOG + "/internal/v1/inventory/reservations", 409,
                 "{\"status\":409,\"message\":\"Insufficient stock for variant 7\"}"));
         signedInBuyer();
 
         String body = mvc(new CheckoutController(checkout)).perform(post("/api/checkout")
                         .header("Idempotency-Key", "checkout-abc123")
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"addressId\":11}"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"addressId\":11,\"selection\":{\"cartItemIds\":[1]},\"quote\":\"" + "a".repeat(64) + "\"}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("INSUFFICIENT_STOCK"))
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);

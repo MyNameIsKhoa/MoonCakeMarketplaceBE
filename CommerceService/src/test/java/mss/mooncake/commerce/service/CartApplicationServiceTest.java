@@ -44,7 +44,7 @@ class CartApplicationServiceTest {
             VariantSnapshotBatchRequest request = invocation.getArgument(0);
             return List.of(new VariantSnapshotResponse(request.variantIds().getFirst(), 1L, 1L, 1L,
                     "P", "Product", "Variant", "SKU", null, new BigDecimal("100"), 10,
-                    "ACTIVE", "ACTIVE", "ACTIVE"));
+                    "ACTIVE", "ACTIVE", "ACTIVE", 10));
         });
     }
 
@@ -107,7 +107,7 @@ class CartApplicationServiceTest {
             VariantSnapshotBatchRequest request = invocation.getArgument(0);
             return request.variantIds().stream().map(id -> new VariantSnapshotResponse(id, id, 1L, 1L, "P",
                     "Mooncake " + id, "Box", "SKU" + id, null, new BigDecimal("100"), 10,
-                    id == 702L ? "INACTIVE" : "ACTIVE", "ACTIVE", "ACTIVE")).toList();
+                    id == 702L ? "INACTIVE" : "ACTIVE", "ACTIVE", "ACTIVE", 10)).toList();
         }).when(catalog).getVariantSnapshots(any());
         when(catalog.getStoreSummary(1L))
                 .thenReturn(new StoreSummaryResponse(1L, 1L, "S1", "Store 1", "s1", null, "ACTIVE"));
@@ -120,7 +120,7 @@ class CartApplicationServiceTest {
                             price, List.of())), List.of());
         });
 
-        var priced = carts.priceCart(customerId);
+        var priced = carts.priceCart(carts.getCart(customerId).items(), true);
 
         assertThat(priced.totalAmount()).isEqualByComparingTo("100");
         assertThat(priced.stores()).singleElement().satisfies(store -> assertThat(store.items())
@@ -141,7 +141,7 @@ class CartApplicationServiceTest {
             return request.variantIds().stream().map(id -> new VariantSnapshotResponse(id, id, id - 500,
                     id - 500, "P", "Mooncake", "Box", "SKU", null,
                     new BigDecimal(id == 501L ? "100.60" : "50.60"), 10,
-                    "ACTIVE", "ACTIVE", "ACTIVE")).toList();
+                    "ACTIVE", "ACTIVE", "ACTIVE", 10)).toList();
         }).when(catalog).getVariantSnapshots(any());
         when(catalog.getStoreSummary(1L))
                 .thenReturn(new StoreSummaryResponse(1L, 1L, "S1", "Store 1", "s1", null, "ACTIVE"));
@@ -158,7 +158,7 @@ class CartApplicationServiceTest {
         });
         carts.addItem(10003L, new AddCartItemRequest(501L, 1));
         carts.addItem(10003L, new AddCartItemRequest(502L, 1));
-        var priced = carts.priceCart(10003L);
+        var priced = carts.priceCart(carts.getCart(10003L).items(), true);
         assertThat(priced.stores()).hasSize(2);
         assertThat(priced.subtotal()).isEqualByComparingTo("151.20");
         assertThat(priced.totalAmount()).isEqualByComparingTo("152");

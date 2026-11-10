@@ -33,7 +33,7 @@ import org.springframework.web.bind.annotation.RestController;
  * của store
  */
 @RestController
-@RequestMapping("/api/products/{productId}/variants")
+@RequestMapping("/api")
 public class ProductVariantController {
 
     private static final Set<String> SORT_FIELDS = Set.of("basePrice", "variantName", "id");
@@ -49,7 +49,7 @@ public class ProductVariantController {
         return principal == null ? null : principal.getUserId();
     }
 
-    @GetMapping
+    @GetMapping("/products/{productId}/variants")
     public ResponseEntity<PageResponse<VariantResponse>> getVariants(
             @PathVariable Long productId,
             PageQuery pageQuery,
@@ -58,14 +58,22 @@ public class ProductVariantController {
                 pageQuery.toPageable(SORT_FIELDS, DEFAULT_SORT)));
     }
 
-    @GetMapping("/{variantId}")
+    @GetMapping("/products/{productId}/variants/{variantId}")
     public ResponseEntity<VariantResponse> getVariant(@PathVariable Long productId,
             @PathVariable Long variantId,
             @AuthenticationPrincipal UserPrincipal principal) {
         return ResponseEntity.ok(variantService.getVariant(productId, variantId, userIdOf(principal)));
     }
 
-    @PostMapping
+    @GetMapping("/stores/{storeId}/variants/{variantId}")
+    public VariantResponse getOwnedVariant(@PathVariable Long storeId, @PathVariable Long variantId,
+                                           @AuthenticationPrincipal UserPrincipal principal) {
+        if (principal == null) throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.UNAUTHORIZED);
+        return variantService.getOwnedVariant(storeId, variantId, principal.getUserId());
+    }
+
+    @PostMapping("/products/{productId}/variants")
     public ResponseEntity<VariantResponse> createVariant(@PathVariable Long productId,
             @Valid @RequestBody CreateVariantRequest request,
             @AuthenticationPrincipal UserPrincipal principal) {
@@ -74,7 +82,7 @@ public class ProductVariantController {
                 .body(response);
     }
 
-    @PatchMapping("/{variantId}")
+    @PatchMapping("/products/{productId}/variants/{variantId}")
     public ResponseEntity<VariantResponse> updateVariant(@PathVariable Long productId,
             @PathVariable Long variantId,
             @Valid @RequestBody UpdateVariantRequest request,

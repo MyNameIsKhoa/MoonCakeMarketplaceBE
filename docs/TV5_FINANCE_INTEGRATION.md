@@ -165,8 +165,15 @@ Until a refund matrix is agreed, ADMIN explicitly records an amount and a versio
 manual policy decision, which creates MANUAL_REVIEW. Pending and completed refunds
 reserve that amount against the successful HELD payment. A refund cannot exceed what
 remains available, or target a released payment. ADMIN can reject a pending proposal.
-Use stable reference `mss-refund-{refundId}` for the manual transfer and reconcile that
-reference before retrying any bank transfer with an uncertain outcome.
+Before the manual refund, the buyer saves a bank/MoMo destination in Identity
+(`PUT /api/users/me/payout-accounts/CUSTOMER`). ADMIN prepares each pending refund
+with `POST /api/payments/orders/{sellerOrderId}/refunds/{refundId}/prepare-transfer`.
+Commerce snapshots the beneficiary in its own DB once; later profile edits do not silently
+redirect this transfer. The admin-only `GET /api/payments/orders/{sellerOrderId}/transfer-instructions`
+returns the exact amount, frozen beneficiary, `MSSREFUND{id}` memo and VietQR image link.
+Legacy pending refunds must also be prepared before confirmation. If Identity has no account,
+the preparation returns `RECIPIENT_ACCOUNT_MISSING` and the refund remains pending.
+Reconcile the stable memo before retrying any bank transfer with an uncertain outcome.
 Only successful-transfer reference plus HTTPS evidence can confirm a refund; there is
 no automatic 100% calculation and no fake bank transfer. Ledger and audit retain both
 the policy snapshot and outcome. Pending refunds block settlement. Confirmed refunds
@@ -192,17 +199,26 @@ are snapshotted separately. Full refunds have no payout. Settlement requires buy
 acceptance or a recorded ADMIN decision on a post-delivery dispute, no blocking case,
 and seven days since the last recorded delivery.
 
-Payouts API/account entitlement has not been activated or verified. The current workflow
-is explicitly **manual**, with no payOS payout webhook and no automated transfer call:
+The current payout workflow is explicitly **manual**, with no payOS payout webhook or
+automated transfer call. A supplier saves its own destination with
+`PUT /api/users/me/payout-accounts/SUPPLIER` (Seller Center > Doanh thu & giải ngân):
 
 1. Create READY settlement after checking eligibility.
-2. Begin payout rechecks all blockers under the same per-order lock and creates a stable
-   manual reference `mss-settlement-{id}`. State becomes PROCESSING, funds remain HELD.
-3. The authorized operator makes one bank transfer and reconciles that reference first
+2. Begin payout rechecks all blockers under the same per-order lock, snapshots the supplier
+   destination from Identity and creates `MSSPAYOUT{id}`. State becomes PROCESSING, funds remain
+   HELD. Without an account, begin fails without changing the settlement. For legacy PROCESSING
+   rows lacking a snapshot, use `POST /api/payments/orders/{sellerOrderId}/settlements/{settlementId}/prepare-transfer`.
+3. The authorized operator reads the admin-only transfer instruction, checks the account holder,
+   account number, amount and memo in the bank app, transfers once, and reconciles that memo first
    if the result is uncertain. A second payout request never creates a new transfer.
 4. Confirm requires the successful bank reference and HTTPS proof. Only then does the
    settlement become SUCCESS and payment allocation become RELEASED. The fee and payout
    ledger entries plus confirmed refunds sum to the collected gross snapshot.
+
+The QR is a VietQR Quick Link, which prefills a transfer and sends the destination account,
+amount and memo to VietQR's image service. It is **not** proof of payment and does not verify
+the typed account holder. ADMIN must verify the name shown by the bank app and supply real
+bank evidence. Accounts are stored in Identity; transfer snapshots belong only to Commerce.
 
 A dispute or refund submitted before transfer moves an existing READY settlement to
 ON_HOLD. After the case and refunds finish, ADMIN runs settlement creation again to

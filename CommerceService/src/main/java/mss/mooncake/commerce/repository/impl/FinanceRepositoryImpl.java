@@ -13,6 +13,7 @@ import mss.mooncake.commerce.repository.FinanceRepository.CustomerPayment;
 import mss.mooncake.commerce.repository.FinanceRepository.CustomerPaymentItem;
 import mss.mooncake.commerce.repository.FinanceRepository.StockLine;
 import mss.mooncake.commerce.repository.FinanceRepository.SupplierPayout;
+import mss.mooncake.commerce.repository.FinanceRepository.TransferDestination;
 import mss.mooncake.commerce.dto.internal.FinanceOrderContext;
 import mss.mooncake.commerce.dto.internal.FinanceEvent;
 import mss.mooncake.commerce.dto.response.FinanceResponse;
@@ -217,6 +218,25 @@ public class FinanceRepositoryImpl implements FinanceRepository {
         return jdbc.queryForObject("SELECT order_no FROM customer_order WHERE order_id=?", String.class, orderId);
     }
 
+    @Override
+    public Long sellerOrderIdByNumber(String sellerOrderNo) {
+        return jdbc.query("SELECT seller_order_id FROM seller_order WHERE seller_order_no=?",
+                (rs, row) -> rs.getLong(1), sellerOrderNo).stream().findFirst().orElse(null);
+    }
+
+    @Override
+    public java.util.Map<Long, Long> reservedRefundAmounts(long sellerOrderId) {
+        return jdbc.query("""
+                SELECT p.payment_id, SUM(r.amount) AS reserved
+                FROM payment p JOIN refund r ON r.payment_id=p.payment_id
+                WHERE p.seller_order_id=? AND r.status<>'REJECTED' GROUP BY p.payment_id
+                """, (org.springframework.jdbc.core.ResultSetExtractor<java.util.Map<Long, Long>>) rs -> {
+            var amounts = new java.util.HashMap<Long, Long>();
+            while (rs.next()) amounts.put(rs.getLong(1), rs.getBigDecimal(2).longValueExact());
+            return amounts;
+        }, sellerOrderId);
+    }
+
     public String sellerOrderNumber(long sellerOrderId) {
         return jdbc.queryForObject("SELECT seller_order_no FROM seller_order WHERE seller_order_id=?", String.class,
                 sellerOrderId);
@@ -355,6 +375,22 @@ public class FinanceRepositoryImpl implements FinanceRepository {
                         rs.getString("rounding_rule"), rs.getBigDecimal("fee_amount").longValueExact(),
                         rs.getBigDecimal("supplier_payout_amount").longValueExact(), rs.getString("status"),
                         rs.getBigDecimal("refunded_amount").longValueExact()), orderId);
+    }
+
+    public List<TransferDestination> transferDestinations(long orderId) {
+        return jdbc.query("""
+                SELECT 'REFUND' AS kind,r.refund_id AS transfer_id,r.amount,r.status,r.transfer_reference,
+                       r.bank_bin,r.bank_name,r.bank_account_number,r.bank_account_holder
+                FROM refund r JOIN payment p ON p.payment_id=r.payment_id
+                WHERE p.seller_order_id=? AND r.status='MANUAL_REVIEW'
+                UNION ALL
+                SELECT 'PAYOUT',s.settlement_id,s.supplier_payout_amount,s.status,s.payout_reference,
+                       s.bank_bin,s.bank_name,s.bank_account_number,s.bank_account_holder
+                FROM settlement s WHERE s.seller_order_id=? AND s.status='PROCESSING'
+                """, (rs, n) -> new TransferDestination(rs.getString("kind"), rs.getLong("transfer_id"),
+                        rs.getBigDecimal("amount").longValueExact(), rs.getString("status"),
+                        rs.getString("transfer_reference"), rs.getString("bank_bin"), rs.getString("bank_name"),
+                        rs.getString("bank_account_number"), rs.getString("bank_account_holder")), orderId, orderId);
     }
 
     public List<SupplierPayout> supplierPayouts(long supplierId) {

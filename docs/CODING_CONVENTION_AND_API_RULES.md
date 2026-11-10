@@ -259,7 +259,7 @@ Auth đã có native JWT + password hash; repo chưa có refresh/session/revocat
 | AU02 T | `POST /api/auth/logout` | Session credential | Session hiện tại | 204 | Chỉ hứa revoke khi server có revoke/session mechanism; xóa token FE không vô hiệu JWT đã bị lấy cắp. |
 | AU03 T | `POST /api/auth/password-change` | USER | oldPassword, newPassword | 204 | Xác thực lại, policy password và revoke-session strategy. |
 | AU04 T | `POST /api/auth/password-reset-requests` | PUBLIC | email | 202 generic | Cần email provider + token reset một lần có expiry; không tiết lộ email tồn tại. |
-| AU05 T | `POST /api/auth/password-resets` | Reset credential | resetToken, newPassword | 204 | Token một lần, không nhận userId làm quyền reset. |
+| AU05 T | `POST /api/auth/password-resets` | Reset credential | email, code, newPassword | 204 | OTP 6 chữ số gắn email, dùng một lần; vô hiệu sau 5 lần sai, không nhận userId làm quyền reset. |
 
 AU01–AU05 là phần mở rộng cần chốt cơ chế, không phải các API đã có hoặc yêu cầu MVP được tự động thêm vào.
 

@@ -122,6 +122,10 @@ services:
       CATALOG_DB_PASSWORD: ${MSSQL_SA_PASSWORD:?Set a strong SQL Server password in .env}
       # Catalog gọi Identity (Feign) để xác minh supplier / chủ store.
       IDENTITY_SERVICE_URL: http://identity-service:8081
+      CATALOG_UPLOAD_DIR: /app/uploads/catalog
+      CATALOG_PUBLIC_BASE_URL: ${CATALOG_PUBLIC_BASE_URL:-http://localhost:8080}
+    volumes:
+      - catalog-image-data:/app/uploads/catalog
     ports: ["8082:8082"]
     restart: on-failure
     depends_on:
@@ -203,5 +207,6 @@ services:
 volumes:
   identity-db-data:
   catalog-db-data:
+  catalog-image-data:
   commerce-db-data:
   rfq-db-data:
