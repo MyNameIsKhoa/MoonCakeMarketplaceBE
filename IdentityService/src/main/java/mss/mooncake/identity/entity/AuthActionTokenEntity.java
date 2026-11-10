@@ -32,6 +32,9 @@ public class AuthActionTokenEntity extends BaseIdentityEntity {
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
+    @Column(name = "failed_attempts", nullable = false)
+    private int failedAttempts;
+
     protected AuthActionTokenEntity() { }
 
     public AuthActionTokenEntity(Long userId, String tokenHash, AuthTokenPurpose purpose,
@@ -49,5 +52,7 @@ public class AuthActionTokenEntity extends BaseIdentityEntity {
     public LocalDateTime getExpiresAt() { return expiresAt; }
     public LocalDateTime getUsedAt() { return usedAt; }
     public LocalDateTime getCreatedAt() { return createdAt; }
+    public int getFailedAttempts() { return failedAttempts; }
+    public void recordFailedAttempt() { failedAttempts++; }
     public void setUsedAt(LocalDateTime usedAt) { this.usedAt = usedAt; }
 }

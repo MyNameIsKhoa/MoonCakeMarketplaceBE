@@ -12,6 +12,10 @@ import jakarta.persistence.LockModeType;
 
 public interface AuthActionTokenRepository extends JpaRepository<AuthActionTokenEntity, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select t from AuthActionTokenEntity t where t.userId = :userId and t.purpose = :purpose and t.usedAt is null")
+    Optional<AuthActionTokenEntity> findUsableTokenByUserForUpdate(@Param("userId") Long userId,
+                                                                 @Param("purpose") AuthTokenPurpose purpose);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select t from AuthActionTokenEntity t where t.tokenHash = :tokenHash and t.purpose = :purpose and t.usedAt is null")
     Optional<AuthActionTokenEntity> findUsableTokenForUpdate(@Param("tokenHash") String tokenHash,
                                                               @Param("purpose") AuthTokenPurpose purpose);

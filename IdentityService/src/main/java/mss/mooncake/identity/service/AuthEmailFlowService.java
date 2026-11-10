@@ -7,5 +7,5 @@ public interface AuthEmailFlowService {
     void requestVerification(String email);
     void verifyEmail(String rawToken);
     void requestPasswordReset(String email);
-    void resetPassword(String rawToken, String newPassword);
+    void resetPassword(String email, String code, String newPassword);
 }

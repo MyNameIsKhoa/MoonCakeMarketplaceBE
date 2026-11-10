@@ -8,6 +8,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.Locale;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import mss.mooncake.identity.entity.AuthActionTokenEntity;
 import mss.mooncake.identity.entity.UserEntity;
 import mss.mooncake.identity.enums.AuthTokenPurpose;
@@ -30,12 +32,14 @@ public class AuthEmailFlowServiceImpl implements AuthEmailFlowService {
     private final OutboundEmailService emailService;
     private final PasswordEncoder passwordEncoder;
     private final String frontendUrl;
+    private final byte[] otpHashKey;
     private final int verificationTtlMinutes;
     private final int resetTtlMinutes;
 
     public AuthEmailFlowServiceImpl(UserRepository userRepository, AuthActionTokenRepository tokenRepository,
                                 OutboundEmailService emailService, PasswordEncoder passwordEncoder,
                                 @Value("${app.frontend-url:http://localhost:3000}") String frontendUrl,
+                                @Value("${security.jwt.secret}") String jwtSecret,
                                 @Value("${app.auth.email-verification-ttl-minutes:1440}") int verificationTtlMinutes,
                                 @Value("${app.auth.password-reset-ttl-minutes:30}") int resetTtlMinutes) {
         this.userRepository = userRepository;
@@ -43,6 +47,7 @@ public class AuthEmailFlowServiceImpl implements AuthEmailFlowService {
         this.emailService = emailService;
         this.passwordEncoder = passwordEncoder;
         this.frontendUrl = frontendUrl.replaceAll("/+$", "");
+        this.otpHashKey = jwtSecret.getBytes(StandardCharsets.UTF_8);
         this.verificationTtlMinutes = verificationTtlMinutes;
         this.resetTtlMinutes = resetTtlMinutes;
     }
@@ -83,22 +88,31 @@ public class AuthEmailFlowServiceImpl implements AuthEmailFlowService {
         userRepository.findByEmail(normalize(email))
                 .filter(user -> user.isEmailVerified() && user.getStatus() == UserStatus.ACTIVE)
                 .ifPresent(user -> {
-                    String rawToken = issue(user, AuthTokenPurpose.PASSWORD_RESET, resetTtlMinutes);
-                    if (rawToken == null) return;
-                    emailService.send(user.getEmail(), "Đặt lại mật khẩu MoonCake Marketplace",
-                            "Chúng tôi nhận được yêu cầu đặt lại mật khẩu. Mở liên kết sau để tạo mật khẩu mới:\n"
-                                    + frontendUrl + "/reset-password?token=" + rawToken
-                                    + "\n\nLiên kết chỉ dùng một lần và hết hạn sau " + resetTtlMinutes
-                                    + " phút. Nếu bạn không yêu cầu, hãy bỏ qua email này.");
+                    String code = issue(user, AuthTokenPurpose.PASSWORD_RESET, resetTtlMinutes);
+                    if (code == null) return;
+                    emailService.send(user.getEmail(), "Mã đặt lại mật khẩu MoonCake Marketplace",
+                            "Mã đặt lại mật khẩu của bạn là: " + code
+                                    + "\n\nMã có hiệu lực trong " + resetTtlMinutes
+                                    + " phút và chỉ sử dụng được một lần. Nếu bạn không yêu cầu, hãy bỏ qua email này.");
                 });
     }
 
     @Override
-    @Transactional
-    public void resetPassword(String rawToken, String newPassword) {
-        AuthActionTokenEntity token = consume(rawToken, AuthTokenPurpose.PASSWORD_RESET);
-        UserEntity user = userRepository.findById(token.getUserId())
-                .orElseThrow(() -> new UnauthorizedException("Invalid or expired password reset token"));
+    @Transactional(noRollbackFor = UnauthorizedException.class)
+    public void resetPassword(String email, String code, String newPassword) {
+        UserEntity user = userRepository.findByEmail(normalize(email))
+                .filter(candidate -> candidate.isEmailVerified() && candidate.getStatus() == UserStatus.ACTIVE)
+                .orElseThrow(() -> new UnauthorizedException("Invalid or expired password reset code"));
+        AuthActionTokenEntity token = tokenRepository
+                .findUsableTokenByUserForUpdate(user.getId(), AuthTokenPurpose.PASSWORD_RESET)
+                .filter(candidate -> candidate.getExpiresAt().isAfter(LocalDateTime.now(ZoneOffset.UTC)))
+                .orElseThrow(() -> new UnauthorizedException("Invalid or expired password reset code"));
+        if (!MessageDigest.isEqual(token.getTokenHash().getBytes(StandardCharsets.UTF_8),
+                resetCodeHash(user.getEmail(), code).getBytes(StandardCharsets.UTF_8))) {
+            token.recordFailedAttempt();
+            if (token.getFailedAttempts() >= 5) token.setUsedAt(LocalDateTime.now(ZoneOffset.UTC));
+            throw new UnauthorizedException("Invalid or expired password reset code");
+        }
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         user.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
         token.setUsedAt(LocalDateTime.now(ZoneOffset.UTC));
@@ -112,10 +126,15 @@ public class AuthEmailFlowServiceImpl implements AuthEmailFlowService {
                 .orElse(false);
         if (recentlyIssued) return null;
         tokenRepository.deleteByUserIdAndPurpose(user.getId(), purpose);
+        tokenRepository.flush();
         byte[] bytes = new byte[32];
         RANDOM.nextBytes(bytes);
-        String rawToken = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-        tokenRepository.save(new AuthActionTokenEntity(user.getId(), hash(rawToken), purpose,
+        String rawToken = purpose == AuthTokenPurpose.PASSWORD_RESET
+                ? String.format(Locale.ROOT, "%06d", RANDOM.nextInt(1_000_000))
+                : Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        String tokenHash = purpose == AuthTokenPurpose.PASSWORD_RESET
+                ? resetCodeHash(user.getEmail(), rawToken) : hash(rawToken);
+        tokenRepository.save(new AuthActionTokenEntity(user.getId(), tokenHash, purpose,
                 now.plusMinutes(ttlMinutes), now));
         return rawToken;
     }
@@ -136,6 +155,17 @@ public class AuthEmailFlowServiceImpl implements AuthEmailFlowService {
             return java.util.HexFormat.of().formatHex(digest);
         } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException("SHA-256 is unavailable", ex);
+        }
+    }
+
+    private String resetCodeHash(String email, String code) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(otpHashKey, "HmacSHA256"));
+            String scopedCode = AuthTokenPurpose.PASSWORD_RESET + ":" + normalize(email) + ":" + code;
+            return java.util.HexFormat.of().formatHex(mac.doFinal(scopedCode.getBytes(StandardCharsets.UTF_8)));
+        } catch (java.security.GeneralSecurityException ex) {
+            throw new IllegalStateException("OTP hashing is unavailable", ex);
         }
     }
 

@@ -33,7 +33,7 @@ class AuthEmailFlowIntegrationTest {
     }
 
     @Test
-    void verificationAndResetTokensAreSingleUse() throws Exception {
+    void verificationAndResetCodesAreSingleUse() throws Exception {
         String email = "email-flow-" + java.util.UUID.randomUUID() + "@example.com";
         mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"fullName\":\"Email Flow\",\"email\":\"" + email
@@ -45,7 +45,7 @@ class AuthEmailFlowIntegrationTest {
 
         var messages = org.mockito.ArgumentCaptor.forClass(SimpleMailMessage.class);
         verify(mailSender).send(messages.capture());
-        String verificationToken = tokenFrom(messages.getValue(), "verify-email");
+        String verificationToken = verificationTokenFrom(messages.getValue());
         String verifyBody = "{\"token\":\"" + verificationToken + "\"}";
         mvc.perform(post("/api/auth/email/verify").contentType(MediaType.APPLICATION_JSON).content(verifyBody))
                 .andExpect(status().isNoContent());
@@ -58,8 +58,8 @@ class AuthEmailFlowIntegrationTest {
                         .content("{\"email\":\"" + email + "\"}"))
                 .andExpect(status().isAccepted());
         verify(mailSender, times(2)).send(messages.capture());
-        String resetToken = tokenFrom(messages.getValue(), "reset-password");
-        String resetBody = "{\"token\":\"" + resetToken + "\",\"newPassword\":\"newPassword123\"}";
+        String resetCode = codeFrom(messages.getValue());
+        String resetBody = resetBody(email, resetCode);
         mvc.perform(post("/api/auth/password-resets").contentType(MediaType.APPLICATION_JSON).content(resetBody))
                 .andExpect(status().isNoContent());
         mvc.perform(post("/api/auth/password-resets").contentType(MediaType.APPLICATION_JSON).content(resetBody))
@@ -71,8 +71,51 @@ class AuthEmailFlowIntegrationTest {
                 .andExpect(status().isOk());
     }
 
-    private String tokenFrom(SimpleMailMessage message, String page) {
-        var matcher = Pattern.compile("/" + page + "\\?token=([A-Za-z0-9_-]+)")
+    @Test
+    void resetCodeCannotResetAnotherAccountAndLocksAfterFiveWrongAttempts() throws Exception {
+        String email = "otp-owner-" + java.util.UUID.randomUUID() + "@example.com";
+        mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"fullName\":\"OTP Owner\",\"email\":\"" + email + "\",\"password\":\"password123\"}"))
+                .andExpect(status().isCreated());
+        var messages = org.mockito.ArgumentCaptor.forClass(SimpleMailMessage.class);
+        verify(mailSender).send(messages.capture());
+        mvc.perform(post("/api/auth/email/verify").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"token\":\"" + verificationTokenFrom(messages.getValue()) + "\"}"))
+                .andExpect(status().isNoContent());
+        mvc.perform(post("/api/auth/password-reset-requests").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"" + email + "\"}"))
+                .andExpect(status().isAccepted());
+        verify(mailSender, times(2)).send(messages.capture());
+        String code = codeFrom(messages.getValue());
+        mvc.perform(post("/api/auth/password-resets").contentType(MediaType.APPLICATION_JSON)
+                .content(resetBody("other@example.com", code)))
+                .andExpect(status().isUnauthorized());
+        String wrongCode = code.equals("000000") ? "000001" : "000000";
+        for (int i = 0; i < 5; i++) {
+            mvc.perform(post("/api/auth/password-resets").contentType(MediaType.APPLICATION_JSON)
+                    .content(resetBody(email, wrongCode)))
+                    .andExpect(status().isUnauthorized());
+        }
+        mvc.perform(post("/api/auth/password-resets").contentType(MediaType.APPLICATION_JSON)
+                .content(resetBody(email, code)))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"" + email + "\",\"password\":\"password123\"}"))
+                .andExpect(status().isOk());
+    }
+
+    private String resetBody(String email, String code) {
+        return "{\"email\":\"" + email + "\",\"code\":\"" + code + "\",\"newPassword\":\"newPassword123\"}";
+    }
+
+    private String verificationTokenFrom(SimpleMailMessage message) {
+        var matcher = Pattern.compile("/verify-email\\?token=([A-Za-z0-9_-]+)").matcher(message.getText());
+        org.junit.jupiter.api.Assertions.assertTrue(matcher.find());
+        return matcher.group(1);
+    }
+
+    private String codeFrom(SimpleMailMessage message) {
+        var matcher = Pattern.compile("(?m)^.*?(\\d{6})\\s*$")
                 .matcher(message.getText());
         org.junit.jupiter.api.Assertions.assertTrue(matcher.find());
         return matcher.group(1);

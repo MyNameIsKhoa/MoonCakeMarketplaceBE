@@ -25,9 +25,9 @@ Native registration creates the account as unverified and emails a verification 
 
 To resend verification, call `POST /api/auth/email/verification-requests` with `{"email":"person@example.com"}`. It always responds `202 Accepted` regardless of whether the address needs a message.
 
-To request a reset, call `POST /api/auth/password-reset-requests` with the same email body. It also always responds `202 Accepted`, including for unknown addresses. The reset link directs the user to `/reset-password?token=...`; the client collects a new password and posts `{"token":"...","newPassword":"..."}` to `POST /api/auth/password-resets`. A successful verification or password reset responds `204 No Content`. Tokens are random, stored only as SHA-256 hashes, expire, and are single-use. A new request invalidates the older token of the same type.
+To request a reset, call `POST /api/auth/password-reset-requests` with the same email body. It always responds `202 Accepted`, including for unknown addresses. For an eligible account, Identity emails a six-digit code. The client posts `{"email":"person@example.com","code":"123456","newPassword":"..."}` to `POST /api/auth/password-resets`. The code is bound to the email, expires after 10 minutes by default, and is single-use. Five incorrect attempts invalidate it. Requests are limited to one per minute; a new request invalidates the older code. Flyway V8 adds the persistent failed-attempt counter.
 
-Set `APP_FRONTEND_URL` to the public origin of the frontend. Add frontend routes `/verify-email` and `/reset-password` to read the token and call the matching API endpoint.
+Set `APP_FRONTEND_URL` to the public origin of the frontend. `/verify-email` reads the email verification token. Password reset uses the code form at `/forgot-password`; `/reset-password` opens the same form for older bookmarks.
 
 ## Real outbound email
 
