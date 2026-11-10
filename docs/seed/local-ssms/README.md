@@ -5,7 +5,7 @@ Ba file `.txt` trong thư mục này mở bằng SSMS và chạy bằng **Execut
 1. **Dừng các Spring Boot service** trong IntelliJ. Chạy [`01_reset_3db.txt`](01_reset_3db.txt) trong SSMS: xóa và tạo lại `mss_identity`, `mss_catalog_store`, `mss_commerce`. **Mọi dữ liệu cũ, kể cả tài khoản, sẽ mất.** Bỏ qua bước này nếu không muốn reset.
 2. Chạy lần lượt **Identity → Catalog → Commerce** trong IntelliJ. Đợi cả ba báo `Started`; Flyway tự tạo/cập nhật bảng. **Không chạy tay các file `V1__...sql`, `V2__...sql`**. Nếu DB đã có bảng từ lần trước, chỉ cần bảo đảm Flyway chạy thành công.
 3. Chạy [`02_identity_demo.txt`](02_identity_demo.txt) trong SSMS để thêm 15 supplier demo.
-4. Chạy [`03_catalog_demo.txt`](03_catalog_demo.txt) trong SSMS để thêm 15 gian hàng, 34 sản phẩm/variant và phí giao hàng demo. Cuối file có câu `SELECT` kiểm tra số lượng. Chạy lại hai file seed sau khi đã nạp bản cũ để cập nhật tên/logo/banner, không cần reset DB.
+4. Chạy [`03_catalog_demo.txt`](03_catalog_demo.txt) trong SSMS để thêm 15 gian hàng, chi nhánh chính, 34 sản phẩm/variant, khuyến mãi đang chạy và phí giao hàng demo. Cuối file có câu `SELECT` kiểm tra số lượng. Chạy lại hai file seed sau khi đã nạp bản cũ để cập nhật tên/mô tả/khuyến mãi, không cần reset DB.
 
 Nếu chạy hai file seed bằng `sqlcmd` thay vì SSMS, bắt buộc thêm `-f 65001` để đọc nội dung UTF-8; ví dụ `sqlcmd -S localhost -E -C -I -b -f 65001 -i docs/seed/local-ssms/02_identity_demo.txt` rồi chạy file `03_catalog_demo.txt` tương tự. Có thể chạy lại hai file sau khi đã lỡ dùng bảng mã mặc định: chúng chỉ bổ sung bản ghi demo còn thiếu và sửa tên/mô tả tiếng Việt của đúng các mã demo, không reset đơn hàng hoặc tồn kho.
 

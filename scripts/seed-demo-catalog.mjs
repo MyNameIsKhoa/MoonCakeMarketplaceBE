@@ -64,6 +64,7 @@ const STORES = [
     bannerUrl: P('banh-matcha-cao-cap'),
     description: 'Bánh trung thu Chợ Lớn, nổi tiếng với nhân thập cẩm và hương vị người Hoa.',
     branch: { name: 'Đồng Khánh Chợ Lớn', addressLine: '200 Trần Hưng Đạo', ward: 'Phường 11', district: 'Quận 5', city: 'TP. Hồ Chí Minh', openingHours: '08:00–21:00' },
+    promotion: { name: 'Tết Trung Thu Chợ Lớn: Giảm 8%', discountPercent: 8 },
     products: [
       { key: 'MTCC', name: 'Bánh nướng matcha cao cấp', category: 'hien-dai', image: P('banh-matcha-cao-cap'),
         description: 'Vỏ bánh trà xanh Uji, nhân đậu đỏ ít ngọt.',
@@ -81,6 +82,7 @@ const STORES = [
     bannerUrl: P('banh-mini-sua-dua'),
     description: 'Hỷ Lâm Môn Bakery từ 1984, bánh trung thu nướng thủ công theo công thức gia truyền.',
     branch: { name: 'Hỷ Lâm Môn Quận 10', addressLine: '412 Sư Vạn Hạnh', ward: 'Phường 9', district: 'Quận 10', city: 'TP. Hồ Chí Minh', openingHours: '07:00–21:00' },
+    promotion: { name: 'Ưu đãi gia truyền: Giảm 10%', discountPercent: 10 },
     products: [
       { key: 'SDLD', name: 'Bánh nướng mini sữa dừa', category: 'thieu-nhi', image: P('banh-mini-sua-dua'),
         description: 'Bánh mini 50g nhân sữa dừa lá dứa, vừa miệng cho bé.',
@@ -98,6 +100,7 @@ const STORES = [
     bannerUrl: P('banh-deo-hat-sen'),
     description: 'Đức Phát Bakery, thương hiệu bánh người Hoa với bánh nướng nhân jambon đặc trưng.',
     branch: { name: 'Đức Phát Quận 3', addressLine: '139 Hai Bà Trưng', ward: 'Võ Thị Sáu', district: 'Quận 3', city: 'TP. Hồ Chí Minh', openingHours: '07:00–21:00' },
+    promotion: { name: 'Đoàn viên Đức Phát: Giảm 8%', discountPercent: 8 },
     products: [
       { key: 'TCJB', name: 'Bánh nướng thập cẩm jambon', category: 'truyen-thong', image: P('banh-nuong-thap-cam'),
         description: 'Nhân thập cẩm kết hợp jambon, đậm vị truyền thống.',
@@ -133,6 +136,7 @@ const STORES = [
     bannerUrl: P('banh-chay-dau-xanh'),
     description: 'Bánh trung thu chay thanh tịnh, nguyên liệu thực vật, ít đường.',
     branch: { name: 'Khiết Minh Tân Bình', addressLine: '55 Trường Chinh', ward: 'Phường 12', district: 'Tân Bình', city: 'TP. Hồ Chí Minh', openingHours: '08:00–20:30' },
+    promotion: { name: 'Thanh tịnh mùa trăng: Giảm 10%', discountPercent: 10 },
     products: [
       { key: 'CDX', name: 'Bánh chay đậu xanh', category: 'chay', image: P('banh-chay-dau-xanh'),
         description: 'Nhân đậu xanh sên tay, vỏ bánh dầu thực vật.',
@@ -149,37 +153,42 @@ const STORES = [
   {
     key: 'nhu-lan', name: 'Như Lan', logoUrl: `${IMG}/brands/stores/nhu-lan-logo.svg`,
     bannerUrl: `${IMG}/brands/stores/nhu-lan-banner.webp`,
-    description: 'Gian hàng tham chiếu để thử giao diện; ảnh, giá và người bán chỉ là dữ liệu mẫu.',
-    products: [{ key: 'TC', name: 'Bánh nướng thập cẩm (demo)', category: 'truyen-thong',
-      image: BP('nhu-lan-thap-cam'), description: 'Sản phẩm và giá minh họa.', variants: [['Bánh 150g minh họa', 155000, 50]] }]
+    description: 'Hương vị bánh Trung thu Sài Gòn lâu đời, nổi tiếng với bánh nướng thập cẩm gà quay và dẻo hạt sen.',
+    promotion: { name: 'Ưu đãi Sài Gòn xưa: Giảm 8%', discountPercent: 8 },
+    products: [{ key: 'TC', name: 'Bánh nướng thập cẩm gà quay', category: 'truyen-thong',
+      image: BP('nhu-lan-thap-cam'), description: 'Bánh nướng nhân thập cẩm gà quay chuẩn vị Sài Gòn truyền thống.', variants: [['Bánh 200g', 185000, 50]] }]
   },
   {
     key: 'madame-huong', name: 'Madame Hương', logoUrl: `${IMG}/brands/stores/madame-huong-logo.svg`,
     bannerUrl: `${IMG}/brands/stores/madame-huong-banner.webp`,
-    description: 'Gian hàng tham chiếu, không đại diện nhà bán chính thức.',
-    products: [{ key: 'CS', name: 'Bánh cốm sen (demo)', category: 'hien-dai',
-      image: BP('madame-huong-com-sen'), description: 'Sản phẩm và giá minh họa.', variants: [['Bánh 150g minh họa', 165000, 45]] }]
+    description: 'Sự giao thoa tinh tế giữa nghệ thuật làm bánh Pháp và hương vị cốm non, hạt sen truyền thống Hà Thành.',
+    promotion: { name: 'Quà biếu Phố Cổ: Giảm 8%', discountPercent: 8 },
+    products: [{ key: 'CS', name: 'Bánh cốm xanh hạt sen', category: 'hien-dai',
+      image: BP('madame-huong-com-sen'), description: 'Hương vị cốm non làng Vòng kết hợp nhân hạt sen bùi thơm đặc trưng mùa thu Hà Nội.', variants: [['Bánh 150g', 185000, 45]] }]
   },
   {
     key: 'brodard', name: 'Brodard', logoUrl: `${IMG}/brands/stores/brodard-logo.svg`,
     bannerUrl: `${IMG}/brands/stores/brodard-banner.webp`,
-    description: 'Gian hàng tham chiếu, không đại diện nhà bán chính thức.',
-    products: [{ key: 'HS', name: 'Bánh hải sản (demo)', category: 'cao-cap',
-      image: BP('brodard-hai-san'), description: 'Sản phẩm và giá minh họa.', variants: [['Bánh 200g minh họa', 240000, 35]] }]
+    description: 'Thương hiệu bánh danh tiếng từ năm 1948, kết hợp phong cách ẩm thực Pháp tinh tế cùng hương vị Á Đông.',
+    promotion: { name: 'Ưu đãi Hoàng Gia: Giảm 10%', discountPercent: 10 },
+    products: [{ key: 'HS', name: 'Bánh hải sản xốt bào ngư', category: 'cao-cap',
+      image: BP('brodard-hai-san'), description: 'Bánh nướng cao cấp nhân hải sản và xốt bào ngư đậm vị.', variants: [['Bánh 200g', 240000, 35]] }]
   },
   {
     key: 'kidos', name: "KIDO's Bakery", logoUrl: `${IMG}/brands/stores/kidos-logo.svg`,
     bannerUrl: `${IMG}/brands/stores/kidos-banner.webp`,
-    description: 'Gian hàng tham chiếu, không đại diện nhà bán chính thức.',
-    products: [{ key: 'MTC', name: 'Bánh trà xanh phô mai (demo)', category: 'hien-dai',
-      image: BP('kidos-tra-xanh-pho-mai'), description: 'Sản phẩm và giá minh họa.', variants: [['Bánh 150g minh họa', 160000, 50]] }]
+    description: 'Bộ sưu tập bánh Trung thu hiện đại với nhân xốt thượng hạng và hương vị trà xanh, phô mai trẻ trung.',
+    promotion: { name: 'Đón trăng KIDO: Giảm 10%', discountPercent: 10 },
+    products: [{ key: 'MTC', name: 'Bánh trà xanh phô mai', category: 'hien-dai',
+      image: BP('kidos-tra-xanh-pho-mai'), description: 'Sự kết hợp hài hòa giữa vỏ bánh trà xanh thanh mát và nhân phô mai béo dịu.', variants: [['Bánh 150g', 160000, 50]] }]
   },
   {
     key: 'maison', name: 'Maison', logoUrl: `${IMG}/brands/stores/maison-logo.svg`,
     bannerUrl: `${IMG}/brands/stores/maison-banner.webp`,
-    description: 'Gian hàng tham chiếu, không đại diện nhà bán chính thức.',
-    products: [{ key: 'HQ', name: 'Hộp quà Trung thu (demo)', category: 'cao-cap',
-      image: BP('maison-hop-qua'), description: 'Sản phẩm và giá minh họa.', variants: [['Hộp 4 bánh minh họa', 890000, 30]] }]
+    description: 'Dòng hộp quà bánh Trung thu phong cách Hồng Kông hiện đại, thiết kế trang nhã dành cho quà biếu doanh nghiệp.',
+    promotion: { name: 'Ưu đãi hộp quà Maison: Giảm 10%', discountPercent: 10 },
+    products: [{ key: 'HQ', name: 'Hộp quà Trung thu Maison', category: 'cao-cap',
+      image: BP('maison-hop-qua'), description: 'Hộp quà 4 bánh Trung thu cao cấp với thiết kế tinh tế, sang trọng cho mùa đoàn viên.', variants: [['Hộp 4 bánh', 890000, 30]] }]
   }
 ];
 
@@ -220,7 +229,7 @@ async function seedStore(def, adminToken, categoryIdBySlug) {
   let token = await login(email, SUPPLIER_PASSWORD);
 
   // Supplier profile → admin duyệt VERIFIED (bỏ qua nếu đã có/đã duyệt).
-  let profile = await api('POST', '/api/supplier-profile', { token, body: { companyName: `Công ty ${def.name} (demo)`, taxCode: `DEMO-${def.key.toUpperCase()}` } });
+  let profile = await api('POST', '/api/supplier-profile', { token, body: { companyName: `Công ty ${def.name}`, taxCode: `DEMO-${def.key.toUpperCase()}` } });
   if (![200, 201].includes(profile.status)) {
     profile = await api('GET', '/api/supplier-profile', { token });
     if (profile.status !== 200) throw new Error(`supplier profile ${email} -> HTTP ${profile.status}: ${profile.text}`);

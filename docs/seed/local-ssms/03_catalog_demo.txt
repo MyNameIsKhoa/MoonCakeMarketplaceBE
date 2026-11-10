@@ -1,6 +1,6 @@
 -- SSMS LOCAL ONLY: mss_identity and mss_catalog_store must be on the SAME SQL Server instance.
 -- Chạy sau 02_identity_demo.txt, khi Catalog Flyway V6 đã tạo xong bảng.
--- Đây chỉ là dữ liệu thử; URL ảnh cần FE Vite đang phục vụ /images/demo/...
+-- URL ảnh phục vụ từ FE Vite (/images/demo/...).
 USE mss_catalog_store;
 GO
 IF DB_ID(N'mss_identity') IS NULL THROW 51320, 'Missing mss_identity database on this SQL Server.', 1;
@@ -31,14 +31,18 @@ INSERT INTO @categories (name, slug) VALUES
     (N'Bánh thiếu nhi', N'thieu-nhi');
 
 DECLARE @stores TABLE (store_code NVARCHAR(100) PRIMARY KEY, supplier_id_ref BIGINT,
-    name NVARCHAR(255), slug NVARCHAR(255), logo_url NVARCHAR(500), banner_url NVARCHAR(500));
+    name NVARCHAR(255), slug NVARCHAR(255), description NVARCHAR(2000),
+    logo_url NVARCHAR(500), banner_url NVARCHAR(500), shipping_fee DECIMAL(18,2));
 INSERT INTO @stores VALUES
     (N'DEMO-TRANG-MOC', @trangMocSupplierId, N'Trăng Mộc', N'demo-trang-moc',
-     N'/images/demo/stores/trang-moc-logo.svg', N'/images/demo/stores/trang-moc-banner.webp'),
+     N'Xưởng bánh Trung thu thủ công giữ trọn hương vị truyền thống và dòng bánh thuần chay thanh đạm.',
+     N'/images/demo/stores/trang-moc-logo.svg', N'/images/demo/stores/trang-moc-banner.webp', 25000),
     (N'DEMO-NGUYET-VIEN', @nguyetVienSupplierId, N'Nguyệt Viên', N'demo-nguyet-vien',
-     N'/images/demo/stores/nguyet-vien-logo.svg', N'/images/demo/stores/nguyet-vien-banner.webp'),
+     N'Thương hiệu bánh Trung thu hiện đại và hộp quà đoàn viên cao cấp dành cho gia đình, doanh nghiệp.',
+     N'/images/demo/stores/nguyet-vien-logo.svg', N'/images/demo/stores/nguyet-vien-banner.webp', 30000),
     (N'DEMO-SAO-NHO', @saoNhoSupplierId, N'Sao Nhỏ', N'demo-sao-nho',
-     N'/images/demo/stores/sao-nho-logo.svg', N'/images/demo/stores/sao-nho-banner.webp');
+     N'Tiệm bánh Trung thu mini tươi ngon với tạo hình ngộ nghĩnh và vị ngọt dịu dành cho thiếu nhi.',
+     N'/images/demo/stores/sao-nho-logo.svg', N'/images/demo/stores/sao-nho-banner.webp', 20000);
 
 DECLARE @products TABLE (store_code NVARCHAR(100), category_slug NVARCHAR(255),
     product_code NVARCHAR(100) PRIMARY KEY, name NVARCHAR(255), description NVARCHAR(MAX),
@@ -46,35 +50,35 @@ DECLARE @products TABLE (store_code NVARCHAR(100), category_slug NVARCHAR(255),
     base_price DECIMAL(18,2), stock_quantity INT);
 INSERT INTO @products VALUES
     (N'DEMO-TRANG-MOC', N'truyen-thong', N'DEMO-TM-THAP-CAM', N'Bánh nướng thập cẩm hai trứng',
-     N'Bánh trung thu nướng nhân thập cẩm và hai lòng đỏ trứng muối.',
-     N'DEMO-TM-THAP-CAM-150', N'Hộp 1 bánh 150 g', N'/images/demo/products/banh-nuong-thap-cam.webp', 165000, 80),
+     N'Bánh trung thu nướng nhân thập cẩm truyền thống kết hợp hai lòng đỏ trứng muối béo bùi.',
+     N'DEMO-TM-THAP-CAM-150', N'Hộp 1 bánh 150g', N'/images/demo/products/banh-nuong-thap-cam.webp', 165000, 80),
     (N'DEMO-TRANG-MOC', N'truyen-thong', N'DEMO-TM-HAT-SEN', N'Bánh dẻo hạt sen',
-     N'Bánh dẻo truyền thống nhân hạt sen dịu ngọt.',
-     N'DEMO-TM-HAT-SEN-150', N'Hộp 1 bánh 150 g', N'/images/demo/products/banh-deo-hat-sen.webp', 125000, 60),
+     N'Bánh dẻo truyền thống hương hoa bưởi thanh mát cùng nhân hạt sen sên mịn dịu ngọt.',
+     N'DEMO-TM-HAT-SEN-150', N'Hộp 1 bánh 150g', N'/images/demo/products/banh-deo-hat-sen.webp', 125000, 60),
     (N'DEMO-NGUYET-VIEN', N'hien-dai', N'DEMO-NV-LAVA', N'Bánh lava trứng muối',
-     N'Bánh trung thu hiện đại với nhân custard trứng muối chảy.',
-     N'DEMO-NV-LAVA-150', N'Hộp 1 bánh 150 g', N'/images/demo/products/banh-lava-trung-muoi.webp', 195000, 70),
+     N'Bánh trung thu hiện đại với lớp vỏ mềm thơm bơ và nhân custard trứng muối tan chảy.',
+     N'DEMO-NV-LAVA-150', N'Hộp 1 bánh 150g', N'/images/demo/products/banh-lava-trung-muoi.webp', 195000, 70),
     (N'DEMO-NGUYET-VIEN', N'hien-dai', N'DEMO-NV-SOCOLA', N'Bánh socola hạnh nhân',
-     N'Vỏ socola, nhân hạnh nhân; phiên bản bánh trung thu hiện đại.',
-     N'DEMO-NV-SOCOLA-150', N'Hộp 1 bánh 150 g', N'/images/demo/products/banh-socola-hanh-nhan.webp', 185000, 50),
+     N'Vỏ bánh socola đắng nhẹ kết hợp nhân hạnh nhân rang giòn giàu dinh dưỡng.',
+     N'DEMO-NV-SOCOLA-150', N'Hộp 1 bánh 150g', N'/images/demo/products/banh-socola-hanh-nhan.webp', 185000, 50),
     (N'DEMO-TRANG-MOC', N'chay', N'DEMO-TM-DAU-XANH', N'Bánh chay đậu xanh',
-     N'Bánh trung thu chay nhân đậu xanh, không dùng trứng.',
-     N'DEMO-TM-DAU-XANH-150', N'Hộp 1 bánh 150 g', N'/images/demo/products/banh-chay-dau-xanh.webp', 120000, 75),
+     N'Bánh trung thu thuần chay nhân đậu xanh nguyên chất ít ngọt, không sử dụng trứng và mỡ động vật.',
+     N'DEMO-TM-DAU-XANH-150', N'Hộp 1 bánh 150g', N'/images/demo/products/banh-chay-dau-xanh.webp', 120000, 75),
     (N'DEMO-TRANG-MOC', N'chay', N'DEMO-TM-ME-DEN', N'Bánh chay mè đen',
-     N'Bánh trung thu chay nhân mè đen thơm bùi.',
-     N'DEMO-TM-ME-DEN-150', N'Hộp 1 bánh 150 g', N'/images/demo/products/banh-chay-me-den.webp', 130000, 45),
+     N'Bánh trung thu chay nhân mè đen rang thơm bùi, vị ngọt thanh tự nhiên.',
+     N'DEMO-TM-ME-DEN-150', N'Hộp 1 bánh 150g', N'/images/demo/products/banh-chay-me-den.webp', 130000, 45),
     (N'DEMO-NGUYET-VIEN', N'cao-cap', N'DEMO-NV-HOP-QUA', N'Hộp quà Trăng Vàng bốn bánh',
-     N'Hộp quà Tết Trung thu gồm bốn bánh với nhiều hương vị.',
+     N'Hộp quà Tết Trung thu sang trọng gồm 4 bánh tuyển chọn nhiều hương vị đặc sắc, thích hợp biếu tặng.',
      N'DEMO-NV-HOP-QUA-4', N'Hộp 4 bánh', N'/images/demo/products/hop-qua-trang-vang.webp', 880000, 25),
     (N'DEMO-NGUYET-VIEN', N'cao-cap', N'DEMO-NV-MATCHA', N'Bánh matcha hạt sen cao cấp',
-     N'Bánh trung thu nhân trà xanh matcha và hạt sen.',
-     N'DEMO-NV-MATCHA-150', N'Hộp 1 bánh 150 g', N'/images/demo/products/banh-matcha-cao-cap.webp', 245000, 40),
+     N'Bánh trung thu cao cấp kết hợp bột trà xanh matcha Nhật Bản và nhân hạt sen bùi mịn.',
+     N'DEMO-NV-MATCHA-150', N'Hộp 1 bánh 150g', N'/images/demo/products/banh-matcha-cao-cap.webp', 245000, 40),
     (N'DEMO-SAO-NHO', N'thieu-nhi', N'DEMO-SN-SUA-DUA', N'Bánh mini sữa dừa',
-     N'Bánh trung thu mini nhân sữa dừa dành cho khẩu phần nhỏ.',
-     N'DEMO-SN-SUA-DUA-80', N'Hộp 1 bánh 80 g', N'/images/demo/products/banh-mini-sua-dua.webp', 85000, 90),
+     N'Bánh trung thu mini nhân sữa dừa thơm béo với khẩu phần nhỏ gọn dành cho bé.',
+     N'DEMO-SN-SUA-DUA-80', N'Hộp 1 bánh 80g', N'/images/demo/products/banh-mini-sua-dua.webp', 85000, 90),
     (N'DEMO-SAO-NHO', N'thieu-nhi', N'DEMO-SN-DAU-TAY', N'Bánh mini dâu tây',
-     N'Bánh trung thu mini nhân dâu tây dành cho khẩu phần nhỏ.',
-     N'DEMO-SN-DAU-TAY-80', N'Hộp 1 bánh 80 g', N'/images/demo/products/banh-mini-dau-tay.webp', 90000, 80);
+     N'Bánh trung thu mini nhân mứt dâu tây chua ngọt dịu nhẹ, dễ thưởng thức.',
+     N'DEMO-SN-DAU-TAY-80', N'Hộp 1 bánh 80g', N'/images/demo/products/banh-mini-dau-tay.webp', 90000, 80);
 
 BEGIN TRY
     BEGIN TRANSACTION;
@@ -92,8 +96,8 @@ BEGIN TRY
         THROW 51104, 'An existing demo store has different ownership, slug or status.', 1;
     IF EXISTS (SELECT 1 FROM @stores d JOIN dbo.store s ON s.slug = d.slug WHERE s.store_code <> d.store_code)
         THROW 51105, 'A demo store slug is already used by another store.', 1;
-    INSERT INTO dbo.store (supplier_id_ref, store_code, name, slug, logo_url, banner_url, status)
-    SELECT d.supplier_id_ref, d.store_code, d.name, d.slug, d.logo_url, d.banner_url, N'ACTIVE'
+    INSERT INTO dbo.store (supplier_id_ref, store_code, name, slug, description, logo_url, banner_url, shipping_fee, status)
+    SELECT d.supplier_id_ref, d.store_code, d.name, d.slug, d.description, d.logo_url, d.banner_url, d.shipping_fee, N'ACTIVE'
     FROM @stores d WHERE NOT EXISTS (SELECT 1 FROM dbo.store s WHERE s.store_code = d.store_code);
 
     IF EXISTS (SELECT 1 FROM @products d JOIN dbo.store s ON s.store_code = d.store_code
@@ -119,12 +123,14 @@ BEGIN TRY
     JOIN dbo.product p ON p.store_id = s.store_id AND p.product_code = d.product_code
     WHERE NOT EXISTS (SELECT 1 FROM dbo.product_variant v WHERE v.sku = d.sku);
 
-    UPDATE s SET name=d.name FROM dbo.store s JOIN @stores d ON d.store_code=s.store_code;
-    UPDATE p SET name=d.name,description=d.description
-    FROM dbo.product p JOIN dbo.store s ON s.store_id=p.store_id
-    JOIN @products d ON d.store_code=s.store_code AND d.product_code=p.product_code;
-    UPDATE v SET variant_name=d.variant_name
-    FROM dbo.product_variant v JOIN @products d ON d.sku=v.sku;
+    UPDATE s SET name = d.name, description = d.description,
+        shipping_fee = COALESCE(s.shipping_fee, d.shipping_fee)
+    FROM dbo.store s JOIN @stores d ON d.store_code = s.store_code;
+    UPDATE p SET name = d.name, description = d.description
+    FROM dbo.product p JOIN dbo.store s ON s.store_id = p.store_id
+    JOIN @products d ON d.store_code = s.store_code AND d.product_code = p.product_code;
+    UPDATE v SET variant_name = d.variant_name
+    FROM dbo.product_variant v JOIN @products d ON d.sku = v.sku;
 
     IF (SELECT COUNT(*) FROM @products d JOIN dbo.store s ON s.store_code = d.store_code
         JOIN dbo.product p ON p.store_id = s.store_id AND p.product_code = d.product_code
@@ -154,21 +160,21 @@ IF OBJECT_ID(N'dbo.store', N'U') IS NULL OR OBJECT_ID(N'dbo.product_variant', N'
     THROW 51301, 'Run Catalog Flyway migrations through V6 before the brand demo seed.', 1;
 
 DECLARE @stores TABLE (store_code NVARCHAR(100) PRIMARY KEY, supplier_id_ref BIGINT,
-    name NVARCHAR(255), slug NVARCHAR(255), logo_url NVARCHAR(500), banner_url NVARCHAR(500),
-    shipping_fee DECIMAL(18,2));
+    name NVARCHAR(255), slug NVARCHAR(255), description NVARCHAR(2000),
+    logo_url NVARCHAR(500), banner_url NVARCHAR(500), shipping_fee DECIMAL(18,2));
 INSERT INTO @stores VALUES
-    (N'DEMO-BRAND-KINH-DO', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'kinh-do@demo.mss.invalid'), N'Kinh Đô', N'demo-kinh-do', N'/images/demo/stores/kinh-do/logo.png', N'/images/demo/brands/stores/kinh-do-banner.webp', 30000),
-    (N'DEMO-BRAND-NHU-LAN', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'nhu-lan@demo.mss.invalid'), N'Như Lan', N'demo-nhu-lan', N'/images/demo/brands/stores/nhu-lan-logo.svg', N'/images/demo/brands/stores/nhu-lan-banner.webp', 25000),
-    (N'DEMO-BRAND-MADAME-HUONG', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'madame-huong@demo.mss.invalid'), N'Madame Hương', N'demo-madame-huong', N'/images/demo/brands/stores/madame-huong-logo.svg', N'/images/demo/brands/stores/madame-huong-banner.webp', 35000),
-    (N'DEMO-BRAND-BRODARD', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'brodard@demo.mss.invalid'), N'Brodard', N'demo-brodard', N'/images/demo/brands/stores/brodard-logo.svg', N'/images/demo/brands/stores/brodard-banner.webp', 30000),
-    (N'DEMO-BRAND-GIVRAL', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'givral@demo.mss.invalid'), N'Givral', N'demo-givral', N'/images/demo/stores/givral/logo.png', N'/images/demo/brands/stores/givral-banner.webp', 28000),
-    (N'DEMO-BRAND-KIDOS', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'kidos@demo.mss.invalid'), N'KIDO''s Bakery', N'demo-kidos-bakery', N'/images/demo/brands/stores/kidos-logo.svg', N'/images/demo/brands/stores/kidos-banner.webp', 30000),
-    (N'DEMO-BRAND-MAISON', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'maison@demo.mss.invalid'), N'Maison', N'demo-maison', N'/images/demo/brands/stores/maison-logo.svg', N'/images/demo/brands/stores/maison-banner.webp', 35000),
-    (N'DEMO-BRAND-DONG-KHANH', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'dong-khanh@demo.mss.invalid'), N'Đồng Khánh', N'demo-dong-khanh', N'/images/demo/stores/dong-khanh/logo.png', N'/images/demo/products/banh-matcha-cao-cap.webp', 30000),
-    (N'DEMO-BRAND-HY-LAM-MON', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'hy-lam-mon@demo.mss.invalid'), N'Hỷ Lâm Môn', N'demo-hy-lam-mon', N'/images/demo/stores/hy-lam-mon/logo.png', N'/images/demo/products/banh-mini-sua-dua.webp', 30000),
-    (N'DEMO-BRAND-DUC-PHAT', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'duc-phat@demo.mss.invalid'), N'Đức Phát', N'demo-duc-phat', N'/images/demo/stores/duc-phat/logo.png', N'/images/demo/products/banh-deo-hat-sen.webp', 30000),
-    (N'DEMO-BRAND-ABC', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'abc@demo.mss.invalid'), N'ABC Bakery', N'demo-abc', N'/images/demo/stores/abc/logo.png', N'/images/demo/products/banh-lava-trung-muoi.webp', 30000),
-    (N'DEMO-BRAND-KHIET-MINH', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'khiet-minh@demo.mss.invalid'), N'Khiết Minh', N'demo-khiet-minh', N'/images/demo/stores/khiet-minh/logo.jpg', N'/images/demo/products/banh-chay-dau-xanh.webp', 30000);
+    (N'DEMO-BRAND-KINH-DO', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'kinh-do@demo.mss.invalid'), N'Kinh Đô', N'demo-kinh-do', N'Thương hiệu bánh Trung thu quen thuộc với các dòng bánh nướng truyền thống và hộp quà Trăng Vàng sang trọng.', N'/images/demo/stores/kinh-do/logo.png', N'/images/demo/brands/stores/kinh-do-banner.webp', 30000),
+    (N'DEMO-BRAND-NHU-LAN', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'nhu-lan@demo.mss.invalid'), N'Như Lan', N'demo-nhu-lan', N'Hương vị bánh Trung thu Sài Gòn lâu đời, nổi tiếng với bánh nướng thập cẩm gà quay và dẻo hạt sen.', N'/images/demo/brands/stores/nhu-lan-logo.svg', N'/images/demo/brands/stores/nhu-lan-banner.webp', 25000),
+    (N'DEMO-BRAND-MADAME-HUONG', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'madame-huong@demo.mss.invalid'), N'Madame Hương', N'demo-madame-huong', N'Sự giao thoa tinh tế giữa nghệ thuật làm bánh Pháp và hương vị cốm non, hạt sen truyền thống Hà Thành.', N'/images/demo/brands/stores/madame-huong-logo.svg', N'/images/demo/brands/stores/madame-huong-banner.webp', 35000),
+    (N'DEMO-BRAND-BRODARD', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'brodard@demo.mss.invalid'), N'Brodard', N'demo-brodard', N'Thương hiệu bánh danh tiếng từ năm 1948, kết hợp phong cách ẩm thực Pháp tinh tế cùng hương vị Á Đông.', N'/images/demo/brands/stores/brodard-logo.svg', N'/images/demo/brands/stores/brodard-banner.webp', 30000),
+    (N'DEMO-BRAND-GIVRAL', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'givral@demo.mss.invalid'), N'Givral', N'demo-givral', N'Tiệm bánh lâu đời của Sài Gòn với dòng bánh Trung thu tươi vỏ mỏng nhân đầy, vị ngọt thanh tao.', N'/images/demo/stores/givral/logo.png', N'/images/demo/brands/stores/givral-banner.webp', 28000),
+    (N'DEMO-BRAND-KIDOS', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'kidos@demo.mss.invalid'), N'KIDO''s Bakery', N'demo-kidos-bakery', N'Bộ sưu tập bánh Trung thu hiện đại với nhân xốt thượng hạng và hương vị trà xanh, phô mai trẻ trung.', N'/images/demo/brands/stores/kidos-logo.svg', N'/images/demo/brands/stores/kidos-banner.webp', 30000),
+    (N'DEMO-BRAND-MAISON', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'maison@demo.mss.invalid'), N'Maison', N'demo-maison', N'Dòng hộp quà bánh Trung thu phong cách Hồng Kông hiện đại, thiết kế trang nhã dành cho quà biếu doanh nghiệp.', N'/images/demo/brands/stores/maison-logo.svg', N'/images/demo/brands/stores/maison-banner.webp', 35000),
+    (N'DEMO-BRAND-DONG-KHANH', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'dong-khanh@demo.mss.invalid'), N'Đồng Khánh', N'demo-dong-khanh', N'Bánh Trung thu Chợ Lớn chính hiệu, đậm đà hương vị thập cẩm lạp xưởng và các dòng hộp quà đoàn viên.', N'/images/demo/stores/dong-khanh/logo.png', N'/images/demo/products/banh-matcha-cao-cap.webp', 30000),
+    (N'DEMO-BRAND-HY-LAM-MON', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'hy-lam-mon@demo.mss.invalid'), N'Hỷ Lâm Môn', N'demo-hy-lam-mon', N'Hỷ Lâm Môn Bakery từ 1984, chuyên bánh Trung thu nướng thủ công theo công thức gia truyền.', N'/images/demo/stores/hy-lam-mon/logo.png', N'/images/demo/products/banh-mini-sua-dua.webp', 30000),
+    (N'DEMO-BRAND-DUC-PHAT', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'duc-phat@demo.mss.invalid'), N'Đức Phát', N'demo-duc-phat', N'Đức Phát Bakery nổi tiếng với bánh nướng nhân thập cẩm jambon và dòng bánh dẻo hạt sen truyền thống.', N'/images/demo/stores/duc-phat/logo.png', N'/images/demo/products/banh-deo-hat-sen.webp', 30000),
+    (N'DEMO-BRAND-ABC', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'abc@demo.mss.invalid'), N'ABC Bakery', N'demo-abc', N'Bánh Trung thu ABC Bakery đa dạng từ nhân lava trứng muối hiện đại đến vị bánh nướng truyền thống.', N'/images/demo/stores/abc/logo.png', N'/images/demo/products/banh-lava-trung-muoi.webp', 30000),
+    (N'DEMO-BRAND-KHIET-MINH', (SELECT sp.supplier_id FROM mss_identity.dbo.supplier_profile sp JOIN mss_identity.dbo.app_user u ON u.user_id=sp.user_id WHERE u.email=N'khiet-minh@demo.mss.invalid'), N'Khiết Minh', N'demo-khiet-minh', N'Chuyên dòng bánh Trung thu thuần chay thanh tịnh từ nguyên liệu thực vật tự nhiên, giảm ngọt tốt cho sức khỏe.', N'/images/demo/stores/khiet-minh/logo.jpg', N'/images/demo/products/banh-chay-dau-xanh.webp', 30000);
 
 IF EXISTS (SELECT 1 FROM @stores WHERE supplier_id_ref IS NULL OR supplier_id_ref <= 0)
    OR (SELECT COUNT(DISTINCT supplier_id_ref) FROM @stores) <> 12
@@ -179,30 +185,30 @@ DECLARE @products TABLE (store_code NVARCHAR(100), category_slug NVARCHAR(255),
     sku NVARCHAR(100), variant_name NVARCHAR(255), image_url NVARCHAR(500),
     base_price DECIMAL(18,2), stock_quantity INT);
 INSERT INTO @products VALUES
-    (N'DEMO-BRAND-KINH-DO', N'cao-cap', N'DEMO-KD-TRANG-VANG', N'Hộp quà Trăng Vàng (demo)', N'Hộp bánh Trung thu lấy cảm hứng từ dòng quà tặng Trăng Vàng; quy cách và giá chỉ dùng thử giao diện.', N'DEMO-KD-TRANG-VANG-4', N'Hộp 4 bánh minh họa', N'/images/demo/brands/products/kinh-do-hop-qua.webp', 1280000, 25),
-    (N'DEMO-BRAND-KINH-DO', N'truyen-thong', N'DEMO-KD-THAP-CAM', N'Bánh nướng thập cẩm hai trứng (demo)', N'Bánh nướng truyền thống nhân thập cẩm, hình ảnh và giá minh họa.', N'DEMO-KD-THAP-CAM-200', N'Bánh 200 g minh họa', N'/images/demo/brands/products/kinh-do-truyen-thong.webp', 185000, 60),
-    (N'DEMO-BRAND-KINH-DO', N'thieu-nhi', N'DEMO-KD-THIEU-NHI', N'Hộp bánh Trung thu thiếu nhi (demo)', N'Hộp bánh mini chủ đề thiếu nhi, thiết kế minh họa; không kèm quà tặng.', N'DEMO-KD-THIEU-NHI-4', N'Hộp 4 bánh mini minh họa', N'/images/demo/brands/products/kinh-do-thieu-nhi.webp', 195000, 45),
-    (N'DEMO-BRAND-NHU-LAN', N'truyen-thong', N'DEMO-NL-THAP-CAM', N'Bánh nướng thập cẩm gà quay (demo)', N'Hương vị thập cẩm gà quay tham khảo từ dòng bánh truyền thống; giá minh họa.', N'DEMO-NL-THAP-CAM-200', N'Bánh 200 g minh họa', N'/images/demo/brands/products/nhu-lan-thap-cam.webp', 185000, 50),
-    (N'DEMO-BRAND-MADAME-HUONG', N'truyen-thong', N'DEMO-MH-COM-SEN', N'Bánh cốm và hạt sen (demo)', N'Hương vị cốm và sen gợi mùa thu Hà Nội; tên quy cách và giá là dữ liệu thử.', N'DEMO-MH-COM-SEN-150', N'Bánh 150 g minh họa', N'/images/demo/brands/products/madame-huong-com-sen.webp', 185000, 40),
-    (N'DEMO-BRAND-BRODARD', N'truyen-thong', N'DEMO-BD-HAI-SAN', N'Bánh hải sản xốt bào ngư (demo)', N'Hương vị hải sản xốt bào ngư tham khảo danh mục bánh Trung thu Brodard; giá minh họa.', N'DEMO-BD-HAI-SAN-200', N'Bánh 200 g minh họa', N'/images/demo/brands/products/brodard-hai-san.webp', 240000, 35),
-    (N'DEMO-BRAND-GIVRAL', N'truyen-thong', N'DEMO-GV-HAT-SEN', N'Bánh hạt sen (demo)', N'Bánh Trung thu nhân hạt sen minh họa cho gian hàng Givral; giá không phải niêm yết.', N'DEMO-GV-HAT-SEN-200', N'Bánh 200 g minh họa', N'/images/demo/brands/products/givral-hat-sen.webp', 145000, 55),
-    (N'DEMO-BRAND-KIDOS', N'hien-dai', N'DEMO-KIDOS-MATCHA', N'Bánh trà xanh phô mai (demo)', N'Hương vị trà xanh phô mai tham khảo hồ sơ công bố sản phẩm KIDO; ảnh và giá minh họa.', N'DEMO-KIDOS-MATCHA-150', N'Bánh 150 g minh họa', N'/images/demo/brands/products/kidos-tra-xanh-pho-mai.webp', 160000, 50),
-    (N'DEMO-BRAND-MAISON', N'cao-cap', N'DEMO-MAISON-HOP-QUA', N'Hộp quà Trung thu Maison (demo)', N'Hộp quà bánh Trung thu lấy cảm hứng từ bộ sưu tập Maison; thành phần và giá chỉ dùng thử.', N'DEMO-MAISON-HOP-QUA-4', N'Hộp 4 bánh minh họa', N'/images/demo/brands/products/maison-hop-qua.webp', 890000, 30),
-    (N'DEMO-BRAND-DONG-KHANH', N'hien-dai', N'DEMO-DK-MTCC', N'Bánh nướng matcha cao cấp', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-DK-MTCC-1', N'Bánh 150g', N'/images/demo/products/banh-matcha-cao-cap.webp', 88000, 120),
-    (N'DEMO-BRAND-DONG-KHANH', N'truyen-thong', N'DEMO-DK-TCLX', N'Bánh nướng thập cẩm lạp xưởng', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-DK-TCLX-1', N'Bánh 200g', N'/images/demo/products/banh-nuong-thap-cam.webp', 95000, 150),
-    (N'DEMO-BRAND-DONG-KHANH', N'cao-cap', N'DEMO-DK-DV', N'Hộp quà Đồng Khánh Đoàn Viên', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-DK-DV-1', N'Hộp 4 bánh', N'/images/demo/products/hop-qua-trang-vang.webp', 820000, 35),
-    (N'DEMO-BRAND-HY-LAM-MON', N'thieu-nhi', N'DEMO-HLM-SDLD', N'Bánh nướng mini sữa dừa', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-HLM-SDLD-1', N'Set 6 bánh', N'/images/demo/products/banh-mini-sua-dua.webp', 180000, 80),
-    (N'DEMO-BRAND-HY-LAM-MON', N'hien-dai', N'DEMO-HLM-SCHN', N'Bánh socola hạnh nhân', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-HLM-SCHN-1', N'Bánh 150g', N'/images/demo/products/banh-socola-hanh-nhan.webp', 79000, 100),
-    (N'DEMO-BRAND-HY-LAM-MON', N'chay', N'DEMO-HLM-CMD', N'Bánh chay mè đen', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-HLM-CMD-1', N'Bánh 150g', N'/images/demo/products/banh-chay-me-den.webp', 65000, 90),
-    (N'DEMO-BRAND-DUC-PHAT', N'truyen-thong', N'DEMO-DP-TCJB', N'Bánh nướng thập cẩm jambon', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-DP-TCJB-1', N'Bánh 250g', N'/images/demo/products/banh-nuong-thap-cam.webp', 125000, 100),
-    (N'DEMO-BRAND-DUC-PHAT', N'thieu-nhi', N'DEMO-DP-MDT', N'Bánh mini dâu tây', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-DP-MDT-1', N'Set 4 bánh', N'/images/demo/products/banh-mini-dau-tay.webp', 160000, 80),
-    (N'DEMO-BRAND-DUC-PHAT', N'truyen-thong', N'DEMO-DP-DHS', N'Bánh dẻo hạt sen Đức Phát', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-DP-DHS-1', N'Bánh 180g', N'/images/demo/products/banh-deo-hat-sen.webp', 68000, 100),
-    (N'DEMO-BRAND-ABC', N'hien-dai', N'DEMO-ABC-LVTM', N'Bánh lava trứng muối ABC', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-ABC-LVTM-1', N'Hộp 6 bánh', N'/images/demo/products/banh-lava-trung-muoi.webp', 420000, 60),
-    (N'DEMO-BRAND-ABC', N'truyen-thong', N'DEMO-ABC-TCTT', N'Bánh nướng thập cẩm ABC', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-ABC-TCTT-1', N'Bánh 150g', N'/images/demo/products/banh-nuong-thap-cam.webp', 68000, 150),
-    (N'DEMO-BRAND-ABC', N'thieu-nhi', N'DEMO-ABC-MDT', N'Bánh mini dâu tây ABC', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-ABC-MDT-1', N'Set 4 bánh', N'/images/demo/products/banh-mini-dau-tay.webp', 150000, 80),
-    (N'DEMO-BRAND-KHIET-MINH', N'chay', N'DEMO-KM-CDX', N'Bánh chay đậu xanh', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-KM-CDX-1', N'Bánh 150g', N'/images/demo/products/banh-chay-dau-xanh.webp', 72000, 120),
-    (N'DEMO-BRAND-KHIET-MINH', N'chay', N'DEMO-KM-CMD', N'Bánh chay mè đen', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-KM-CMD-1', N'Bánh 150g', N'/images/demo/products/banh-chay-me-den.webp', 72000, 100),
-    (N'DEMO-BRAND-KHIET-MINH', N'chay', N'DEMO-KM-MTC', N'Bánh chay matcha', N'Dữ liệu sản phẩm minh họa theo seed Catalog.', N'DEMO-KM-MTC-1', N'Bánh 150g', N'/images/demo/products/banh-matcha-cao-cap.webp', 78000, 90);
+    (N'DEMO-BRAND-KINH-DO', N'cao-cap', N'DEMO-KD-TRANG-VANG', N'Hộp quà Trăng Vàng Hoàng Kim', N'Hộp quà Trung thu 4 bánh nướng nhân thượng hạng, thiết kế sang trọng thích hợp biếu tặng đối tác và gia đình.', N'DEMO-KD-TRANG-VANG-4', N'Hộp 4 bánh', N'/images/demo/brands/products/kinh-do-hop-qua.webp', 1280000, 25),
+    (N'DEMO-BRAND-KINH-DO', N'truyen-thong', N'DEMO-KD-THAP-CAM', N'Bánh nướng thập cẩm hai trứng', N'Bánh nướng truyền thống nhân thập cẩm đậm đà kết hợp hai lòng đỏ trứng muối.', N'DEMO-KD-THAP-CAM-200', N'Bánh 200g', N'/images/demo/brands/products/kinh-do-truyen-thong.webp', 185000, 60),
+    (N'DEMO-BRAND-KINH-DO', N'thieu-nhi', N'DEMO-KD-THIEU-NHI', N'Hộp bánh Trung thu thiếu nhi', N'Hộp 4 bánh nhỏ nhân ngọt dịu dành riêng cho các bé dịp Tết Trung thu.', N'DEMO-KD-THIEU-NHI-4', N'Hộp 4 bánh mini', N'/images/demo/brands/products/kinh-do-thieu-nhi.webp', 195000, 45),
+    (N'DEMO-BRAND-NHU-LAN', N'truyen-thong', N'DEMO-NL-THAP-CAM', N'Bánh nướng thập cẩm gà quay', N'Bánh nướng nhân thập cẩm gà quay chuẩn vị Sài Gòn truyền thống, vỏ mỏng vàng óng.', N'DEMO-NL-THAP-CAM-200', N'Bánh 200g', N'/images/demo/brands/products/nhu-lan-thap-cam.webp', 185000, 50),
+    (N'DEMO-BRAND-MADAME-HUONG', N'truyen-thong', N'DEMO-MH-COM-SEN', N'Bánh cốm xanh hạt sen', N'Hương vị cốm non làng Vòng kết hợp nhân hạt sen bùi thơm đặc trưng mùa thu Hà Nội.', N'DEMO-MH-COM-SEN-150', N'Bánh 150g', N'/images/demo/brands/products/madame-huong-com-sen.webp', 185000, 40),
+    (N'DEMO-BRAND-BRODARD', N'truyen-thong', N'DEMO-BD-HAI-SAN', N'Bánh hải sản xốt bào ngư', N'Bánh nướng cao cấp nhân hải sản và xốt bào ngư đậm vị theo phong cách ẩm thực Pháp - Việt.', N'DEMO-BD-HAI-SAN-200', N'Bánh 200g', N'/images/demo/brands/products/brodard-hai-san.webp', 240000, 35),
+    (N'DEMO-BRAND-GIVRAL', N'truyen-thong', N'DEMO-GV-HAT-SEN', N'Bánh hạt sen tươi', N'Bánh Trung thu tươi nhân hạt sen sên mịn, vị ngọt thanh tự nhiên.', N'DEMO-GV-HAT-SEN-200', N'Bánh 200g', N'/images/demo/brands/products/givral-hat-sen.webp', 145000, 55),
+    (N'DEMO-BRAND-KIDOS', N'hien-dai', N'DEMO-KIDOS-MATCHA', N'Bánh trà xanh phô mai', N'Sự kết hợp hài hòa giữa vỏ bánh trà xanh thanh mát và nhân phô mai béo dịu.', N'DEMO-KIDOS-MATCHA-150', N'Bánh 150g', N'/images/demo/brands/products/kidos-tra-xanh-pho-mai.webp', 160000, 50),
+    (N'DEMO-BRAND-MAISON', N'cao-cap', N'DEMO-MAISON-HOP-QUA', N'Hộp quà Trung thu Maison', N'Hộp quà 4 bánh Trung thu cao cấp với thiết kế tinh tế, sang trọng cho mùa đoàn viên.', N'DEMO-MAISON-HOP-QUA-4', N'Hộp 4 bánh', N'/images/demo/brands/products/maison-hop-qua.webp', 890000, 30),
+    (N'DEMO-BRAND-DONG-KHANH', N'hien-dai', N'DEMO-DK-MTCC', N'Bánh nướng matcha cao cấp', N'Vỏ bánh trà xanh Uji thơm dịu kết hợp nhân đậu đỏ ít ngọt.', N'DEMO-DK-MTCC-1', N'Bánh 150g', N'/images/demo/products/banh-matcha-cao-cap.webp', 88000, 120),
+    (N'DEMO-BRAND-DONG-KHANH', N'truyen-thong', N'DEMO-DK-TCLX', N'Bánh nướng thập cẩm lạp xưởng', N'Nhân thập cẩm lạp xưởng Mai Quế Lộ truyền thống đặc trưng vùng Chợ Lớn.', N'DEMO-DK-TCLX-1', N'Bánh 200g', N'/images/demo/products/banh-nuong-thap-cam.webp', 95000, 150),
+    (N'DEMO-BRAND-DONG-KHANH', N'cao-cap', N'DEMO-DK-DV', N'Hộp quà Đồng Khánh Đoàn Viên', N'Hộp quà 4 bánh truyền thống kèm trà thơm, thích hợp biếu tặng người thân và đối tác.', N'DEMO-DK-DV-1', N'Hộp 4 bánh', N'/images/demo/products/hop-qua-trang-vang.webp', 820000, 35),
+    (N'DEMO-BRAND-HY-LAM-MON', N'thieu-nhi', N'DEMO-HLM-SDLD', N'Bánh nướng mini sữa dừa', N'Set 6 bánh mini nhân sữa dừa lá dứa thơm béo, khẩu phần vừa miệng.', N'DEMO-HLM-SDLD-1', N'Set 6 bánh', N'/images/demo/products/banh-mini-sua-dua.webp', 180000, 80),
+    (N'DEMO-BRAND-HY-LAM-MON', N'hien-dai', N'DEMO-HLM-SCHN', N'Bánh socola hạnh nhân', N'Vỏ cacao đậm vị kết hợp nhân socola đen và hạt hạnh nhân rang giòn.', N'DEMO-HLM-SCHN-1', N'Bánh 150g', N'/images/demo/products/banh-socola-hanh-nhan.webp', 79000, 100),
+    (N'DEMO-BRAND-HY-LAM-MON', N'chay', N'DEMO-HLM-CMD', N'Bánh chay mè đen', N'Bánh chay nhân mè đen xay nhuyễn thơm bùi, sử dụng hoàn toàn dầu thực vật.', N'DEMO-HLM-CMD-1', N'Bánh 150g', N'/images/demo/products/banh-chay-me-den.webp', 65000, 90),
+    (N'DEMO-BRAND-DUC-PHAT', N'truyen-thong', N'DEMO-DP-TCJB', N'Bánh nướng thập cẩm jambon', N'Bánh nướng nhân thập cẩm jambon đậm đà theo công thức gia truyền Đức Phát.', N'DEMO-DP-TCJB-1', N'Bánh 250g', N'/images/demo/products/banh-nuong-thap-cam.webp', 125000, 100),
+    (N'DEMO-BRAND-DUC-PHAT', N'thieu-nhi', N'DEMO-DP-MDT', N'Bánh mini dâu tây', N'Set 4 bánh dẻo mini nhân mứt dâu tây chua ngọt thanh mát.', N'DEMO-DP-MDT-1', N'Set 4 bánh', N'/images/demo/products/banh-mini-dau-tay.webp', 160000, 80),
+    (N'DEMO-BRAND-DUC-PHAT', N'truyen-thong', N'DEMO-DP-DHS', N'Bánh dẻo hạt sen Đức Phát', N'Vỏ bánh dẻo thơm hương hoa bưởi quyện cùng nhân hạt sen sên nhuyễn.', N'DEMO-DP-DHS-1', N'Bánh 180g', N'/images/demo/products/banh-deo-hat-sen.webp', 68000, 100),
+    (N'DEMO-BRAND-ABC', N'hien-dai', N'DEMO-ABC-LVTM', N'Bánh lava trứng muối ABC', N'Hộp 6 bánh nhân custard phô mai trứng muối tan chảy thơm béo.', N'DEMO-ABC-LVTM-1', N'Hộp 6 bánh', N'/images/demo/products/banh-lava-trung-muoi.webp', 420000, 60),
+    (N'DEMO-BRAND-ABC', N'truyen-thong', N'DEMO-ABC-TCTT', N'Bánh nướng thập cẩm ABC', N'Bánh nướng nhân thập cẩm truyền thống, điều chỉnh giảm ngọt vừa ăn.', N'DEMO-ABC-TCTT-1', N'Bánh 150g', N'/images/demo/products/banh-nuong-thap-cam.webp', 68000, 150),
+    (N'DEMO-BRAND-ABC', N'thieu-nhi', N'DEMO-ABC-MDT', N'Bánh mini dâu tây ABC', N'Set 4 bánh nhỏ nhân dâu tây ngọt dịu dành cho gia đình và trẻ nhỏ.', N'DEMO-ABC-MDT-1', N'Set 4 bánh', N'/images/demo/products/banh-mini-dau-tay.webp', 150000, 80),
+    (N'DEMO-BRAND-KHIET-MINH', N'chay', N'DEMO-KM-CDX', N'Bánh chay đậu xanh', N'Bánh Trung thu thuần chay nhân đậu xanh sên tay, ít đường, tốt cho sức khỏe.', N'DEMO-KM-CDX-1', N'Bánh 150g', N'/images/demo/products/banh-chay-dau-xanh.webp', 72000, 120),
+    (N'DEMO-BRAND-KHIET-MINH', N'chay', N'DEMO-KM-CMD', N'Bánh chay mè đen', N'Bánh thuần chay nhân mè đen nguyên chất giàu dinh dưỡng, vị ngọt nhẹ.', N'DEMO-KM-CMD-1', N'Bánh 150g', N'/images/demo/products/banh-chay-me-den.webp', 72000, 100),
+    (N'DEMO-BRAND-KHIET-MINH', N'chay', N'DEMO-KM-MTC', N'Bánh chay matcha', N'Bánh thuần chay vị trà xanh matcha thanh mát kết hợp nhân đậu đỏ.', N'DEMO-KM-MTC-1', N'Bánh 150g', N'/images/demo/products/banh-matcha-cao-cap.webp', 78000, 90);
 
 BEGIN TRY
     BEGIN TRANSACTION;
@@ -215,12 +221,12 @@ BEGIN TRY
     IF EXISTS (SELECT 1 FROM @stores d JOIN dbo.store s ON s.slug = d.slug WHERE s.store_code <> d.store_code)
         THROW 51305, 'A demo brand slug belongs to another store.', 1;
 
-    UPDATE s SET name = d.name, logo_url = d.logo_url, banner_url = d.banner_url,
+    UPDATE s SET name = d.name, description = d.description, logo_url = d.logo_url, banner_url = d.banner_url,
         shipping_fee = COALESCE(s.shipping_fee, d.shipping_fee)
     FROM dbo.store s JOIN @stores d ON d.store_code = s.store_code;
 
-    INSERT INTO dbo.store (supplier_id_ref, store_code, name, slug, logo_url, banner_url, shipping_fee, status)
-    SELECT d.supplier_id_ref, d.store_code, d.name, d.slug, d.logo_url, d.banner_url, d.shipping_fee, N'ACTIVE'
+    INSERT INTO dbo.store (supplier_id_ref, store_code, name, slug, description, logo_url, banner_url, shipping_fee, status)
+    SELECT d.supplier_id_ref, d.store_code, d.name, d.slug, d.description, d.logo_url, d.banner_url, d.shipping_fee, N'ACTIVE'
     FROM @stores d WHERE NOT EXISTS (SELECT 1 FROM dbo.store s WHERE s.store_code = d.store_code);
 
     IF EXISTS (SELECT 1 FROM @products d JOIN dbo.store s ON s.store_code = d.store_code
@@ -244,12 +250,12 @@ BEGIN TRY
     JOIN dbo.product p ON p.store_id = s.store_id AND p.product_code = d.product_code
     WHERE NOT EXISTS (SELECT 1 FROM dbo.product_variant v WHERE v.sku = d.sku);
 
-    UPDATE s SET name=d.name FROM dbo.store s JOIN @stores d ON d.store_code=s.store_code;
-    UPDATE p SET name=d.name,description=d.description
-    FROM dbo.product p JOIN dbo.store s ON s.store_id=p.store_id
-    JOIN @products d ON d.store_code=s.store_code AND d.product_code=p.product_code;
-    UPDATE v SET variant_name=d.variant_name
-    FROM dbo.product_variant v JOIN @products d ON d.sku=v.sku;
+    UPDATE s SET name = d.name, description = d.description FROM dbo.store s JOIN @stores d ON d.store_code = s.store_code;
+    UPDATE p SET name = d.name, description = d.description
+    FROM dbo.product p JOIN dbo.store s ON s.store_id = p.store_id
+    JOIN @products d ON d.store_code = s.store_code AND d.product_code = p.product_code;
+    UPDATE v SET variant_name = d.variant_name
+    FROM dbo.product_variant v JOIN @products d ON d.sku = v.sku;
 
     IF (SELECT COUNT(*) FROM @products d JOIN dbo.store s ON s.store_code = d.store_code
         JOIN dbo.product p ON p.store_id = s.store_id AND p.product_code = d.product_code
@@ -267,7 +273,105 @@ FROM @products d JOIN dbo.store s ON s.store_code = d.store_code
 JOIN dbo.product p ON p.store_id = s.store_id AND p.product_code = d.product_code
 GROUP BY s.store_code ORDER BY s.store_code;
 GO
+-- Seed chi nhánh chính (store_branch) và chương trình khuyến mãi đang chạy (promotion + promotion_rule) cho 15 gian hàng demo.
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF OBJECT_ID(N'dbo.store_branch', N'U') IS NULL OR OBJECT_ID(N'dbo.promotion', N'U') IS NULL OR OBJECT_ID(N'dbo.promotion_rule', N'U') IS NULL
+    THROW 51401, 'Run Catalog Flyway migrations through V5 before seeding branches and promotions.', 1;
+
+DECLARE @branches TABLE (
+    store_code NVARCHAR(100) PRIMARY KEY,
+    branch_name NVARCHAR(255),
+    address_line NVARCHAR(500),
+    ward NVARCHAR(100),
+    district NVARCHAR(100),
+    city NVARCHAR(100),
+    phone NVARCHAR(30),
+    opening_hours NVARCHAR(255)
+);
+INSERT INTO @branches VALUES
+    (N'DEMO-TRANG-MOC', N'Trăng Mộc Quận 1', N'45 Lê Thánh Tôn', N'Bến Nghé', N'Quận 1', N'TP. Hồ Chí Minh', N'028 3822 1001', N'08:00–21:00'),
+    (N'DEMO-NGUYET-VIEN', N'Nguyệt Viên Quận 3', N'128 Nguyễn Đình Chiểu', N'Võ Thị Sáu', N'Quận 3', N'TP. Hồ Chí Minh', N'028 3930 2002', N'08:00–21:30'),
+    (N'DEMO-SAO-NHO', N'Sao Nhỏ Phú Nhuận', N'62 Phan Xích Long', N'Phường 2', N'Phú Nhuận', N'TP. Hồ Chí Minh', N'028 3517 3003', N'08:30–21:00'),
+    (N'DEMO-BRAND-KINH-DO', N'Kinh Đô Nguyễn Huệ', N'72 Nguyễn Huệ', N'Bến Nghé', N'Quận 1', N'TP. Hồ Chí Minh', N'028 3829 1234', N'07:30–22:00'),
+    (N'DEMO-BRAND-NHU-LAN', N'Như Lan Hàm Nghi', N'50 Hàm Nghi', N'Bến Nghé', N'Quận 1', N'TP. Hồ Chí Minh', N'028 3829 2970', N'06:30–22:00'),
+    (N'DEMO-BRAND-MADAME-HUONG', N'Madame Hương Lý Thường Kiệt', N'39 Lý Thường Kiệt', N'Hàng Bài', N'Hoàn Kiếm', N'Hà Nội', N'024 3933 6688', N'08:00–21:30'),
+    (N'DEMO-BRAND-BRODARD', N'Brodard Đồng Khởi', N'11 Nguyễn Thiệp', N'Bến Nghé', N'Quận 1', N'TP. Hồ Chí Minh', N'028 3822 3965', N'07:30–21:30'),
+    (N'DEMO-BRAND-GIVRAL', N'Givral Đồng Khởi', N'169 Đồng Khởi', N'Bến Nghé', N'Quận 1', N'TP. Hồ Chí Minh', N'028 3824 2750', N'07:00–22:00'),
+    (N'DEMO-BRAND-KIDOS', N'KIDO''s Bakery Quận 1', N'138 Hai Bà Trưng', N'Đa Kao', N'Quận 1', N'TP. Hồ Chí Minh', N'028 3827 5566', N'08:00–21:30'),
+    (N'DEMO-BRAND-MAISON', N'Maison Quận 1', N'92 Nam Kỳ Khởi Nghĩa', N'Bến Nghé', N'Quận 1', N'TP. Hồ Chí Minh', N'028 3821 8899', N'08:00–21:30'),
+    (N'DEMO-BRAND-DONG-KHANH', N'Đồng Khánh Chợ Lớn', N'200 Trần Hưng Đạo', N'Phường 11', N'Quận 5', N'TP. Hồ Chí Minh', N'028 3855 4411', N'08:00–21:00'),
+    (N'DEMO-BRAND-HY-LAM-MON', N'Hỷ Lâm Môn Quận 10', N'412 Sư Vạn Hạnh', N'Phường 9', N'Quận 10', N'TP. Hồ Chí Minh', N'028 3865 7788', N'07:00–21:00'),
+    (N'DEMO-BRAND-DUC-PHAT', N'Đức Phát Quận 3', N'139 Hai Bà Trưng', N'Võ Thị Sáu', N'Quận 3', N'TP. Hồ Chí Minh', N'028 3829 6677', N'07:00–21:00'),
+    (N'DEMO-BRAND-ABC', N'ABC Bakery Phú Nhuận', N'98 Phan Đăng Lưu', N'Phường 5', N'Phú Nhuận', N'TP. Hồ Chí Minh', N'028 3844 5599', N'07:00–22:00'),
+    (N'DEMO-BRAND-KHIET-MINH', N'Khiết Minh Tân Bình', N'55 Trường Chinh', N'Phường 12', N'Tân Bình', N'TP. Hồ Chí Minh', N'028 3811 2233', N'08:00–20:30');
+
+DECLARE @promotions TABLE (
+    store_code NVARCHAR(100) PRIMARY KEY,
+    promo_name NVARCHAR(255),
+    rule_type NVARCHAR(30),
+    min_quantity INT,
+    discount_percent DECIMAL(5,2),
+    discount_amount DECIMAL(18,2)
+);
+INSERT INTO @promotions VALUES
+    (N'DEMO-TRANG-MOC', N'Ưu đãi Mùa Đoàn Viên: Giảm 10% khi mua từ 2 hộp', N'PERCENT_DISCOUNT', 2, 10.00, NULL),
+    (N'DEMO-NGUYET-VIEN', N'Khuyến mãi Trăng Rằm: Giảm 12% đơn từ 2 sản phẩm', N'PERCENT_DISCOUNT', 2, 12.00, NULL),
+    (N'DEMO-SAO-NHO', N'Ưu đãi bánh thiếu nhi: Giảm 20.000đ khi mua từ 3 hộp', N'FIXED_DISCOUNT', 3, NULL, 20000),
+    (N'DEMO-BRAND-KINH-DO', N'Mùa Trăng Vàng: Giảm 10% khi mua từ 2 sản phẩm', N'PERCENT_DISCOUNT', 2, 10.00, NULL),
+    (N'DEMO-BRAND-NHU-LAN', N'Ưu đãi Sài Gòn xưa: Giảm 30.000đ cho đơn từ 3 bánh', N'FIXED_DISCOUNT', 3, NULL, 30000),
+    (N'DEMO-BRAND-MADAME-HUONG', N'Quà biếu Phố Cổ: Giảm 8% khi mua từ 2 hộp', N'PERCENT_DISCOUNT', 2, 8.00, NULL),
+    (N'DEMO-BRAND-BRODARD', N'Ưu đãi Hoàng Gia: Giảm 50.000đ khi mua từ 2 bánh', N'FIXED_DISCOUNT', 2, NULL, 50000),
+    (N'DEMO-BRAND-GIVRAL', N'Ưu đãi bánh tươi Givral: Giảm 8% khi mua từ 2 sản phẩm', N'PERCENT_DISCOUNT', 2, 8.00, NULL),
+    (N'DEMO-BRAND-KIDOS', N'Đón trăng KIDO: Giảm 10% khi mua từ 2 bánh', N'PERCENT_DISCOUNT', 2, 10.00, NULL),
+    (N'DEMO-BRAND-MAISON', N'Ưu đãi hộp quà Maison: Giảm 80.000đ khi mua từ 2 hộp', N'FIXED_DISCOUNT', 2, NULL, 80000),
+    (N'DEMO-BRAND-DONG-KHANH', N'Tết Trung Thu Chợ Lớn: Giảm 25.000đ đơn từ 3 bánh', N'FIXED_DISCOUNT', 3, NULL, 25000),
+    (N'DEMO-BRAND-HY-LAM-MON', N'Ưu đãi gia truyền: Giảm 10% khi mua từ 2 sản phẩm', N'PERCENT_DISCOUNT', 2, 10.00, NULL),
+    (N'DEMO-BRAND-DUC-PHAT', N'Đoàn viên Đức Phát: Giảm 20.000đ khi mua từ 2 bánh', N'FIXED_DISCOUNT', 2, NULL, 20000),
+    (N'DEMO-BRAND-ABC', N'Mùa trăng ABC Bakery: Giảm 5% toàn bộ sản phẩm', N'PERCENT_DISCOUNT', 1, 5.00, NULL),
+    (N'DEMO-BRAND-KHIET-MINH', N'Thanh tịnh mùa trăng: Giảm 10% khi mua từ 3 bánh chay', N'PERCENT_DISCOUNT', 3, 10.00, NULL);
+
+DECLARE @promoStart DATETIME2(0) = DATEADD(DAY, -7, SYSUTCDATETIME());
+DECLARE @promoEnd   DATETIME2(0) = DATEADD(DAY, 90, SYSUTCDATETIME());
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    INSERT INTO dbo.store_branch (store_id, name, address_line, ward, district, city, phone, opening_hours, is_primary, status)
+    SELECT s.store_id, b.branch_name, b.address_line, b.ward, b.district, b.city, b.phone, b.opening_hours, 1, N'ACTIVE'
+    FROM @branches b JOIN dbo.store s ON s.store_code = b.store_code
+    WHERE NOT EXISTS (SELECT 1 FROM dbo.store_branch existing WHERE existing.store_id = s.store_id AND existing.is_primary = 1);
+
+    UPDATE pr
+    SET pr.start_at = @promoStart,
+        pr.end_at = @promoEnd,
+        pr.status = N'ACTIVE'
+    FROM dbo.promotion pr
+    JOIN dbo.store s ON s.store_id = pr.store_id
+    JOIN @promotions d ON d.store_code = s.store_code AND d.promo_name = pr.name;
+
+    INSERT INTO dbo.promotion (store_id, name, start_at, end_at, status)
+    SELECT s.store_id, d.promo_name, @promoStart, @promoEnd, N'ACTIVE'
+    FROM @promotions d JOIN dbo.store s ON s.store_code = d.store_code
+    WHERE NOT EXISTS (SELECT 1 FROM dbo.promotion pr WHERE pr.store_id = s.store_id AND pr.name = d.promo_name);
+
+    INSERT INTO dbo.promotion_rule (promotion_id, target_variant_id, reward_variant_id, rule_type, min_quantity, discount_percent, discount_amount, reward_quantity)
+    SELECT pr.promotion_id, NULL, NULL, d.rule_type, d.min_quantity, d.discount_percent, d.discount_amount, NULL
+    FROM @promotions d
+    JOIN dbo.store s ON s.store_code = d.store_code
+    JOIN dbo.promotion pr ON pr.store_id = s.store_id AND pr.name = d.promo_name
+    WHERE NOT EXISTS (SELECT 1 FROM dbo.promotion_rule r WHERE r.promotion_id = pr.promotion_id);
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+GO
 UPDATE dbo.store SET shipping_fee=30000 WHERE store_code LIKE N'DEMO-%' AND shipping_fee IS NULL;
 SELECT COUNT(*) AS demo_store_count FROM dbo.store WHERE store_code LIKE N'DEMO-%';
 SELECT COUNT(*) AS demo_product_count FROM dbo.product WHERE product_code LIKE N'DEMO-%';
 SELECT COUNT(*) AS demo_variant_count FROM dbo.product_variant WHERE sku LIKE N'DEMO-%';
+SELECT COUNT(*) AS demo_promotion_count FROM dbo.promotion pr JOIN dbo.store s ON s.store_id = pr.store_id WHERE s.store_code LIKE N'DEMO-%' AND pr.status = N'ACTIVE';
