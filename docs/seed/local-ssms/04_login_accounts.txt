@@ -1,0 +1,103 @@
+-- CHỈ DÙNG CHO SQL SERVER LOCAL DEMO. Tạo tài khoản ĐĂNG NHẬP ĐƯỢC (email đã xác minh), chạy lại an toàn.
+-- Chạy sau khi Identity Flyway đã tạo bảng (V5+). Có thể chạy cả khi Identity đang dừng vì
+-- "ADMIN_USER_IDS must reference existing ... users": script tạo admin đúng user_id 1 (khớp ADMIN_USER_IDS=1 trong .env).
+-- Mật khẩu trùng mặc định của scripts/seed-demo-catalog.mjs và scripts/seed-demo-tv4.mjs:
+--   admin@mooncake.local              / MoonCake@Admin2026    (ROLE_ADMIN khi ADMIN_USER_IDS=1)
+--   buyer.b2b@mooncake.local          / MoonCake@Buyer2026    (khách doanh nghiệp, có địa chỉ mặc định)
+--   supplier.<key>@mooncake.local     / MoonCake@Supplier2026 (supplier VERIFIED, chưa có gian hàng)
+-- Sau đó chạy `node scripts/seed-demo-catalog.mjs` (cần Gateway + Identity + Catalog) để tạo gian hàng/sản phẩm.
+-- Tài khoản demo đã tồn tại sẽ được đặt lại mật khẩu demo, xác minh email và ACTIVE. Không dùng trên production.
+USE mss_identity;
+GO
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF OBJECT_ID(N'dbo.app_user', N'U') IS NULL OR COL_LENGTH(N'dbo.app_user', N'email_verified') IS NULL
+    THROW 51301, 'Run Identity Flyway migrations (V5+) before seeding login accounts.', 1;
+
+-- BCrypt $2a$10 (BCryptPasswordEncoder mặc định của IdentityService).
+DECLARE @adminHash    NVARCHAR(255) = N'$2a$10$jXHDQIIA6e.m.VO2tPoHq.o0OFkIw6sNldm2ePIGblLfz6wuTsLaK';
+DECLARE @buyerHash    NVARCHAR(255) = N'$2a$10$/22n4OQKJBSLARnrBRItPuxftmDLzMFUSVHEQJve/2TfvvdF934qi';
+DECLARE @supplierHash NVARCHAR(255) = N'$2a$10$SSdgYp/MIKXQ/ts37xV8wunAbd/7gvpLHKxi4vFYxGJDYpGTN3bma';
+
+DECLARE @acc TABLE (
+    email NVARCHAR(255) PRIMARY KEY, full_name NVARCHAR(255) NOT NULL, phone NVARCHAR(30) NULL,
+    password_hash NVARCHAR(255) NOT NULL, company_name NVARCHAR(255) NULL, tax_code NVARCHAR(100) NULL);
+-- Supplier: email/tên/mã số thuế giống scripts/seed-demo-catalog.mjs. Tên thương hiệu chỉ là dữ liệu minh họa.
+INSERT INTO @acc VALUES
+    (N'admin@mooncake.local',               N'MoonCake Admin',          NULL,          @adminHash,    NULL, NULL),
+    (N'buyer.b2b@mooncake.local',           N'Công ty Demo B2B',        N'0909000111', @buyerHash,    NULL, NULL),
+    (N'supplier.kinh-do@mooncake.local',    N'Kinh Đô Supplier',        NULL, @supplierHash, N'Công ty Kinh Đô (demo)',        N'DEMO-KINH-DO'),
+    (N'supplier.givral@mooncake.local',     N'Givral Supplier',         NULL, @supplierHash, N'Công ty Givral (demo)',         N'DEMO-GIVRAL'),
+    (N'supplier.dong-khanh@mooncake.local', N'Đồng Khánh Supplier',     NULL, @supplierHash, N'Công ty Đồng Khánh (demo)',     N'DEMO-DONG-KHANH'),
+    (N'supplier.hy-lam-mon@mooncake.local', N'Hỷ Lâm Môn Supplier',     NULL, @supplierHash, N'Công ty Hỷ Lâm Môn (demo)',     N'DEMO-HY-LAM-MON'),
+    (N'supplier.duc-phat@mooncake.local',   N'Đức Phát Supplier',       NULL, @supplierHash, N'Công ty Đức Phát (demo)',       N'DEMO-DUC-PHAT'),
+    (N'supplier.abc@mooncake.local',        N'ABC Bakery Supplier',     NULL, @supplierHash, N'Công ty ABC Bakery (demo)',     N'DEMO-ABC'),
+    (N'supplier.khiet-minh@mooncake.local', N'Khiết Minh Supplier',     NULL, @supplierHash, N'Công ty Khiết Minh (demo)',     N'DEMO-KHIET-MINH'),
+    (N'supplier.nhu-lan@mooncake.local',    N'Như Lan Supplier',        NULL, @supplierHash, N'Công ty Như Lan (demo)',        N'DEMO-NHU-LAN'),
+    (N'supplier.madame-huong@mooncake.local', N'Madame Hương Supplier', NULL, @supplierHash, N'Công ty Madame Hương (demo)',   N'DEMO-MADAME-HUONG'),
+    (N'supplier.brodard@mooncake.local',    N'Brodard Supplier',        NULL, @supplierHash, N'Công ty Brodard (demo)',        N'DEMO-BRODARD'),
+    (N'supplier.kidos@mooncake.local',      N'KIDO''s Bakery Supplier', NULL, @supplierHash, N'Công ty KIDO''s Bakery (demo)', N'DEMO-KIDOS'),
+    (N'supplier.maison@mooncake.local',     N'Maison Supplier',         NULL, @supplierHash, N'Công ty Maison (demo)',         N'DEMO-MAISON');
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF EXISTS (SELECT 1 FROM @acc a JOIN dbo.supplier_profile s ON s.tax_code = a.tax_code
+               JOIN dbo.app_user u ON u.user_id = s.user_id WHERE u.email <> a.email)
+        THROW 51302, 'A demo tax code belongs to another user; nothing was changed.', 1;
+
+    -- Admin cần đúng user_id 1 vì Identity kiểm tra ADMIN_USER_IDS lúc khởi động.
+    IF NOT EXISTS (SELECT 1 FROM dbo.app_user WHERE user_id = 1)
+       AND NOT EXISTS (SELECT 1 FROM dbo.app_user WHERE email = N'admin@mooncake.local')
+    BEGIN
+        SET IDENTITY_INSERT dbo.app_user ON;
+        INSERT INTO dbo.app_user (user_id, email, status, password_hash, email_verified)
+        VALUES (1, N'admin@mooncake.local', N'ACTIVE', @adminHash, 1);
+        SET IDENTITY_INSERT dbo.app_user OFF;
+    END;
+
+    UPDATE u SET password_hash = a.password_hash, email_verified = 1, status = N'ACTIVE', updated_at = SYSUTCDATETIME()
+    FROM dbo.app_user u JOIN @acc a ON a.email = u.email;
+
+    INSERT INTO dbo.app_user (email, status, password_hash, email_verified)
+    SELECT a.email, N'ACTIVE', a.password_hash, 1 FROM @acc a
+    WHERE NOT EXISTS (SELECT 1 FROM dbo.app_user u WHERE u.email = a.email);
+
+    INSERT INTO dbo.customer_profile (user_id, full_name, phone)
+    SELECT u.user_id, a.full_name, a.phone FROM @acc a JOIN dbo.app_user u ON u.email = a.email
+    WHERE NOT EXISTS (SELECT 1 FROM dbo.customer_profile c WHERE c.user_id = u.user_id);
+
+    INSERT INTO dbo.supplier_profile (user_id, company_name, tax_code, verification_status)
+    SELECT u.user_id, a.company_name, a.tax_code, N'VERIFIED' FROM @acc a JOIN dbo.app_user u ON u.email = a.email
+    WHERE a.tax_code IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.supplier_profile s WHERE s.user_id = u.user_id);
+
+    UPDATE s SET verification_status = N'VERIFIED', updated_at = SYSUTCDATETIME()
+    FROM dbo.supplier_profile s JOIN dbo.app_user u ON u.user_id = s.user_id JOIN @acc a ON a.email = u.email
+    WHERE a.tax_code IS NOT NULL AND s.verification_status <> N'VERIFIED';
+
+    -- Địa chỉ mặc định của buyer (cần khi chấp nhận báo giá → tạo đơn), giống scripts/seed-demo-tv4.mjs.
+    INSERT INTO dbo.address (customer_id, recipient_name, recipient_phone, address_line, ward, district, city, is_default)
+    SELECT c.customer_id, N'Phòng Hành chính - Công ty Demo B2B', N'0909000111', N'12 Tôn Đức Thắng',
+           N'Bến Nghé', N'Quận 1', N'TP. Hồ Chí Minh', 1
+    FROM dbo.app_user u JOIN dbo.customer_profile c ON c.user_id = u.user_id
+    WHERE u.email = N'buyer.b2b@mooncake.local'
+      AND NOT EXISTS (SELECT 1 FROM dbo.address ad WHERE ad.customer_id = c.customer_id);
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+IF NOT EXISTS (SELECT 1 FROM dbo.app_user WHERE user_id = 1 AND email = N'admin@mooncake.local')
+    PRINT N'CẢNH BÁO: admin@mooncake.local không phải user_id 1; sửa ADMIN_USER_IDS trong .env theo user_id bên dưới.';
+
+SELECT u.user_id, u.email, u.email_verified, u.status, s.verification_status AS supplier_status,
+       (SELECT COUNT(*) FROM dbo.address ad WHERE ad.customer_id = c.customer_id) AS addresses
+FROM @acc a JOIN dbo.app_user u ON u.email = a.email
+LEFT JOIN dbo.customer_profile c ON c.user_id = u.user_id
+LEFT JOIN dbo.supplier_profile s ON s.user_id = u.user_id
+ORDER BY u.user_id;
+GO

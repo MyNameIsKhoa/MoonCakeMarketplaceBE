@@ -15,6 +15,7 @@ import mss.mooncake.identity.repository.CustomerProfileRepository;
 import mss.mooncake.identity.repository.NotificationRepository;
 import mss.mooncake.identity.repository.SupplierProfileRepository;
 import mss.mooncake.identity.repository.UserRepository;
+import mss.mooncake.identity.service.impl.NotificationServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -34,7 +35,7 @@ class NotificationServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new NotificationService(notifications, users, customers, suppliers, JsonMapper.builder().build());
+        service = new NotificationServiceImpl(notifications, users, customers, suppliers, JsonMapper.builder().build());
     }
 
     private static CreateNotificationRequest request(String dedupKey) {
