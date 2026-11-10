@@ -5,6 +5,7 @@ import mss.mooncake.commerce.dto.request.CreateReviewRequest;
 import mss.mooncake.commerce.dto.request.CreateShipmentRequest;
 import mss.mooncake.commerce.dto.request.UpdateShipmentRequest;
 import mss.mooncake.commerce.dto.response.ReviewResponse;
+import mss.mooncake.commerce.dto.response.ProductSignalResponse;
 import mss.mooncake.commerce.dto.response.SellerOrderAcceptanceResponse;
 import mss.mooncake.commerce.dto.response.ShipmentItemProgressResponse;
 import mss.mooncake.commerce.dto.response.ShipmentResponse;
@@ -50,6 +51,8 @@ public interface FulfillmentApplicationService {
     List<ReviewResponse> getMyReviews(Long customerId);
 
     ReviewResponse getReviewById(Long reviewId);
+
+    List<ProductSignalResponse> getProductSignals(List<Long> variantIds);
 
     // --- Internal Checks (For TV5 Settlement & TV3) ---
     void assertEligibleForShipment(Long sellerOrderId);

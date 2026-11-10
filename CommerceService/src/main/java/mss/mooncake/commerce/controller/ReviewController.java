@@ -5,6 +5,7 @@ import java.net.URI;
 import java.util.List;
 import mss.mooncake.commerce.dto.request.CreateReviewRequest;
 import mss.mooncake.commerce.dto.response.ReviewResponse;
+import mss.mooncake.commerce.dto.response.ProductSignalResponse;
 import mss.mooncake.commerce.security.CommercePrincipal;
 import mss.mooncake.commerce.service.FulfillmentApplicationService;
 import org.springframework.http.ResponseEntity;
@@ -25,6 +26,11 @@ public class ReviewController {
 
     public ReviewController(FulfillmentApplicationService fulfillmentService) {
         this.fulfillmentService = fulfillmentService;
+    }
+
+    @GetMapping("/signals")
+    public ResponseEntity<List<ProductSignalResponse>> getProductSignals(@RequestParam List<Long> variantIds) {
+        return ResponseEntity.ok(fulfillmentService.getProductSignals(variantIds));
     }
 
     @PostMapping

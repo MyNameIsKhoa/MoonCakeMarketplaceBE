@@ -12,6 +12,7 @@ import mss.mooncake.commerce.dto.request.CreateReviewRequest;
 import mss.mooncake.commerce.dto.request.CreateShipmentRequest;
 import mss.mooncake.commerce.dto.request.UpdateShipmentRequest;
 import mss.mooncake.commerce.dto.response.ReviewResponse;
+import mss.mooncake.commerce.dto.response.ProductSignalResponse;
 import mss.mooncake.commerce.dto.response.SellerOrderAcceptanceResponse;
 import mss.mooncake.commerce.dto.response.ShipmentResponse;
 import mss.mooncake.commerce.entity.CustomerOrderEntity;
@@ -478,6 +479,18 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
         ReviewEntity review = reviewRepository.findById(reviewId)
                 .orElseThrow(() -> new ResourceNotFoundException("Review not found with ID: " + reviewId));
         return mapToReviewResponse(review);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ProductSignalResponse> getProductSignals(List<Long> variantIds) {
+        if (variantIds == null || variantIds.isEmpty() || variantIds.size() > 100
+                || variantIds.stream().anyMatch(id -> id == null || id < 1)) {
+            throw new BadRequestException("Provide between 1 and 100 valid variant IDs");
+        }
+        return reviewRepository.findProductSignals(variantIds.stream().distinct().toList()).stream()
+                .map(row -> new ProductSignalResponse(row.getVariantId(), row.getSoldQuantity(), row.getReviewCount(), row.getAverageRating()))
+                .toList();
     }
 
     @Override
