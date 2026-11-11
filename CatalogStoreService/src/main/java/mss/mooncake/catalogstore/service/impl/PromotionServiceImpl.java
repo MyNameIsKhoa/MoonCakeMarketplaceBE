@@ -193,7 +193,7 @@ public class PromotionServiceImpl implements PromotionService {
         PromotionStatus current = promotion.getStatus();
         if (current == next) return;
         if (next == PromotionStatus.DRAFT || next == PromotionStatus.EXPIRED || current == PromotionStatus.EXPIRED) {
-            throw new BadRequestException("Cannot change promotion status from " + current + " to " + next);
+            throw new BadRequestException("Không thể chuyển trạng thái khuyến mãi từ " + current + " sang " + next);
         }
         if (next == PromotionStatus.ACTIVE && !promotion.getEndAt().isAfter(now())) {
             throw new BadRequestException("Không thể kích hoạt khuyến mãi đã kết thúc.");

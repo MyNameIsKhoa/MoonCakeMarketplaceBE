@@ -106,9 +106,10 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
                 throw ApiException.forbidden("STORE_NOT_TARGETED", "Cửa hàng này không được mời báo giá cho yêu cầu");
             }
             ensureOpen(rfq);
+            ensureNotAwarded(rfqId);
             ensureNotSelfDealing(rfq);
             ensureWithinRfqQuantity(rfq, prepared);
-            var latest = quotations.findFirstByRfqIdAndStoreIdRefOrderByVersionNoDesc(rfqId, request.storeId());
+            Optional<QuotationEntity> latest = quotations.findFirstByRfqIdAndStoreIdRefOrderByVersionNoDesc(rfqId, request.storeId());
             if (latest.isPresent() && latest.get().getStatus() == QuotationStatus.SUBMITTED) {
                 throw ApiException.conflict("QUOTATION_REVISION_REQUIRED", "Cửa hàng đã có báo giá đang gửi; hãy tạo phiên bản mới");
             }
@@ -135,6 +136,7 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
             if (concurrentReplay.isPresent()) return concurrentReplay.get();
             QuotationEntity previous = lockedQuotation(quotationId);
             ensureOpen(rfq);
+            ensureNotAwarded(previous.getRfqId());
             ensureWithinRfqQuantity(rfq, prepared);
             ensureSubmitted(previous);
             if (!Objects.equals(previous.getVersionNo(), request.expectedVersion())) {
@@ -383,9 +385,8 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
             throw ApiException.badRequest("INVALID_DELIVERY_DATE", "Ngày giao dự kiến không được ở quá khứ");
         }
         if (DeliveryDateRule.tooSoon(quotation.getDepositPercent(), quotation.getProposedDeliveryDate(), now)) {
-            throw ApiException.badRequest("DELIVERY_TOO_SOON_FOR_REMAINING", "Báo giá có tiền cọc cần ngày giao từ "
-                    + DeliveryDateRule.format(DeliveryDateRule.earliestWithRemaining(now)) + " trở đi: phần còn lại "
-                    + "phải thanh toán trước ngày giao 3 ngày, nên ngày giao cần cách hôm nay ít nhất 4 ngày.");
+            throw ApiException.badRequest(DeliveryDateRule.errorCode(quotation.getDepositPercent()),
+                    DeliveryDateRule.requirement(quotation.getDepositPercent(), now));
         }
         quotation.setRfqId(rfqId);
         quotation.setSupplierIdRef(supplierId);
@@ -442,6 +443,16 @@ public class QuotationManagementServiceImpl implements QuotationManagementServic
         }
         if (rfq.getExpiresAt() != null && !rfq.getExpiresAt().isAfter(now())) {
             throw ApiException.conflict("RFQ_EXPIRED", "Yêu cầu báo giá đã hết hạn");
+        }
+    }
+
+    /**
+     * Single award: once the buyer accepted a quotation (pending or done, order not cancelled) no new quotation
+     * or revision is taken. Also covers the moment before the RFQ is closed and RFQs accepted before this rule.
+     */
+    private void ensureNotAwarded(Long rfqId) {
+        if (conversions.committedQuantity(rfqId) > 0) {
+            throw ApiException.conflict("RFQ_ALREADY_AWARDED", "Người mua đã chốt báo giá cho yêu cầu này; không nhận báo giá mới");
         }
     }
 

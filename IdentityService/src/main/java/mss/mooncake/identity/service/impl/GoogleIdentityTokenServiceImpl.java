@@ -33,16 +33,16 @@ public class GoogleIdentityTokenServiceImpl implements GoogleIdentityTokenServic
         try {
             GoogleIdToken token = verifier.verify(idToken);
             if (token == null || !Boolean.TRUE.equals(token.getPayload().getEmailVerified())) {
-                throw new UnauthorizedException("Invalid Google identity token");
+                throw new UnauthorizedException("Thông tin đăng nhập Google không hợp lệ");
             }
             String email = token.getPayload().getEmail();
             if (email == null || email.isBlank()) {
-                throw new UnauthorizedException("Google account has no verified email");
+                throw new UnauthorizedException("Tài khoản Google chưa có email đã xác minh");
             }
             String name = (String) token.getPayload().get("name");
             return new GoogleIdentity(email.trim().toLowerCase(Locale.ROOT), name);
         } catch (IOException | GeneralSecurityException ex) {
-            throw new UnauthorizedException("Unable to verify Google identity token");
+            throw new UnauthorizedException("Không thể xác minh đăng nhập Google, vui lòng thử lại");
         }
     }
 }

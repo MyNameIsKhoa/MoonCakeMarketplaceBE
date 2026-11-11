@@ -80,6 +80,14 @@ public class FinanceController {
         return service.supplierPayouts(actor(authentication), page, size);
     }
 
+    /** Admin view "Đối soát & giải ngân": every seller order's settlement state; q matches seller/customer order number. */
+    @GetMapping("/settlements")
+    public FinanceResponse.AdminPayouts settlements(@RequestParam(required = false) @Size(max = 100) String q,
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size,
+            Authentication authentication) {
+        return service.adminPayouts(actor(authentication), q, page, size);
+    }
+
     @GetMapping("/customer-orders/{orderId}")
     public CustomerPaymentResponse customerSummary(@PathVariable long orderId, Authentication authentication) {
         return customerPayments.summary(orderId, actor(authentication));

@@ -28,6 +28,7 @@ import mss.mooncake.rfqnegotiation.dto.request.CreateQuotationRequest;
 import mss.mooncake.rfqnegotiation.dto.request.QuotationDecisionRequest;
 import mss.mooncake.rfqnegotiation.dto.request.QuotationItemRequest;
 import mss.mooncake.rfqnegotiation.dto.request.ReviseQuotationRequest;
+import mss.mooncake.rfqnegotiation.dto.response.QuotationResponse;
 import mss.mooncake.rfqnegotiation.entity.QuotationCommandEntity;
 import mss.mooncake.rfqnegotiation.entity.QuotationEntity;
 import mss.mooncake.rfqnegotiation.entity.QuotationItemEntity;
@@ -104,7 +105,7 @@ class QuotationManagementServiceTest {
 
     @Test
     void calculatesNegotiatedTotalsAndCreatesSubmittedVersion() {
-        var result = service.create(1L, "create-1", request(customItem("120000.00", "15000.00")));
+        QuotationResponse result = service.create(1L, "create-1", request(customItem("120000.00", "15000.00")));
 
         assertThat(result.version()).isEqualTo(1);
         assertThat(result.status()).isEqualTo(QuotationStatus.SUBMITTED);
@@ -193,10 +194,10 @@ class QuotationManagementServiceTest {
         when(catalog.getProductSnapshot(40L, 50L)).thenReturn(new ProductSnapshotResponse(
                 40L, 50L, "Bánh trung thu", "Đậu xanh", "CAT-001", new BigDecimal("999999.00"),
                 30L, 20L, "P-001", "/images/catalog/variant-50.jpg", "ACTIVE"));
-        var line = new QuotationItemRequest(40L, 50L, "Tên giả", "SKU giả", 2,
+        QuotationItemRequest line = new QuotationItemRequest(40L, 50L, "Tên giả", "SKU giả", 2,
                 new BigDecimal("100.00"), BigDecimal.ZERO, null);
 
-        var result = service.create(1L, "variant", request(line));
+        QuotationResponse result = service.create(1L, "variant", request(line));
 
         assertThat(result.items().getFirst().itemNameSnapshot()).isEqualTo("Bánh trung thu - Đậu xanh");
         assertThat(result.items().getFirst().skuSnapshot()).isEqualTo("CAT-001");
@@ -208,7 +209,7 @@ class QuotationManagementServiceTest {
     void rejectsCatalogImageThatCannotFitTheOrderSnapshot() {
         when(catalog.getProductSnapshot(40L, 50L)).thenReturn(new ProductSnapshotResponse(
                 40L, 50L, "Bánh", "Đậu xanh", "SKU", BigDecimal.TEN, 30L, 20L, null, "x".repeat(501), "ACTIVE"));
-        var line = new QuotationItemRequest(40L, 50L, null, null, 2, BigDecimal.TEN, BigDecimal.ZERO, null);
+        QuotationItemRequest line = new QuotationItemRequest(40L, 50L, null, null, 2, BigDecimal.TEN, BigDecimal.ZERO, null);
         assertCode(() -> service.create(1L, "long-image", request(line)), "CATALOG_INVALID_RESPONSE");
         verify(quotations, never()).saveAndFlush(any());
     }
@@ -217,7 +218,7 @@ class QuotationManagementServiceTest {
     void rejectsVariantFromDifferentStore() {
         when(catalog.getProductSnapshot(40L, 50L)).thenReturn(new ProductSnapshotResponse(
                 40L, 50L, "Bánh", "Đậu xanh", "SKU", BigDecimal.TEN, 999L, 20L, null, null, "ACTIVE"));
-        var line = new QuotationItemRequest(40L, 50L, null, null, 2, BigDecimal.TEN, BigDecimal.ZERO, null);
+        QuotationItemRequest line = new QuotationItemRequest(40L, 50L, null, null, 2, BigDecimal.TEN, BigDecimal.ZERO, null);
 
         assertCode(() -> service.create(1L, "variant", request(line)), "VARIANT_STORE_MISMATCH");
     }
@@ -234,9 +235,9 @@ class QuotationManagementServiceTest {
     void createsImmutableRevisionLinkedToPreviousVersion() {
         QuotationEntity previous = prepareRevision();
         BigDecimal previousAmount = previous.getTotalAmount();
-        var request = revision(3);
+        ReviseQuotationRequest request = revision(3);
 
-        var result = service.revise(90L, "revision-1", request);
+        QuotationResponse result = service.revise(90L, "revision-1", request);
 
         assertThat(result.version()).isEqualTo(4);
         assertThat(result.previousQuotationId()).isEqualTo("90");
@@ -268,18 +269,18 @@ class QuotationManagementServiceTest {
 
     @Test
     void replayReturnsSameQuotationWithoutCatalogRequest() {
-        var request = request(customItem("100.00", "0"));
+        CreateQuotationRequest request = request(customItem("100.00", "0"));
         service.create(1L, "create-1", request);
-        var commandCaptor = ArgumentCaptor.forClass(QuotationCommandEntity.class);
+        ArgumentCaptor<QuotationCommandEntity> commandCaptor = ArgumentCaptor.forClass(QuotationCommandEntity.class);
         verify(commands).save(commandCaptor.capture());
         when(commands.findByActorUserIdAndCommandTypeAndTargetIdAndRequestKey(10L, "CREATE", 1L, "create-1"))
                 .thenReturn(Optional.of(commandCaptor.getValue()));
-        var savedCaptor = ArgumentCaptor.forClass(QuotationEntity.class);
+        ArgumentCaptor<QuotationEntity> savedCaptor = ArgumentCaptor.forClass(QuotationEntity.class);
         verify(quotations).saveAndFlush(savedCaptor.capture());
         when(quotations.findById(100L)).thenReturn(Optional.of(savedCaptor.getValue()));
         when(items.findByQuotationIdOrderByIdAsc(100L)).thenReturn(List.of());
 
-        var replay = service.create(1L, "create-1", request);
+        QuotationResponse replay = service.create(1L, "create-1", request);
 
         assertThat(replay.quotationId()).isEqualTo("100");
         verify(catalog).getStoreSummary(30L);
@@ -349,8 +350,13 @@ class QuotationManagementServiceTest {
     @Test
     void depositQuotationNeedsDeliveryAtLeastSixDaysAheadInVietnam() {
         // 48h to pay the deposit, then the remaining balance is due 3 days before delivery.
-        assertCode(() -> service.create(1L, "create-1", request("30.00", todayInVietnam.plusDays(5))),
-                "DELIVERY_TOO_SOON_FOR_REMAINING");
+        assertThatThrownBy(() -> service.create(1L, "create-1", request("30.00", todayInVietnam.plusDays(5))))
+                .isInstanceOfSatisfying(ApiException.class, exception -> {
+                    assertThat(exception.getCode()).isEqualTo("DELIVERY_TOO_SOON_FOR_REMAINING");
+                    // The message states the same 6 days as the date it gives.
+                    assertThat(exception.getMessage()).contains(dayMonthYear(todayInVietnam.plusDays(6)))
+                            .contains("ít nhất 6 ngày").doesNotContain("4 ngày");
+                });
         verify(quotations, never()).saveAndFlush(any());
 
         assertThat(service.create(1L, "create-2", request("30.00", todayInVietnam.plusDays(6))).status())
@@ -365,6 +371,26 @@ class QuotationManagementServiceTest {
     }
 
     @Test
+    void noNewQuotationOnceTheBuyerAcceptedOne() {
+        // Also covers an RFQ still OPEN while that acceptance is pending or predates single-award.
+        when(conversions.committedQuantity(1L)).thenReturn(10L);
+
+        assertCode(() -> service.create(1L, "after-award", request(customItem("100.00", "0"))), "RFQ_ALREADY_AWARDED");
+        verify(quotations, never()).saveAndFlush(any());
+        verifyNoInteractions(notifier);
+    }
+
+    @Test
+    void noRevisionOnceTheBuyerAcceptedAQuotation() {
+        QuotationEntity previous = prepareRevision();
+        when(conversions.committedQuantity(1L)).thenReturn(10L);
+
+        assertCode(() -> service.revise(90L, "revision-1", revision(3)), "RFQ_ALREADY_AWARDED");
+        assertThat(previous.getStatus()).isEqualTo(QuotationStatus.SUBMITTED);
+        verify(quotations, never()).saveAndFlush(any());
+    }
+
+    @Test
     void quotationCannotOfferMoreUnitsThanTheRfqAsks() {
         rfq.setQuantity(1);
         assertCode(() -> service.create(1L, "too-many", request(customItem("100.00", "0"))), "QUOTATION_EXCEEDS_RFQ_QUANTITY");
@@ -372,21 +398,36 @@ class QuotationManagementServiceTest {
     }
 
     @Test
-    void quotationWithoutRemainingBalanceMayDeliverSoon() {
-        assertThat(service.create(1L, "create-0", request("0.00", todayInVietnam.plusDays(1))).status())
+    void fullPaymentQuotationNeedsDeliveryAtLeastThreeDaysAheadInVietnam() {
+        // A 0% or 100% deposit is one FULL payment: 48h to pay, and goods are prepared only once it is paid.
+        for (String deposit : List.of("0.00", "100.00")) {
+            assertThatThrownBy(() -> service.create(1L, "soon-" + deposit, request(deposit, todayInVietnam.plusDays(2))))
+                    .isInstanceOfSatisfying(ApiException.class, exception -> {
+                        assertThat(exception.getCode()).isEqualTo("DELIVERY_TOO_SOON_FOR_PAYMENT");
+                        assertThat(exception.getMessage()).contains(dayMonthYear(todayInVietnam.plusDays(3)))
+                                .contains("ít nhất 3 ngày");
+                    });
+        }
+        verify(quotations, never()).saveAndFlush(any());
+
+        assertThat(service.create(1L, "create-0", request("0.00", todayInVietnam.plusDays(3))).status())
                 .isEqualTo(QuotationStatus.SUBMITTED);
-        assertThat(service.create(1L, "create-100", request("100.00", todayInVietnam.plusDays(1))).status())
+        assertThat(service.create(1L, "create-100", request("100.00", todayInVietnam.plusDays(3))).status())
                 .isEqualTo(QuotationStatus.SUBMITTED);
     }
 
     @Test
-    void depositRevisionNeedsDeliveryAtLeastFourDaysAhead() {
+    void depositRevisionNeedsDeliveryAtLeastSixDaysAhead() {
         prepareRevision();
 
         assertCode(() -> service.revise(90L, "revision-1", new ReviseQuotationRequest(3, new BigDecimal("30.00"),
-                validity, 3, todayInVietnam.plusDays(2), "EXPRESS", new BigDecimal("10000.00"), "Chuyển khoản",
+                validity, 3, todayInVietnam.plusDays(5), "EXPRESS", new BigDecimal("10000.00"), "Chuyển khoản",
                 List.of(customItem("100.00", "0")))), "DELIVERY_TOO_SOON_FOR_REMAINING");
         verify(quotations, never()).saveAndFlush(any());
+    }
+
+    private static String dayMonthYear(LocalDate day) {
+        return day.format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy"));
     }
 
     private QuotationEntity prepareRevision() {

@@ -72,7 +72,7 @@ public class StoreServiceImpl implements StoreService {
             if (!storeRepository.existsByStoreCode(code))
                 return code;
         }
-        throw new ConflictException("Could not generate a unique store code; retry the request");
+        throw new ConflictException("Không tạo được mã cửa hàng duy nhất, vui lòng thử lại");
     }
 
     /**
@@ -294,7 +294,7 @@ public class StoreServiceImpl implements StoreService {
         if (current == next)
             return;
         if (!admin && (current == StoreStatus.SUSPENDED || next == StoreStatus.SUSPENDED)) {
-            throw new ForbiddenException("Only an administrator can suspend or reinstate a store");
+            throw new ForbiddenException("Chỉ quản trị viên mới có thể tạm khóa hoặc mở khóa cửa hàng");
         }
         if (admin && next == StoreStatus.SUSPENDED
                 && (current == StoreStatus.ACTIVE || current == StoreStatus.INACTIVE))

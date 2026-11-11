@@ -16,9 +16,12 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import mss.mooncake.rfqnegotiation.client.IdentityServiceClient;
 import mss.mooncake.rfqnegotiation.client.dto.identity.CreateNotificationRequest;
@@ -26,6 +29,9 @@ import mss.mooncake.rfqnegotiation.client.dto.identity.SupplierSummaryResponse;
 import mss.mooncake.rfqnegotiation.client.dto.identity.UserSummaryResponse;
 import mss.mooncake.rfqnegotiation.dto.request.CreateConversationRequest;
 import mss.mooncake.rfqnegotiation.dto.request.SendMessageRequest;
+import mss.mooncake.rfqnegotiation.dto.response.ConversationCreatedResponse;
+import mss.mooncake.rfqnegotiation.dto.response.MessagePageResponse;
+import mss.mooncake.rfqnegotiation.entity.QuotationEntity;
 import mss.mooncake.rfqnegotiation.entity.RfqEntity;
 import mss.mooncake.rfqnegotiation.entity.RfqTargetStoreEntity;
 import mss.mooncake.rfqnegotiation.enums.RfqAudience;
@@ -46,6 +52,7 @@ import mss.mooncake.rfqnegotiation.websocket.MessagePersistedEvent;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.persistence.autoconfigure.EntityScan;
@@ -126,8 +133,8 @@ class ConversationApplicationServiceTest {
 
     @Test
     void creationIsIdempotentAndUsesCustomerIdRatherThanUserId() {
-        var first = service.create(rfqId, new CreateConversationRequest(77L));
-        var retry = service.create(rfqId, new CreateConversationRequest(77L));
+        ConversationCreatedResponse first = service.create(rfqId, new CreateConversationRequest(77L));
+        ConversationCreatedResponse retry = service.create(rfqId, new CreateConversationRequest(77L));
         assertThat(first.created()).isTrue();
         assertThat(retry.created()).isFalse();
         assertThat(retry.conversation().conversationId()).isEqualTo(first.conversation().conversationId());
@@ -174,12 +181,12 @@ class ConversationApplicationServiceTest {
     @Test
     void retryReusesPersistentMessageAndChangedPayloadConflicts() {
         Long id = createConversation();
-        var first = service.send(id, 101L, message("client-1", "Hello"));
-        var retry = service.send(id, 101L, message("client-1", "Hello"));
+        MessageResponse first = service.send(id, 101L, message("client-1", "Hello"));
+        MessageResponse retry = service.send(id, 101L, message("client-1", "Hello"));
         assertThat(retry.messageId()).isEqualTo(first.messageId());
         assertThat(messages.count()).isEqualTo(1);
         assertThatThrownBy(() -> service.send(id, 101L, message("client-1", "Changed"))).isInstanceOf(ApiException.class);
-        var supplier = service.send(id, 202L, message("client-1", "Reply"));
+        MessageResponse supplier = service.send(id, 202L, message("client-1", "Reply"));
         assertThat(supplier.messageId()).isNotEqualTo(first.messageId());
         assertThat(messages.count()).isEqualTo(2);
     }
@@ -187,17 +194,17 @@ class ConversationApplicationServiceTest {
     @Test
     void cursorsAreExclusiveAndMessagesAreReturnedAscending() {
         Long id = createConversation();
-        var a = service.send(id, 101L, message("a", "One"));
-        var b = service.send(id, 101L, message("b", "Two"));
-        var c = service.send(id, 101L, message("c", "Three"));
-        var latest = service.history(id, null, null, 2);
+        MessageResponse a = service.send(id, 101L, message("a", "One"));
+        MessageResponse b = service.send(id, 101L, message("b", "Two"));
+        MessageResponse c = service.send(id, 101L, message("c", "Three"));
+        MessagePageResponse latest = service.history(id, null, null, 2);
         assertThat(latest.items()).extracting("messageId").containsExactly(b.messageId(), c.messageId());
         assertThat(latest.hasMore()).isTrue();
         assertThat(latest.nextCursor()).isEqualTo(b.messageId());
-        var older = service.history(id, Long.valueOf(latest.nextCursor()), null, 2);
+        MessagePageResponse older = service.history(id, Long.valueOf(latest.nextCursor()), null, 2);
         assertThat(older.items()).extracting("messageId").containsExactly(a.messageId());
         assertThat(older.hasMore()).isFalse();
-        var newer = service.history(id, null, Long.valueOf(a.messageId()), 1);
+        MessagePageResponse newer = service.history(id, null, Long.valueOf(a.messageId()), 1);
         assertThat(newer.items()).extracting("messageId").containsExactly(b.messageId());
         assertThat(newer.nextCursor()).isEqualTo(b.messageId());
         assertThat(newer.hasMore()).isTrue();
@@ -220,7 +227,7 @@ class ConversationApplicationServiceTest {
         });
         assertThat(messages.count()).isZero();
         assertThat(broadcast.delivered).isEmpty();
-        var saved = service.send(id, 101L, message("commit", "Saved"));
+        MessageResponse saved = service.send(id, 101L, message("commit", "Saved"));
         assertThat(broadcast.delivered).containsExactly(saved);
         assertThat(messages.count()).isEqualTo(1);
     }
@@ -228,16 +235,16 @@ class ConversationApplicationServiceTest {
     @Test
     void concurrentRetriesCreateOnlyOnePersistentMessage() throws Exception {
         Long id = createConversation();
-        var ready = new CountDownLatch(2);
-        var start = new CountDownLatch(1);
-        try (var pool = Executors.newFixedThreadPool(2)) {
-            var task = (java.util.concurrent.Callable<MessageResponse>) () -> {
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try (ExecutorService pool = Executors.newFixedThreadPool(2)) {
+            Callable<MessageResponse> task = (java.util.concurrent.Callable<MessageResponse>) () -> {
                 ready.countDown();
                 start.await(10, TimeUnit.SECONDS);
                 return service.send(id, 101L, message("concurrent", "Once"));
             };
-            var first = pool.submit(task);
-            var second = pool.submit(task);
+            Future<MessageResponse> first = pool.submit(task);
+            Future<MessageResponse> second = pool.submit(task);
             assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
             start.countDown();
             assertThat(first.get(10, TimeUnit.SECONDS).messageId()).isEqualTo(second.get(10, TimeUnit.SECONDS).messageId());
@@ -274,7 +281,7 @@ class ConversationApplicationServiceTest {
         assertThat(reads.count()).isZero();
 
         service.send(id, 202L, message("s1", "One"));
-        var latest = service.send(id, 202L, message("s2", "Two"));
+        MessageResponse latest = service.send(id, 202L, message("s2", "Two"));
         service.markRead(id);
         service.markRead(id);
         assertThat(reads.findAll()).singleElement()
@@ -294,7 +301,7 @@ class ConversationApplicationServiceTest {
         assertThatThrownBy(() -> service.create(rfqId, new CreateConversationRequest(77L)))
                 .isInstanceOf(ApiException.class).extracting("code").isEqualTo("RFQ_NOT_OPEN");
 
-        var accepted = new mss.mooncake.rfqnegotiation.entity.QuotationEntity();
+        QuotationEntity accepted = new mss.mooncake.rfqnegotiation.entity.QuotationEntity();
         accepted.setRfqId(rfqId); accepted.setSupplierIdRef(77L); accepted.setStoreIdRef(30L); accepted.setVersionNo(1);
         accepted.setTotalAmount(new java.math.BigDecimal("100.00")); accepted.setDepositPercent(java.math.BigDecimal.ZERO);
         accepted.setShippingFee(java.math.BigDecimal.ZERO); accepted.setValidUntil(LocalDateTime.now().plusDays(1));
@@ -329,7 +336,7 @@ class ConversationApplicationServiceTest {
         service.send(id, 101L, message("b1", "Xin chào"));
         service.send(id, 101L, message("b2", "Cho mình hỏi giá hộp 4 bánh"));
 
-        var burst = sentNotifications();
+        List<CreateNotificationRequest> burst = sentNotifications();
         assertThat(burst).hasSize(2);
         assertThat(burst).extracting(CreateNotificationRequest::supplierId).containsOnly(77L);
         // Same key for the whole streak: Identity keeps a single notification.
@@ -347,7 +354,7 @@ class ConversationApplicationServiceTest {
 
         // A supplier reply goes to the buyer, addressed by customer id.
         service.send(id, 202L, message("s1", "Có ạ"));
-        var reply = sentNotifications().getLast();
+        CreateNotificationRequest reply = sentNotifications().getLast();
         assertThat(reply.customerId()).isEqualTo(11L);
         assertThat(reply.supplierId()).isNull();
         assertThat(reply.title()).contains("Bakery");
@@ -372,7 +379,7 @@ class ConversationApplicationServiceTest {
     }
 
     private List<CreateNotificationRequest> sentNotifications() {
-        var captor = org.mockito.ArgumentCaptor.forClass(CreateNotificationRequest.class);
+        ArgumentCaptor<CreateNotificationRequest> captor = org.mockito.ArgumentCaptor.forClass(CreateNotificationRequest.class);
         verify(identity, atLeast(0)).createNotification(captor.capture());
         return captor.getAllValues();
     }
@@ -382,7 +389,7 @@ class ConversationApplicationServiceTest {
     }
 
     private static FeignException.NotFound notFound() {
-        var request = Request.create(Request.HttpMethod.GET, "/internal/v1/suppliers/by-user", Map.of(), null,
+        Request request = Request.create(Request.HttpMethod.GET, "/internal/v1/suppliers/by-user", Map.of(), null,
                 StandardCharsets.UTF_8, null);
         return new FeignException.NotFound("not found", request, null, Map.of());
     }
@@ -392,7 +399,7 @@ class ConversationApplicationServiceTest {
     }
 
     private void login(Long userId) {
-        var principal = new UserPrincipal(userId, "user@test", List.of());
+        UserPrincipal principal = new UserPrincipal(userId, "user@test", List.of());
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(principal, null, List.of()));
     }
 }

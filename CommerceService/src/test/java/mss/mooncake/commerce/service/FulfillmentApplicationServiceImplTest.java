@@ -204,7 +204,7 @@ class FulfillmentApplicationServiceImplTest {
 
             assertThatThrownBy(() -> fulfillmentService.createShipment(request, OTHER_SUPPLIER_ID))
                     .isInstanceOf(ForbiddenException.class)
-                    .hasMessageContaining("permission");
+                    .hasMessageContaining("không có quyền");
         }
 
         @Test
@@ -502,7 +502,7 @@ class FulfillmentApplicationServiceImplTest {
 
             assertThatThrownBy(() -> fulfillmentService.acceptSellerOrder(SELLER_ORDER_ID, CUSTOMER_ID))
                     .isInstanceOf(BadRequestException.class)
-                    .hasMessageContaining("not delivered yet");
+                    .hasMessageContaining("chưa giao xong");
         }
 
         @Test
@@ -539,7 +539,7 @@ class FulfillmentApplicationServiceImplTest {
 
             assertThatThrownBy(() -> fulfillmentService.markAsShipped(SHIPMENT_ID, SUPPLIER_ID))
                     .isInstanceOf(BadRequestException.class)
-                    .hasMessageContaining("Insufficient payment");
+                    .hasMessageContaining("chưa thanh toán đủ");
             assertThat(shipment.getStatus()).isEqualTo(ShipmentStatus.PLANNED);
         }
 
@@ -662,13 +662,13 @@ class FulfillmentApplicationServiceImplTest {
             LocalDateTime ship = LocalDateTime.now().plusDays(3);
             assertThatThrownBy(() -> fulfillmentService.createShipment(new CreateShipmentRequest(SELLER_ORDER_ID,
                     "STANDARD", "GHTK", null, ship, ship.minusDays(1), BigDecimal.ZERO), SUPPLIER_ID))
-                    .isInstanceOf(BadRequestException.class).hasMessageContaining("expectedDeliveryAt");
+                    .isInstanceOf(BadRequestException.class).hasMessageContaining("Ngày giao dự kiến");
 
             when(shipmentRepository.findById(SHIPMENT_ID)).thenReturn(Optional.of(shipment));
             when(sellerOrderRepository.findById(SELLER_ORDER_ID)).thenReturn(Optional.of(sellerOrder));
             assertThatThrownBy(() -> fulfillmentService.updateShipment(SHIPMENT_ID, new UpdateShipmentRequest(
                     null, null, null, shipment.getExpectedShipAt().minusHours(1)), SUPPLIER_ID))
-                    .isInstanceOf(BadRequestException.class).hasMessageContaining("expectedDeliveryAt");
+                    .isInstanceOf(BadRequestException.class).hasMessageContaining("Ngày giao dự kiến");
         }
     }
 
@@ -762,7 +762,7 @@ class FulfillmentApplicationServiceImplTest {
 
             assertThatThrownBy(() -> fulfillmentService.createReview(request, CUSTOMER_ID))
                     .isInstanceOf(ConflictException.class)
-                    .hasMessageContaining("already submitted a review");
+                    .hasMessageContaining("đã đánh giá");
         }
 
         @Test
@@ -771,12 +771,12 @@ class FulfillmentApplicationServiceImplTest {
             CreateReviewRequest requestZero = new CreateReviewRequest(ORDER_ITEM_ID, 0, "Bad");
             assertThatThrownBy(() -> fulfillmentService.createReview(requestZero, CUSTOMER_ID))
                     .isInstanceOf(BadRequestException.class)
-                    .hasMessageContaining("between 1 and 5");
+                    .hasMessageContaining("từ 1 đến 5");
 
             CreateReviewRequest requestSix = new CreateReviewRequest(ORDER_ITEM_ID, 6, "Super");
             assertThatThrownBy(() -> fulfillmentService.createReview(requestSix, CUSTOMER_ID))
                     .isInstanceOf(BadRequestException.class)
-                    .hasMessageContaining("between 1 and 5");
+                    .hasMessageContaining("từ 1 đến 5");
         }
 
         @Test

@@ -58,6 +58,8 @@ public interface FinanceRepository {
     List<Long> pendingCancellationOrderIds();
     List<Long> overdueRfqOrderIds(Instant placedBefore);
     List<Long> overdueRetailOrderIds(Instant placedBefore);
+    /** Deposit-paid RFQ orders still short of their total whose balance deadline passed (delivery on or before the date). */
+    List<Long> overdueBalanceRfqOrderIds(LocalDate deliveredOnOrBefore);
     /** Retail checkouts with confirmed stock still to return: fully cancelled, or with a cancelled seller order. */
     List<Long> unrestoredCancelledRetailOrderIds();
     /** Cancelled seller orders of the checkout whose own lines were not returned to Catalog yet. */
@@ -91,6 +93,9 @@ public interface FinanceRepository {
     List<TransferDestination> transferDestinations(long orderId);
     /** Every seller order of the supplier that has a finance context, newest first. */
     List<SupplierPayout> supplierPayouts(long supplierId);
+    /** Every seller order that has a finance context, newest first; a non-blank query matches seller or customer order number. */
+    List<SupplierPayout> payouts(String query, int offset, int limit);
+    long countPayouts(String query);
     List<FinanceResponse.Audit> history(long orderId);
     void event(long orderId, String type, long resourceId, String actor, String detail);
     void ledger(long orderId, String key, String type, long amount);

@@ -92,7 +92,7 @@ class SupplierApplicationServiceTest {
 
         DuplicateResourceException ex = assertThrows(DuplicateResourceException.class,
                 () -> supplierService.registerSupplier(1L, request));
-        assertTrue(ex.getMessage().contains("already registered as a supplier"));
+        assertTrue(ex.getMessage().contains("đã đăng ký làm nhà cung cấp"));
         verify(supplierProfileRepository, never()).save(any());
     }
 
@@ -105,7 +105,7 @@ class SupplierApplicationServiceTest {
 
         DuplicateResourceException ex = assertThrows(DuplicateResourceException.class,
                 () -> supplierService.registerSupplier(1L, request));
-        assertTrue(ex.getMessage().contains("Tax code is already registered"));
+        assertTrue(ex.getMessage().contains("Mã số thuế đã được đăng ký"));
         verify(supplierProfileRepository, never()).save(any());
     }
 

@@ -27,7 +27,7 @@ public class UserController {
     @GetMapping("/me")
     public ResponseEntity<UserProfileResponse> getCurrentUser(@AuthenticationPrincipal UserPrincipal principal) {
         if (principal == null) {
-            throw new UnauthorizedException("User is not authenticated");
+            throw new UnauthorizedException("Vui lòng đăng nhập");
         }
         return ResponseEntity.ok(accountApplicationService.getProfile(principal.getUserId()));
     }
@@ -36,7 +36,7 @@ public class UserController {
     public ResponseEntity<UserProfileResponse> updateCurrentUser(@AuthenticationPrincipal UserPrincipal principal,
                                                                  @Valid @RequestBody UpdateProfileRequest request) {
         if (principal == null) {
-            throw new UnauthorizedException("User is not authenticated");
+            throw new UnauthorizedException("Vui lòng đăng nhập");
         }
         return ResponseEntity.ok(accountApplicationService.updateProfile(principal.getUserId(), request));
     }

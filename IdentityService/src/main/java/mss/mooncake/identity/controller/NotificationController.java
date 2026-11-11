@@ -50,7 +50,7 @@ public class NotificationController {
     }
 
     private static Long userId(UserPrincipal principal) {
-        if (principal == null) throw new UnauthorizedException("User is not authenticated");
+        if (principal == null) throw new UnauthorizedException("Vui lòng đăng nhập");
         return principal.getUserId();
     }
 }

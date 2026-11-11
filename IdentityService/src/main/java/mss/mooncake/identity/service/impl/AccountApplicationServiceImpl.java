@@ -98,7 +98,7 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
     public UserSummaryResponse register(RegisterRequest request) {
         String normalizedEmail = request.email().trim().toLowerCase();
         if (userRepository.existsByEmail(normalizedEmail)) {
-            throw new DuplicateResourceException("Email is already registered: " + normalizedEmail);
+            throw new DuplicateResourceException("Email đã được đăng ký: " + normalizedEmail);
         }
 
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
@@ -138,10 +138,10 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
     public AuthResponse login(LoginRequest request) {
         String normalizedEmail = request.email().trim().toLowerCase();
         UserEntity user = userRepository.findByEmail(normalizedEmail)
-                .orElseThrow(() -> new UnauthorizedException("Invalid email or password"));
+                .orElseThrow(() -> new UnauthorizedException("Email hoặc mật khẩu không đúng"));
 
         if (user.getPasswordHash() == null || !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
-            throw new UnauthorizedException("Invalid email or password");
+            throw new UnauthorizedException("Email hoặc mật khẩu không đúng");
         }
 
         if (user.getStatus() != UserStatus.ACTIVE) {
@@ -183,7 +183,7 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
         }
 
         if (user.getStatus() != UserStatus.ACTIVE) {
-            throw new ForbiddenException("Account is not active. Current status: " + user.getStatus());
+            throw new ForbiddenException("Tài khoản chưa được kích hoạt hoặc đang bị khóa. Trạng thái hiện tại: " + user.getStatus());
         }
         CustomerProfileEntity profile = customerProfileRepository.findByUserId(user.getId()).orElse(null);
         return createAuthResponse(user, profile);
@@ -236,7 +236,7 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
     @Transactional(readOnly = true)
     public UserProfileResponse getProfile(Long userId) {
         UserEntity user = userRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + userId));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy người dùng, mã: " + userId));
 
         CustomerProfileEntity profile = customerProfileRepository.findByUserId(userId).orElse(null);
 
@@ -256,10 +256,10 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
     @Transactional
     public UserProfileResponse updateProfile(Long userId, UpdateProfileRequest request) {
         UserEntity user = userRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + userId));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy người dùng, mã: " + userId));
 
         CustomerProfileEntity profile = customerProfileRepository.findByUserId(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("Customer profile not found for user id: " + userId));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy hồ sơ khách hàng của người dùng, mã: " + userId));
 
         boolean updated = false;
         if (request.fullName() != null && !request.fullName().isBlank()) {
@@ -296,7 +296,7 @@ public class AccountApplicationServiceImpl implements AccountApplicationService 
     @Transactional(readOnly = true)
     public UserSummaryResponse getUserSummary(Long userId) {
         UserEntity user = userRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + userId));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy người dùng, mã: " + userId));
 
         CustomerProfileEntity profile = customerProfileRepository.findByUserId(userId)
                 .orElse(null);

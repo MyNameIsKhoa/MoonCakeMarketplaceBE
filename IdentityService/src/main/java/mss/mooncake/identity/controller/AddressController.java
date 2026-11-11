@@ -33,7 +33,7 @@ public class AddressController {
     @GetMapping
     public ResponseEntity<List<AddressResponse>> getMyAddresses(@AuthenticationPrincipal UserPrincipal principal) {
         if (principal == null) {
-            throw new UnauthorizedException("User is not authenticated");
+            throw new UnauthorizedException("Vui lòng đăng nhập");
         }
         return ResponseEntity.ok(addressService.getCustomerAddresses(principal.getUserId()));
     }
@@ -42,7 +42,7 @@ public class AddressController {
     public ResponseEntity<AddressResponse> getAddress(@AuthenticationPrincipal UserPrincipal principal,
                                                       @PathVariable("id") Long id) {
         if (principal == null) {
-            throw new UnauthorizedException("User is not authenticated");
+            throw new UnauthorizedException("Vui lòng đăng nhập");
         }
         return ResponseEntity.ok(addressService.getCustomerAddress(principal.getUserId(), id));
     }
@@ -51,7 +51,7 @@ public class AddressController {
     public ResponseEntity<AddressResponse> createAddress(@AuthenticationPrincipal UserPrincipal principal,
                                                          @Valid @RequestBody AddressRequest request) {
         if (principal == null) {
-            throw new UnauthorizedException("User is not authenticated");
+            throw new UnauthorizedException("Vui lòng đăng nhập");
         }
         return ResponseEntity.status(HttpStatus.CREATED).body(addressService.createAddress(principal.getUserId(), request));
     }
@@ -61,7 +61,7 @@ public class AddressController {
                                                          @PathVariable("id") Long id,
                                                          @Valid @RequestBody UpdateAddressRequest request) {
         if (principal == null) {
-            throw new UnauthorizedException("User is not authenticated");
+            throw new UnauthorizedException("Vui lòng đăng nhập");
         }
         return ResponseEntity.ok(addressService.updateAddress(principal.getUserId(), id, request));
     }
@@ -70,7 +70,7 @@ public class AddressController {
     public ResponseEntity<Void> deleteAddress(@AuthenticationPrincipal UserPrincipal principal,
                                               @PathVariable("id") Long id) {
         if (principal == null) {
-            throw new UnauthorizedException("User is not authenticated");
+            throw new UnauthorizedException("Vui lòng đăng nhập");
         }
         addressService.deleteAddress(principal.getUserId(), id);
         return ResponseEntity.noContent().build();

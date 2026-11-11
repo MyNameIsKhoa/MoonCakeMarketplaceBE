@@ -65,7 +65,7 @@ class QuotationManagementIntegrationTest {
         when(actor.supplierId()).thenReturn(20L);
         when(actor.verifiedSupplierId()).thenReturn(20L);
         when(catalog.getStoreSummary(30L)).thenReturn(new StoreSummaryResponse(30L, 20L, "STORE-30", "Shop", "shop", null, "ACTIVE"));
-        var rfq = new RfqEntity();
+        RfqEntity rfq = new RfqEntity();
         rfq.setRfqCode("RFQ-MANAGEMENT-TEST");
         rfq.setCustomerIdRef(2L);
         rfq.setTitle("Hộp bánh công ty");
@@ -79,16 +79,16 @@ class QuotationManagementIntegrationTest {
     @Test
     void savesImagesPerVersionAndReplaysWithoutRefreshingCatalog() {
         when(catalog.getProductSnapshot(40L, 50L)).thenReturn(snapshot("/images/original.jpg"));
-        var base = request();
-        var request = new CreateQuotationRequest(base.storeId(), base.depositPercent(), base.validUntil(), base.leadTimeDays(),
+        CreateQuotationRequest base = request();
+        CreateQuotationRequest request = new CreateQuotationRequest(base.storeId(), base.depositPercent(), base.validUntil(), base.leadTimeDays(),
                 base.proposedDeliveryDate(), base.shippingMethod(), base.shippingFee(), base.paymentTerms(),
                 List.of(new QuotationItemRequest(40L, 50L, "Ignored", null, 10, new BigDecimal("100.00"), BigDecimal.ZERO, null)));
-        var original = service.create(rfqId, "catalog-original", request);
+        QuotationResponse original = service.create(rfqId, "catalog-original", request);
         Long originalId = Long.valueOf(original.quotationId());
         when(catalog.getProductSnapshot(40L, 50L)).thenReturn(snapshot("/images/revised.jpg"));
-        var revision = new ReviseQuotationRequest(1, request.depositPercent(), request.validUntil(), request.leadTimeDays(),
+        ReviseQuotationRequest revision = new ReviseQuotationRequest(1, request.depositPercent(), request.validUntil(), request.leadTimeDays(),
                 request.proposedDeliveryDate(), request.shippingMethod(), request.shippingFee(), request.paymentTerms(), request.items());
-        var revised = service.revise(originalId, "catalog-revision", revision);
+        QuotationResponse revised = service.revise(originalId, "catalog-revision", revision);
 
         assertThat(original.items().getFirst().imageUrlSnapshot()).isEqualTo("/images/original.jpg");
         assertThat(revised.items().getFirst().imageUrlSnapshot()).isEqualTo("/images/revised.jpg");
@@ -106,10 +106,10 @@ class QuotationManagementIntegrationTest {
 
     @Test
     void concurrentCreateWithSameKeyProducesOneQuotationAndOneCommand() throws Exception {
-        var ready = new CountDownLatch(2);
-        var start = new CountDownLatch(1);
-        var first = concurrentCreate(ready, start);
-        var second = concurrentCreate(ready, start);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        CompletableFuture<QuotationResponse> first = concurrentCreate(ready, start);
+        CompletableFuture<QuotationResponse> second = concurrentCreate(ready, start);
         assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
         start.countDown();
 
@@ -123,10 +123,10 @@ class QuotationManagementIntegrationTest {
     void competingRevisionsOnlyAllowOneSuccessAndPreservePreviousItems() throws Exception {
         QuotationResponse original = service.create(rfqId, "original", request());
         Long originalId = Long.valueOf(original.quotationId());
-        var ready = new CountDownLatch(2);
-        var start = new CountDownLatch(1);
-        var first = concurrentRevision(originalId, "revision-a", ready, start);
-        var second = concurrentRevision(originalId, "revision-b", ready, start);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        CompletableFuture<RevisionOutcome> first = concurrentRevision(originalId, "revision-a", ready, start);
+        CompletableFuture<RevisionOutcome> second = concurrentRevision(originalId, "revision-b", ready, start);
         assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
         start.countDown();
 
@@ -151,8 +151,8 @@ class QuotationManagementIntegrationTest {
                                                                  CountDownLatch ready, CountDownLatch start) {
         return CompletableFuture.supplyAsync(() -> {
             awaitStart(ready, start);
-            var request = request();
-            var revision = new ReviseQuotationRequest(1, request.depositPercent(), request.validUntil(), request.leadTimeDays(),
+            CreateQuotationRequest request = request();
+            ReviseQuotationRequest revision = new ReviseQuotationRequest(1, request.depositPercent(), request.validUntil(), request.leadTimeDays(),
                     request.proposedDeliveryDate(), request.shippingMethod(), request.shippingFee(), request.paymentTerms(), request.items());
             try {
                 return new RevisionOutcome(service.revise(quotationId, key, revision), null);

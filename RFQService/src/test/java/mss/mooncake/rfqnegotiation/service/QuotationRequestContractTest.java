@@ -21,7 +21,7 @@ class QuotationRequestContractTest {
 
     @Test
     void acceptsDecimalStringsIntegerQuantityAndUtcTimestamp() {
-        var request = mapper.readValue(CREATE, CreateQuotationRequest.class);
+        CreateQuotationRequest request = mapper.readValue(CREATE, CreateQuotationRequest.class);
         assertThat(request.storeId()).isEqualTo(30L);
         assertThat(request.depositPercent()).isEqualByComparingTo("30.00");
         assertThat(request.items().getFirst().quantity()).isEqualTo(10);

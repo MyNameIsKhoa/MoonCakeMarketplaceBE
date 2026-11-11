@@ -8,6 +8,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.HexFormat;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import mss.mooncake.commerce.dto.request.CreateOrderFromQuotationRequest;
 import mss.mooncake.commerce.dto.response.OrderResponse;
@@ -47,24 +48,24 @@ public class OrderApplicationServiceImpl implements OrderApplicationService {
         validateAmounts(request);
         String hash=hash(json.writeValueAsString(request));
         try { return tx.execute(s -> {
-            var replay=conversions.findByQuotationIdRef(request.quotationId());
+            Optional<QuotationOrderConversionEntity> replay=conversions.findByQuotationIdRef(request.quotationId());
             if (replay.isPresent()) return replay(replay.get(),request,hash);
             if (conversions.findByIdempotencyKey(request.idempotencyKey()).isPresent()) throw conflict();
             // Unique insert claims this quotation. Its claim and all snapshots commit atomically.
-            var claim=new QuotationOrderConversionEntity(); claim.setQuotationIdRef(request.quotationId());
+            QuotationOrderConversionEntity claim=new QuotationOrderConversionEntity(); claim.setQuotationIdRef(request.quotationId());
             claim.setQuotationVersion(request.quotationVersion()); claim.setIdempotencyKey(request.idempotencyKey()); claim.setRequestHash(hash);
             conversions.saveAndFlush(claim);
-            var order=new CustomerOrderEntity(); order.setOrderNo("RFQ-"+UUID.randomUUID()); order.setCustomerIdRef(request.customerId());
+            CustomerOrderEntity order=new CustomerOrderEntity(); order.setOrderNo("RFQ-"+UUID.randomUUID()); order.setCustomerIdRef(request.customerId());
             order.setSourceType("RFQ"); order.setRfqIdRef(request.rfqId()); order.setSubtotal(request.subtotal());
             order.setDiscountTotal(BigDecimal.ZERO); order.setShippingTotal(request.terms().shippingFee());
             order.setGrandTotal(request.totalAmount()); order.setStatus("AWAITING_DEPOSIT"); order.setPlacedAt(request.acceptedAt()); orders.saveAndFlush(order);
-            var address=new DeliveryAddressEntity(); var a=request.deliveryAddressSnapshot();
+            DeliveryAddressEntity address=new DeliveryAddressEntity(); CreateOrderFromQuotationRequest.AddressSnapshot a=request.deliveryAddressSnapshot();
             address.setOrderId(order.getId()); address.setSourceAddressIdRef(a.sourceAddressId()); address.setRecipientName(a.recipientName());
             address.setRecipientPhone(a.recipientPhone()); address.setAddressLine(a.addressLine()); address.setWard(a.ward());
             address.setDistrict(a.district()); address.setCity(a.city()); addresses.save(address);
             // null = no deposit split: one FULL payment, like retail orders (deposit/remaining stay empty).
             Long deposit=agreedDeposit(request.totalAmount(),request.terms().depositPercent());
-            var seller=new SellerOrderEntity(); seller.setOrderId(order.getId()); seller.setSellerOrderNo("RFQS-"+UUID.randomUUID());
+            SellerOrderEntity seller=new SellerOrderEntity(); seller.setOrderId(order.getId()); seller.setSellerOrderNo("RFQS-"+UUID.randomUUID());
             seller.setStoreIdRef(request.storeId()); seller.setSupplierIdRef(request.supplierId()); seller.setQuotationIdRef(request.quotationId());
             seller.setStoreNameSnapshot(request.storeSnapshot().storeName()); seller.setSupplierNameSnapshot(request.storeSnapshot().supplierName());
             seller.setSubtotal(request.subtotal()); seller.setShippingFee(request.terms().shippingFee()); seller.setTotalAmount(request.totalAmount());
@@ -77,8 +78,8 @@ public class OrderApplicationServiceImpl implements OrderApplicationService {
             seller.setDeliveryDateSnapshot(request.terms().deliveryDate());
             seller.setShippingMethodSnapshot(request.terms().shippingMethod()); seller.setPaymentTermsSnapshot(request.terms().paymentTerms());
             seller.setStatus(deposit!=null?"AWAITING_DEPOSIT":"AWAITING_PAYMENT"); order.setStatus(seller.getStatus()); sellers.saveAndFlush(seller);
-            for (var line:request.items()) {
-                var item=new OrderItemEntity(); item.setSellerOrderId(seller.getId()); item.setVariantIdRef(line.variantId());
+            for (CreateOrderFromQuotationRequest.Item line:request.items()) {
+                OrderItemEntity item=new OrderItemEntity(); item.setSellerOrderId(seller.getId()); item.setVariantIdRef(line.variantId());
                 item.setProductCodeSnapshot(line.productCodeSnapshot()); item.setProductNameSnapshot(line.productNameSnapshot());
                 item.setVariantNameSnapshot(line.variantNameSnapshot()); item.setSkuSnapshot(line.skuSnapshot()); item.setImageUrlSnapshot(line.imageUrlSnapshot());
                 item.setQuantity(line.quantity()); item.setUnitPrice(line.unitPrice()); item.setDiscountAmount(line.discountAmount()); item.setSubtotal(line.subtotal()); items.save(item);
@@ -95,7 +96,7 @@ public class OrderApplicationServiceImpl implements OrderApplicationService {
         }
     }
     @Override public OrderResponse getOrderByQuotation(Long quotationId) {
-        var c=conversions.findByQuotationIdRef(quotationId).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,"Quotation has not been converted"));
+        QuotationOrderConversionEntity c=conversions.findByQuotationIdRef(quotationId).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,"Quotation has not been converted"));
         return response(c,sellers.findById(c.getSellerOrderId()).orElseThrow().getStatus());
     }
 
@@ -121,7 +122,7 @@ public class OrderApplicationServiceImpl implements OrderApplicationService {
         // Payment rows must be whole VND (CK_payment_integer_vnd); reject before anything is persisted.
         if (!wholeVnd(r.terms().shippingFee()) || r.items().stream().anyMatch(i->!wholeVnd(i.unitPrice()) || !wholeVnd(i.discountAmount()))) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Quotation amounts must be whole VND");
         BigDecimal sum=BigDecimal.ZERO;
-        for (var i:r.items()) {
+        for (CreateOrderFromQuotationRequest.Item i:r.items()) {
             BigDecimal gross=i.unitPrice().multiply(BigDecimal.valueOf(i.quantity()));
             if (i.quantity()<=0 || i.unitPrice().signum()<0 || i.discountAmount().signum()<0 || i.discountAmount().compareTo(gross)>0 || gross.subtract(i.discountAmount()).compareTo(i.subtotal())!=0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid quotation item amounts");
             sum=sum.add(i.subtotal());

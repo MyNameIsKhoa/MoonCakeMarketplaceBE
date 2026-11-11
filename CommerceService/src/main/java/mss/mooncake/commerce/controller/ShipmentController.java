@@ -37,7 +37,7 @@ public class ShipmentController {
 
     private Long supplier(Authentication authentication) {
         Long id = actors.resolve(authentication).supplierId();
-        if (id == null) throw new ForbiddenException("Verified supplier required");
+        if (id == null) throw new ForbiddenException("Cần tài khoản nhà cung cấp đã được xác minh");
         return id;
     }
 

@@ -111,7 +111,7 @@ public class ProductServiceImpl implements ProductService {
             if (!productRepository.existsByStoreIdAndProductCode(storeId, code))
                 return code;
         }
-        throw new ConflictException("Could not generate a unique product code; retry the request");
+        throw new ConflictException("Không tạo được mã sản phẩm duy nhất, vui lòng thử lại");
     }
 
     private void requireActiveCategory(Long categoryId) {
@@ -151,7 +151,7 @@ public class ProductServiceImpl implements ProductService {
             case DRAFT, OUT_OF_STOCK -> false;
         };
         if (!allowed) {
-            throw new BadRequestException("Cannot change product status from " + current + " to " + next);
+            throw new BadRequestException("Không thể chuyển trạng thái sản phẩm từ " + current + " sang " + next);
         }
         if (next == ProductStatus.ACTIVE
                 && !variantRepository.existsByProductIdAndStatus(product.getId(), ProductStatus.ACTIVE)) {

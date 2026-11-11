@@ -31,7 +31,7 @@ public class SupplierProfileController {
     public ResponseEntity<SupplierProfileResponse> registerSupplier(@AuthenticationPrincipal UserPrincipal principal,
                                                                     @Valid @RequestBody SupplierProfileRequest request) {
         if (principal == null) {
-            throw new UnauthorizedException("User is not authenticated");
+            throw new UnauthorizedException("Vui lòng đăng nhập");
         }
         return ResponseEntity.status(HttpStatus.CREATED).body(supplierService.registerSupplier(principal.getUserId(), request));
     }
@@ -39,7 +39,7 @@ public class SupplierProfileController {
     @GetMapping
     public ResponseEntity<SupplierProfileResponse> getMySupplierProfile(@AuthenticationPrincipal UserPrincipal principal) {
         if (principal == null) {
-            throw new UnauthorizedException("User is not authenticated");
+            throw new UnauthorizedException("Vui lòng đăng nhập");
         }
         return ResponseEntity.ok(supplierService.getSupplierProfile(principal.getUserId()));
     }
@@ -48,7 +48,7 @@ public class SupplierProfileController {
     public ResponseEntity<SupplierProfileResponse> updateMySupplierProfile(@AuthenticationPrincipal UserPrincipal principal,
                                                                            @Valid @RequestBody UpdateSupplierProfileRequest request) {
         if (principal == null) {
-            throw new UnauthorizedException("User is not authenticated");
+            throw new UnauthorizedException("Vui lòng đăng nhập");
         }
         return ResponseEntity.ok(supplierService.updateSupplierProfile(principal.getUserId(), request));
     }

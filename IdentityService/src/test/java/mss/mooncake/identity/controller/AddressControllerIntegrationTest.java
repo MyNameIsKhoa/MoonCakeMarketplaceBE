@@ -173,7 +173,7 @@ class AddressControllerIntegrationTest {
                         .content(objectMapper.writeValueAsString(hackReq)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.status").value(403))
-                .andExpect(jsonPath("$.message", containsString("do not have permission")));
+                .andExpect(jsonPath("$.message", containsString("không có quyền")));
     }
 
     @Test
@@ -183,7 +183,7 @@ class AddressControllerIntegrationTest {
                         .header("Authorization", "Bearer " + tokenUserB))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.status").value(403))
-                .andExpect(jsonPath("$.message", containsString("do not have permission")));
+                .andExpect(jsonPath("$.message", containsString("không có quyền")));
     }
 
     @Test

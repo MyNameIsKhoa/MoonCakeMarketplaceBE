@@ -69,7 +69,7 @@ class RfqNotifierTest {
     void newQuotationGoesToTheBuyerWithAQuotationTarget() {
         notifier.quotationSubmitted(rfq, quotation, "Tiệm Bánh Như Lan");
 
-        var request = sent();
+        CreateNotificationRequest request = sent();
         assertThat(request.customerId()).isEqualTo(101L);
         assertThat(request.userId()).isNull();
         assertThat(request.supplierId()).isNull();
@@ -94,7 +94,7 @@ class RfqNotifierTest {
         quotation.setDecisionReason("Giá cao hơn ngân sách");
         notifier.quotationRejected(rfq, quotation);
 
-        var request = sent();
+        CreateNotificationRequest request = sent();
         assertThat(request.supplierId()).isEqualTo(202L);
         assertThat(request.type()).isEqualTo("QUOTATION_REJECTED");
         assertThat(request.body()).contains("Giá cao hơn ngân sách");
@@ -114,7 +114,7 @@ class RfqNotifierTest {
 
     @Test
     void cancelledOrderNotifiesBothSidesWithTheirOwnOrder() {
-        var conversion = new QuotationConversionEntity();
+        QuotationConversionEntity conversion = new QuotationConversionEntity();
         conversion.setOrderIdRef(501L);
         conversion.setSellerOrderIdRef(601L);
 
@@ -122,8 +122,8 @@ class RfqNotifierTest {
 
         ArgumentCaptor<CreateNotificationRequest> captor = ArgumentCaptor.forClass(CreateNotificationRequest.class);
         verify(identity, times(2)).createNotification(captor.capture());
-        var buyer = captor.getAllValues().stream().filter(r -> r.customerId() != null).findFirst().orElseThrow();
-        var seller = captor.getAllValues().stream().filter(r -> r.supplierId() != null).findFirst().orElseThrow();
+        CreateNotificationRequest buyer = captor.getAllValues().stream().filter(r -> r.customerId() != null).findFirst().orElseThrow();
+        CreateNotificationRequest seller = captor.getAllValues().stream().filter(r -> r.supplierId() != null).findFirst().orElseThrow();
         assertThat(buyer.target()).isEqualTo(Map.of("kind", "ORDER", "id", "501"));
         assertThat(buyer.dedupKey()).isEqualTo("ORDER_CANCELLED:501");
         assertThat(seller.supplierId()).isEqualTo(202L);
@@ -133,7 +133,7 @@ class RfqNotifierTest {
 
     @Test
     void chatMessageGoesToTheOtherSideAndCollapsesUntilTheRecipientReads() {
-        var conversation = new ConversationEntity();
+        ConversationEntity conversation = new ConversationEntity();
         ReflectionTestUtils.setField(conversation, "id", 77L);
         conversation.setRfqId(5L);
         conversation.setCustomerIdRef(101L);
@@ -144,8 +144,8 @@ class RfqNotifierTest {
 
         ArgumentCaptor<CreateNotificationRequest> captor = ArgumentCaptor.forClass(CreateNotificationRequest.class);
         verify(identity, times(2)).createNotification(captor.capture());
-        var toSupplier = captor.getAllValues().get(0);
-        var toBuyer = captor.getAllValues().get(1);
+        CreateNotificationRequest toSupplier = captor.getAllValues().get(0);
+        CreateNotificationRequest toBuyer = captor.getAllValues().get(1);
         assertThat(toSupplier.supplierId()).isEqualTo(202L);
         assertThat(toSupplier.type()).isEqualTo("CHAT_MESSAGE");
         assertThat(toSupplier.title()).contains("Công ty Demo");
@@ -159,7 +159,7 @@ class RfqNotifierTest {
 
     @Test
     void identityFailuresAreSwallowed() {
-        var request = Request.create(Request.HttpMethod.POST, "http://identity/internal", Map.of(), null, StandardCharsets.UTF_8, null);
+        Request request = Request.create(Request.HttpMethod.POST, "http://identity/internal", Map.of(), null, StandardCharsets.UTF_8, null);
         doThrow(new FeignException.ServiceUnavailable("down", request, null, null))
                 .when(identity).createNotification(any());
 

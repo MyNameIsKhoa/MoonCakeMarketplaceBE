@@ -1,6 +1,9 @@
 package mss.mooncake.rfqnegotiation.service.impl;
 
 import feign.FeignException;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import java.math.BigDecimal;
@@ -278,12 +281,12 @@ public class RfqApplicationServiceImpl implements RfqApplicationService {
     /** Public RFQs, plus SELECTED_STORES RFQs that invite one of the caller's stores. */
     private Specification<RfqEntity> visibleInFeed(Long supplierId) {
         return (root, query, cb) -> {
-            var isPublic = cb.equal(root.get("audience"), RfqAudience.ALL);
+            Predicate isPublic = cb.equal(root.get("audience"), RfqAudience.ALL);
             if (supplierId == null) {
                 return isPublic;
             }
-            var invited = query.subquery(Long.class);
-            var target = invited.from(RfqTargetStoreEntity.class);
+            Subquery<Long> invited = query.subquery(Long.class);
+            Root<RfqTargetStoreEntity> target = invited.from(RfqTargetStoreEntity.class);
             invited.select(target.get("id")).where(cb.equal(target.get("rfqId"), root.get("id")),
                     cb.equal(target.get("supplierIdRef"), supplierId));
             return cb.or(isPublic, cb.exists(invited));

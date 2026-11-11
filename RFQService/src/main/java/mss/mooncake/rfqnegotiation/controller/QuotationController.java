@@ -15,7 +15,7 @@ public class QuotationController {
     @PostMapping("/{quotationId}/accept")
     public ResponseEntity<QuotationAcceptedResponse> accept(@PathVariable Long quotationId,
             @Valid @RequestBody AcceptQuotationRequest request, @RequestHeader("Idempotency-Key") String key) {
-        var result = service.acceptQuotation(quotationId, request, key);
+        QuotationAcceptedResponse result = service.acceptQuotation(quotationId, request, key);
         return ResponseEntity.status("COMPLETED".equals(result.conversionStatus()) ? 200 : 202).body(result);
     }
     @Operation(operationId="getQuotationOrder", summary="Tra cứu trạng thái tạo đơn của báo giá")

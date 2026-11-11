@@ -20,6 +20,7 @@ commerce:
     recovery-cron: "-"
   rfq:
     deposit-timeout-cron: "-"
+    balance-timeout-cron: "-"
   retail:
     payment-timeout-cron: "-"
   cancellation:

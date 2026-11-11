@@ -26,7 +26,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             Claims claims = tokenProvider.parseClaims(authorization.substring(7));
             if (claims != null && claims.get("userId") != null) {
                 Object roleClaim = claims.get("roles");
-                var authorities = roleClaim instanceof List<?> roles
+                List<SimpleGrantedAuthority> authorities = roleClaim instanceof List<?> roles
                         ? roles.stream().filter(String.class::isInstance).map(String.class::cast)
                                 .map(SimpleGrantedAuthority::new).toList()
                         : List.<SimpleGrantedAuthority>of();

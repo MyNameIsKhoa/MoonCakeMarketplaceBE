@@ -50,6 +50,8 @@ commerce:
     # Unpaid RFQ orders are cancelled by the system this many hours after placed_at.
     deposit-timeout-hours: 48
     deposit-timeout-cron: "0 */5 * * * *"
+    # Deposit orders whose balance is unpaid at 00:00 (VN) three days before delivery: cancelled, deposit kept for the supplier.
+    balance-timeout-cron: "0 */5 * * * *"
   retail:
     # Unpaid retail checkouts are cancelled by the system (stock restored) this many minutes after placed_at.
     payment-timeout-minutes: 60

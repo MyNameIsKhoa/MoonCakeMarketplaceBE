@@ -34,4 +34,6 @@ public interface FinanceService {
     void confirmPayout(long orderId, long id, String reference, String evidence, String commandKey, Actor actor);
     /** Settlement state of the calling supplier's seller orders (page) with pending/ready/paid totals. */
     FinanceResponse.SupplierPayouts supplierPayouts(Actor actor, int page, int size);
+    /** Admin finance list: every seller order (page, newest first), optionally matching an order number. */
+    FinanceResponse.AdminPayouts adminPayouts(Actor actor, String query, int page, int size);
 }

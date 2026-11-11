@@ -48,16 +48,16 @@ public class SupplierApplicationServiceImpl implements SupplierApplicationServic
     @Transactional
     public SupplierProfileResponse registerSupplier(Long userId, SupplierProfileRequest request) {
         if (!userRepository.existsById(userId)) {
-            throw new ResourceNotFoundException("User not found with id: " + userId);
+            throw new ResourceNotFoundException("Không tìm thấy người dùng, mã: " + userId);
         }
 
         if (supplierProfileRepository.existsByUserId(userId)) {
-            throw new DuplicateResourceException("User is already registered as a supplier: " + userId);
+            throw new DuplicateResourceException("Tài khoản đã đăng ký làm nhà cung cấp, mã người dùng: " + userId);
         }
 
         String normalizedTaxCode = request.taxCode().trim();
         if (supplierProfileRepository.existsByTaxCode(normalizedTaxCode)) {
-            throw new DuplicateResourceException("Tax code is already registered: " + normalizedTaxCode);
+            throw new DuplicateResourceException("Mã số thuế đã được đăng ký: " + normalizedTaxCode);
         }
 
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
@@ -80,7 +80,7 @@ public class SupplierApplicationServiceImpl implements SupplierApplicationServic
     @Transactional(readOnly = true)
     public SupplierProfileResponse getSupplierProfile(Long userId) {
         SupplierProfileEntity entity = supplierProfileRepository.findByUserId(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("Supplier profile not found for user: " + userId));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy hồ sơ nhà cung cấp của người dùng, mã: " + userId));
         return toResponse(entity);
     }
 
@@ -88,7 +88,7 @@ public class SupplierApplicationServiceImpl implements SupplierApplicationServic
     @Transactional
     public SupplierProfileResponse updateSupplierProfile(Long userId, UpdateSupplierProfileRequest request) {
         SupplierProfileEntity entity = supplierProfileRepository.findByUserId(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("Supplier profile not found for user: " + userId));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy hồ sơ nhà cung cấp của người dùng, mã: " + userId));
 
         boolean updated = false;
         if (request.companyName() != null && !request.companyName().isBlank()) {
@@ -103,7 +103,7 @@ public class SupplierApplicationServiceImpl implements SupplierApplicationServic
             String newTaxCode = request.taxCode().trim();
             if (!newTaxCode.equalsIgnoreCase(entity.getTaxCode())) {
                 if (supplierProfileRepository.existsByTaxCode(newTaxCode)) {
-                    throw new DuplicateResourceException("Tax code is already registered: " + newTaxCode);
+                    throw new DuplicateResourceException("Mã số thuế đã được đăng ký: " + newTaxCode);
                 }
                 entity.setTaxCode(newTaxCode);
                 updated = true;
@@ -133,7 +133,7 @@ public class SupplierApplicationServiceImpl implements SupplierApplicationServic
     @Transactional(readOnly = true)
     public SupplierSummaryResponse getSupplierSummary(Long supplierId) {
         SupplierProfileEntity entity = supplierProfileRepository.findById(supplierId)
-                .orElseThrow(() -> new ResourceNotFoundException("Supplier not found with id: " + supplierId));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy nhà cung cấp, mã: " + supplierId));
 
         return new SupplierSummaryResponse(
                 entity.getId(),
@@ -148,7 +148,7 @@ public class SupplierApplicationServiceImpl implements SupplierApplicationServic
     @Transactional(readOnly = true)
     public SupplierSummaryResponse getSupplierSummaryByUserId(Long userId) {
         SupplierProfileEntity entity = supplierProfileRepository.findByUserId(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("Supplier profile not found for user: " + userId));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy hồ sơ nhà cung cấp của người dùng, mã: " + userId));
 
         return new SupplierSummaryResponse(
                 entity.getId(),
@@ -169,7 +169,7 @@ public class SupplierApplicationServiceImpl implements SupplierApplicationServic
     @Transactional
     public SupplierProfileResponse reviewSupplier(Long supplierId, SupplierVerificationStatus newStatus, Long actorUserId, String reason) {
         SupplierProfileEntity entity = supplierProfileRepository.findById(supplierId)
-                .orElseThrow(() -> new ResourceNotFoundException("Supplier not found with id: " + supplierId));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy nhà cung cấp, mã: " + supplierId));
         SupplierVerificationStatus currentStatus = parseStatus(entity.getVerificationStatus());
         if (!isAllowedTransition(currentStatus, newStatus)) {
             throw new InvalidStateTransitionException(
@@ -188,7 +188,7 @@ public class SupplierApplicationServiceImpl implements SupplierApplicationServic
     @Transactional(readOnly = true)
     public List<SupplierVerificationAuditResponse> getVerificationHistory(Long supplierId) {
         if (!supplierProfileRepository.existsById(supplierId)) {
-            throw new ResourceNotFoundException("Supplier not found with id: " + supplierId);
+            throw new ResourceNotFoundException("Không tìm thấy nhà cung cấp, mã: " + supplierId);
         }
         return auditRepository.findBySupplierIdOrderByActedAtDescIdDesc(supplierId).stream()
                 .map(a -> new SupplierVerificationAuditResponse(a.getId(), a.getSupplierId(), a.getActorUserId(),
@@ -200,7 +200,7 @@ public class SupplierApplicationServiceImpl implements SupplierApplicationServic
         try {
             return SupplierVerificationStatus.valueOf(value);
         } catch (IllegalArgumentException | NullPointerException ex) {
-            throw new InvalidStateTransitionException("Unknown supplier verification status: " + value);
+            throw new InvalidStateTransitionException("Trạng thái xác minh nhà cung cấp không hợp lệ: " + value);
         }
     }
 

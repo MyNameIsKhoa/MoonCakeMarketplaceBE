@@ -65,20 +65,20 @@ public class CartApplicationServiceImpl implements CartApplicationService {
             var batch = cartItems.subList(start, Math.min(start + 100, cartItems.size()));
             var received = catalog.getVariantSnapshots(new VariantSnapshotBatchRequest(
                     batch.stream().map(CartItemResponse::variantId).toList()));
-            if (received == null) throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Catalog returned no variants");
+            if (received == null) throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Không lấy được thông tin sản phẩm, vui lòng thử lại sau");
             snapshots.addAll(received);
         }
         Map<Long, VariantSnapshotResponse> byVariant = snapshots.stream()
                 .collect(Collectors.toMap(VariantSnapshotResponse::variantId, Function.identity()));
         if (byVariant.size() != cartItems.size()) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Catalog returned an incomplete basket");
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Thông tin sản phẩm trong giỏ chưa đầy đủ, vui lòng thử lại sau");
         }
         Map<Long, List<CartItemResponse>> byStore = new LinkedHashMap<>();
         List<CartPricingResponse.UnavailableLine> unavailable = new ArrayList<>();
         for (var item : cartItems) {
             var snapshot = byVariant.get(item.variantId());
             if (snapshot == null) {
-                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Catalog returned an incomplete basket");
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Thông tin sản phẩm trong giỏ chưa đầy đủ, vui lòng thử lại sau");
             }
             // A line that is no longer for sale is reported, not priced, so the rest of the cart stays usable.
             if (snapshot.storeId() == null || snapshot.supplierId() == null
@@ -111,7 +111,7 @@ public class CartApplicationServiceImpl implements CartApplicationService {
                     || !"ACTIVE".equals(store.status())
                     || storeItems.stream().anyMatch(item -> !store.supplierIdRef()
                             .equals(byVariant.get(item.variantId()).supplierId()))) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "Store is not currently for sale");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Cửa hàng hiện đã ngừng bán");
             }
             PromotionCalculationResult priced = catalog.calculatePromotions(
                     new PromotionCalculationRequest(storeId, storeItems.stream()
@@ -120,7 +120,7 @@ public class CartApplicationServiceImpl implements CartApplicationService {
             if (priced == null || !storeId.equals(priced.storeId()) || priced.lines() == null
                     || priced.lines().size() != storeItems.size() || priced.appliedPromotions() == null
                     || priced.subtotal() == null || priced.discountTotal() == null || priced.totalAmount() == null) {
-                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Catalog returned incomplete pricing");
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Không lấy được đầy đủ giá sản phẩm, vui lòng thử lại sau");
             }
             Map<Long, PromotionCalculationResult.LineResult> pricedByVariant = priced.lines().stream()
                     .collect(Collectors.toMap(PromotionCalculationResult.LineResult::variantId, Function.identity()));
@@ -128,7 +128,7 @@ public class CartApplicationServiceImpl implements CartApplicationService {
                 var snapshot = byVariant.get(item.variantId());
                 var line = pricedByVariant.get(item.variantId());
                 if (line == null || line.quantity() == null || item.quantity() != line.quantity()) {
-                    throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Catalog changed basket lines");
+                    throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Dữ liệu giỏ hàng vừa thay đổi, vui lòng tải lại và thử lại");
                 }
                 return new CartPricingResponse.LinePrice(item.cartItemId(), item.variantId(),
                         snapshot.productName(), snapshot.variantName(), snapshot.sku(), snapshot.imageUrl(),
@@ -159,7 +159,7 @@ public class CartApplicationServiceImpl implements CartApplicationService {
         List<VariantSnapshotResponse> snapshots = catalog.getVariantSnapshots(
                 new VariantSnapshotBatchRequest(List.of(variantId)));
         if (snapshots == null || snapshots.size() != 1 || !variantId.equals(snapshots.getFirst().variantId())) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Catalog returned an invalid variant snapshot");
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Thông tin sản phẩm không hợp lệ, vui lòng thử lại sau");
         }
         return snapshots.getFirst();
     }
@@ -170,12 +170,12 @@ public class CartApplicationServiceImpl implements CartApplicationService {
         VariantSnapshotResponse snapshot = snapshot(request.variantId());
         if (!"ACTIVE".equals(snapshot.variantStatus()) || !"ACTIVE".equals(snapshot.productStatus())
                 || !"ACTIVE".equals(snapshot.storeStatus())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Variant is not currently for sale");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Sản phẩm hiện đã ngừng bán");
         }
         CartEntity current = carts.findFirstByCustomerIdRefAndStatusOrderByIdDesc(customerId, ACTIVE)
                 .orElseGet(() -> createCart(customerId));
         CartEntity cart = carts.lockActive(current.getId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "Cart is checking out"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "Giỏ hàng đang được thanh toán, vui lòng chờ hoàn tất"));
         var existing = items.findByCartIdAndVariantIdRef(cart.getId(), request.variantId());
         CartItemEntity item = existing
                 .orElseGet(() -> {
@@ -190,7 +190,7 @@ public class CartApplicationServiceImpl implements CartApplicationService {
         try {
             quantity = Math.addExact(item.getQuantity(), request.quantity());
         } catch (ArithmeticException overflow) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Quantity exceeds supported range");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Số lượng vượt quá giới hạn cho phép");
         }
         requireStock(snapshot, quantity);
         item.setQuantity(quantity);
@@ -201,10 +201,10 @@ public class CartApplicationServiceImpl implements CartApplicationService {
     @Override
     @Transactional
     public CartItemResponse updateItem(Long customerId, Long itemId, int quantity) {
-        if (quantity <= 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Quantity must be positive");
+        if (quantity <= 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Số lượng phải lớn hơn 0");
         CartEntity cart = requireCart(customerId);
         CartItemEntity item = items.findByIdAndCartId(itemId, cart.getId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Cart item not found"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy sản phẩm trong giỏ hàng"));
         requireStock(snapshot(item.getVariantIdRef()), quantity);
         item.setQuantity(quantity);
         cart.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
@@ -229,7 +229,7 @@ public class CartApplicationServiceImpl implements CartApplicationService {
     public void removeItem(Long customerId, Long itemId) {
         CartEntity cart = requireCart(customerId);
         CartItemEntity item = items.findByIdAndCartId(itemId, cart.getId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Cart item not found"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy sản phẩm trong giỏ hàng"));
         items.delete(item);
         cart.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
     }
@@ -239,7 +239,7 @@ public class CartApplicationServiceImpl implements CartApplicationService {
     public void clear(Long customerId) {
         carts.findFirstByCustomerIdRefAndStatusOrderByIdDesc(customerId, ACTIVE).ifPresent(cart -> {
             carts.lockActive(cart.getId()).orElseThrow(() ->
-                    new ResponseStatusException(HttpStatus.CONFLICT, "Cart is checking out"));
+                    new ResponseStatusException(HttpStatus.CONFLICT, "Giỏ hàng đang được thanh toán, vui lòng chờ hoàn tất"));
             items.deleteByCartId(cart.getId());
             cart.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
         });
@@ -247,7 +247,7 @@ public class CartApplicationServiceImpl implements CartApplicationService {
 
     private CartEntity createCart(Long customerId) {
         if (carts.existsByCustomerIdRefAndStatus(customerId, "CHECKOUT_PENDING"))
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Cart is checking out");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Giỏ hàng đang được thanh toán, vui lòng chờ hoàn tất");
         CartEntity cart = new CartEntity();
         cart.setCustomerIdRef(customerId);
         cart.setStatus(ACTIVE);
@@ -255,14 +255,14 @@ public class CartApplicationServiceImpl implements CartApplicationService {
         cart.setUpdatedAt(cart.getCreatedAt());
         try { return carts.saveAndFlush(cart); }
         catch (DataIntegrityViolationException conflict) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "An active cart or checkout already exists", conflict);
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Đã có giỏ hàng hoặc phiên thanh toán đang hoạt động", conflict);
         }
     }
 
     private CartEntity requireCart(Long customerId) {
         return carts.findFirstByCustomerIdRefAndStatusOrderByIdDesc(customerId, ACTIVE)
                 .flatMap(cart -> carts.lockActive(cart.getId()))
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Cart not found"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy giỏ hàng"));
     }
 
     private CartItemResponse toResponse(CartItemEntity item) {

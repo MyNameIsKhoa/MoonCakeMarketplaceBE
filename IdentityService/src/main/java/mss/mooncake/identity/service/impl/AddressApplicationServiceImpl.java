@@ -41,9 +41,9 @@ public class AddressApplicationServiceImpl implements AddressApplicationService 
     public AddressResponse getCustomerAddress(Long userId, Long addressId) {
         Long customerId = getCustomerProfile(userId).getId();
         AddressEntity address = addressRepository.findById(addressId)
-                .orElseThrow(() -> new ResourceNotFoundException("Address not found with id: " + addressId));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy địa chỉ, mã: " + addressId));
         if (!address.getCustomerId().equals(customerId)) {
-            throw new ForbiddenException("You do not have permission to view this address");
+            throw new ForbiddenException("Bạn không có quyền xem địa chỉ này");
         }
         return toResponse(address);
     }
@@ -83,10 +83,10 @@ public class AddressApplicationServiceImpl implements AddressApplicationService 
         Long customerId = customerProfile.getId();
 
         AddressEntity address = addressRepository.findById(addressId)
-                .orElseThrow(() -> new ResourceNotFoundException("Address not found with id: " + addressId));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy địa chỉ, mã: " + addressId));
 
         if (!address.getCustomerId().equals(customerId)) {
-            throw new ForbiddenException("You do not have permission to modify this address");
+            throw new ForbiddenException("Bạn không có quyền sửa địa chỉ này");
         }
 
         if (request.recipientName() != null && !request.recipientName().isBlank()) {
@@ -133,10 +133,10 @@ public class AddressApplicationServiceImpl implements AddressApplicationService 
         Long customerId = customerProfile.getId();
 
         AddressEntity address = addressRepository.findById(addressId)
-                .orElseThrow(() -> new ResourceNotFoundException("Address not found with id: " + addressId));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy địa chỉ, mã: " + addressId));
 
         if (!address.getCustomerId().equals(customerId)) {
-            throw new ForbiddenException("You do not have permission to delete this address");
+            throw new ForbiddenException("Bạn không có quyền xóa địa chỉ này");
         }
 
         boolean wasDefault = address.isDefaultAddress();
@@ -155,7 +155,7 @@ public class AddressApplicationServiceImpl implements AddressApplicationService 
     @Transactional(readOnly = true)
     public AddressSummaryResponse getAddressSummary(Long addressId) {
         AddressEntity address = addressRepository.findById(addressId)
-                .orElseThrow(() -> new ResourceNotFoundException("Address not found with id: " + addressId));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy địa chỉ, mã: " + addressId));
 
         return new AddressSummaryResponse(
                 address.getId(),
@@ -171,12 +171,12 @@ public class AddressApplicationServiceImpl implements AddressApplicationService 
 
     private CustomerProfileEntity getCustomerProfile(Long userId) {
         return customerProfileRepository.findByUserId(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("Customer profile not found for user id: " + userId));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy hồ sơ khách hàng của người dùng, mã: " + userId));
     }
 
     private CustomerProfileEntity getCustomerProfileForUpdate(Long userId) {
         return customerProfileRepository.findByUserIdForUpdate(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("Customer profile not found for user id: " + userId));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy hồ sơ khách hàng của người dùng, mã: " + userId));
     }
 
     private AddressResponse toResponse(AddressEntity entity) {

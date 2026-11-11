@@ -526,6 +526,56 @@ public class CustomerPaymentServiceImpl implements CustomerPaymentService {
         }
     }
 
+    /**
+     * The balance is due 00:00 Vietnam time three days before delivery. A buyer who misses it loses the order and
+     * the deposit, which is kept for the supplier: nothing is refunded, so the cancellation is approved at once.
+     */
+    @org.springframework.scheduling.annotation.Scheduled(cron = "${commerce.rfq.balance-timeout-cron:0 */5 * * * *}")
+    public void cancelOverdueRemainingRfqOrders() {
+        String reason = "Quá hạn thanh toán phần còn lại; tiền cọc được chuyển cho nhà bán";
+        var dueBy = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Ho_Chi_Minh")).plusDays(3);
+        for (long orderId : repository.overdueBalanceRfqOrderIds(dueBy)) {
+            try {
+                var system = new FinanceService.Actor(0, repository.customerOrderOwner(orderId), null, false);
+                // A balance paid at the deadline is collected here and the order proceeds instead.
+                cancelOpenLinks(orderId, system);
+                cancelKeepingDeposit(orderId, reason);
+            } catch (RuntimeException failure) {
+                log.warn("Overdue balance of RFQ order {} was not handled in this run: {}", orderId, failure.getMessage());
+            }
+        }
+    }
+
+    private void cancelKeepingDeposit(long orderId, String reason) {
+        transaction.executeWithoutResult(status -> {
+            for (long id : lockOrder(orderId)) {
+                var context = repository.context(id);
+                long paid = repository.paid(id);
+                // Re-checked under the lock: the balance may have arrived, or a case opened, since the scan.
+                if (context.deposit() == null || paid != context.deposit() || repository.active(id)
+                        || repository.activeCustomerPayment(id)
+                        || repository.count("""
+                                SELECT COUNT(*) FROM seller_order WHERE seller_order_id=?
+                                AND status IN ('READY_FOR_FULFILLMENT','PREPARING')
+                                """, id) == 0
+                        || repository.cancellations(id).stream().anyMatch(c -> !"REJECTED".equals(c.status()))
+                        || repository.disputes(id).stream().anyMatch(d -> !"RESOLVED".equals(d.status()))) {
+                    continue;
+                }
+                var now = FinanceRepository.utc(Instant.now());
+                long cancellationId = repository.insert("""
+                        INSERT INTO cancellation(seller_order_id,actor_type,actor_id_ref,reason,status,requested_at,
+                        decision_reason,cancelled_at,retained_amount) VALUES(?,'SYSTEM',0,?,'APPROVED',?,?,?,?)
+                        """, id, reason, now, reason, now, paid);
+                repository.update("UPDATE seller_order SET status='CANCELLED' WHERE seller_order_id=?", id);
+                repository.event(id, "CANCELLATION_DECIDED", cancellationId, "SYSTEM",
+                        "Balance overdue; deposit kept for the supplier");
+                integration.syncCustomerOrder(id);
+                notifier.cancellationDecided(id, cancellationId, true, reason);
+            }
+        });
+    }
+
     /** Retail checkout deducts stock at once: an order that is never paid must give that stock back. */
     @org.springframework.scheduling.annotation.Scheduled(cron = "${commerce.retail.payment-timeout-cron:0 * * * * *}")
     public void cancelOverdueRetailOrders() {

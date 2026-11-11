@@ -130,6 +130,21 @@ public class FinanceRepositoryImpl implements FinanceRepository {
                 """, Long.class, utc(placedBefore));
     }
 
+    public List<Long> overdueBalanceRfqOrderIds(LocalDate deliveredOnOrBefore) {
+        return jdbc.queryForList("""
+                SELECT TOP 50 s.order_id FROM seller_order s
+                JOIN customer_order o ON o.order_id=s.order_id
+                JOIN finance_context f ON f.seller_order_id=s.seller_order_id
+                WHERE o.source_type='RFQ' AND s.status IN ('READY_FOR_FULFILLMENT','PREPARING')
+                AND f.deposit_amount IS NOT NULL AND f.delivery_date<=?
+                AND (SELECT COALESCE(SUM(p.amount),0) FROM payment p
+                     WHERE p.seller_order_id=s.seller_order_id AND p.status='SUCCESS') < f.total_amount
+                AND NOT EXISTS (SELECT 1 FROM cancellation c WHERE c.seller_order_id=s.seller_order_id AND c.status<>'REJECTED')
+                AND NOT EXISTS (SELECT 1 FROM dispute d WHERE d.seller_order_id=s.seller_order_id AND d.status<>'RESOLVED')
+                ORDER BY s.order_id
+                """, Long.class, deliveredOnOrBefore);
+    }
+
     public List<Long> autoAcceptableSellerOrderIds(Instant deliveredBefore) {
         return jdbc.queryForList("""
                 SELECT TOP 50 s.seller_order_id FROM seller_order s
@@ -393,21 +408,48 @@ public class FinanceRepositoryImpl implements FinanceRepository {
                         rs.getString("bank_account_number"), rs.getString("bank_account_holder")), orderId, orderId);
     }
 
+    /** Seller orders with a finance context and their settlement (at most one per seller order). */
+    private static final String PAYOUT_FROM = """
+            FROM seller_order s JOIN customer_order o ON o.order_id=s.order_id
+            JOIN finance_context f ON f.seller_order_id=s.seller_order_id
+            LEFT JOIN settlement t ON t.seller_order_id=s.seller_order_id
+            """;
+    private static final String PAYOUT_SELECT = """
+            SELECT s.seller_order_id,s.seller_order_no,s.order_id,o.order_no,s.store_name_snapshot,s.status,o.placed_at,
+            t.settlement_id,t.status AS settlement_status,t.fee_amount,t.supplier_payout_amount,t.refunded_amount,
+            t.payout_reference,t.settled_at
+            """ + PAYOUT_FROM;
+    private static final RowMapper<SupplierPayout> PAYOUT = (rs, n) -> new SupplierPayout(rs.getLong("seller_order_id"),
+            rs.getString("seller_order_no"), rs.getLong("order_id"), rs.getString("order_no"),
+            rs.getString("store_name_snapshot"), rs.getString("status"), instant(rs, "placed_at"),
+            rs.getObject("settlement_id", Long.class), rs.getString("settlement_status"),
+            exact(rs.getBigDecimal("fee_amount")), exact(rs.getBigDecimal("supplier_payout_amount")),
+            exact(rs.getBigDecimal("refunded_amount")), rs.getString("payout_reference"), instant(rs, "settled_at"));
+
     public List<SupplierPayout> supplierPayouts(long supplierId) {
-        return jdbc.query("""
-                SELECT s.seller_order_id,s.seller_order_no,s.order_id,o.order_no,s.store_name_snapshot,s.status,o.placed_at,
-                t.settlement_id,t.status AS settlement_status,t.fee_amount,t.supplier_payout_amount,t.refunded_amount,
-                t.payout_reference,t.settled_at
-                FROM seller_order s JOIN customer_order o ON o.order_id=s.order_id
-                JOIN finance_context f ON f.seller_order_id=s.seller_order_id
-                LEFT JOIN settlement t ON t.seller_order_id=s.seller_order_id
-                WHERE s.supplier_id_ref=? ORDER BY s.seller_order_id DESC
-                """, (rs, n) -> new SupplierPayout(rs.getLong("seller_order_id"), rs.getString("seller_order_no"),
-                        rs.getLong("order_id"), rs.getString("order_no"), rs.getString("store_name_snapshot"),
-                        rs.getString("status"), instant(rs, "placed_at"), rs.getObject("settlement_id", Long.class),
-                        rs.getString("settlement_status"), exact(rs.getBigDecimal("fee_amount")),
-                        exact(rs.getBigDecimal("supplier_payout_amount")), exact(rs.getBigDecimal("refunded_amount")),
-                        rs.getString("payout_reference"), instant(rs, "settled_at")), supplierId);
+        return jdbc.query(PAYOUT_SELECT + "WHERE s.supplier_id_ref=? ORDER BY s.seller_order_id DESC", PAYOUT, supplierId);
+    }
+
+    public List<SupplierPayout> payouts(String query, int offset, int limit) {
+        String pattern = orderNumberPattern(query);
+        String order = "ORDER BY s.seller_order_id DESC OFFSET ? ROWS FETCH NEXT ? ROWS ONLY";
+        return pattern == null ? jdbc.query(PAYOUT_SELECT + order, PAYOUT, offset, limit)
+                : jdbc.query(PAYOUT_SELECT + ORDER_NUMBER_FILTER + order, PAYOUT, pattern, pattern, offset, limit);
+    }
+
+    public long countPayouts(String query) {
+        String pattern = orderNumberPattern(query);
+        return pattern == null ? count("SELECT COUNT(*) " + PAYOUT_FROM)
+                : count("SELECT COUNT(*) " + PAYOUT_FROM + ORDER_NUMBER_FILTER, pattern, pattern);
+    }
+
+    private static final String ORDER_NUMBER_FILTER =
+            "WHERE s.seller_order_no LIKE ? ESCAPE '\\' OR o.order_no LIKE ? ESCAPE '\\' ";
+
+    /** A "contains" LIKE pattern with the query's own wildcards escaped; null for a blank query. */
+    private static String orderNumberPattern(String query) {
+        if (query == null || query.isBlank()) { return null; }
+        return "%" + query.trim().replaceAll("([\\\\%_\\[])", "\\\\$1") + "%";
     }
 
     private static Long exact(java.math.BigDecimal amount) { return amount == null ? null : amount.longValueExact(); }

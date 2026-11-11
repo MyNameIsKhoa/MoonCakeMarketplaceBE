@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 
+import feign.Request;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import java.nio.charset.StandardCharsets;
@@ -96,7 +97,7 @@ class RfqAccessIntegrationTest {
     }
 
     private void login(Long userId) {
-        var principal = new UserPrincipal(userId, "user@test", List.of());
+        UserPrincipal principal = new UserPrincipal(userId, "user@test", List.of());
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(principal, null, List.of()));
     }
 
@@ -154,7 +155,7 @@ class RfqAccessIntegrationTest {
         mvc.perform(get("/api/rfqs").header("Authorization", token(202L, "ROLE_SUPPLIER"))).andExpect(status().isOk());
         mvc.perform(get("/api/rfqs/" + rfq.getId()).header("Authorization", token(202L, "ROLE_SUPPLIER"))).andExpect(status().isOk());
         login(202L);
-        var request = new CreateQuotationRequest(30L, BigDecimal.ZERO, java.time.OffsetDateTime.now(ZoneOffset.UTC).plusDays(1), 1,
+        CreateQuotationRequest request = new CreateQuotationRequest(30L, BigDecimal.ZERO, java.time.OffsetDateTime.now(ZoneOffset.UTC).plusDays(1), 1,
                 LocalDateTime.now(ZoneOffset.UTC).plusDays(7).toLocalDate(), null, BigDecimal.ZERO, null,
                 List.of(new QuotationItemRequest(null, null, "Custom", null, 1, BigDecimal.TEN, BigDecimal.ZERO, null)));
         assertThatThrownBy(() -> quotationService.create(rfq.getId(), "pending", request)).isInstanceOf(ApiException.class)
@@ -195,7 +196,7 @@ class RfqAccessIntegrationTest {
     }
 
     private FeignException feignError(int status) {
-        var request = feign.Request.create(feign.Request.HttpMethod.GET, "http://identity/internal", Map.of(), null, StandardCharsets.UTF_8, null);
+        Request request = feign.Request.create(feign.Request.HttpMethod.GET, "http://identity/internal", Map.of(), null, StandardCharsets.UTF_8, null);
         return FeignException.errorStatus("IdentityServiceClient", feign.Response.builder().status(status).request(request).headers(Map.of()).build());
     }
 
@@ -206,7 +207,7 @@ class RfqAccessIntegrationTest {
     }
 
     private QuotationEntity quote(Long rfqId, Long supplierId, Long storeId) {
-        var q = new QuotationEntity(); q.setRfqId(rfqId); q.setSupplierIdRef(supplierId); q.setStoreIdRef(storeId);
+        QuotationEntity q = new QuotationEntity(); q.setRfqId(rfqId); q.setSupplierIdRef(supplierId); q.setStoreIdRef(storeId);
         q.setVersionNo(1); q.setStatus(QuotationStatus.SUBMITTED); q.setTotalAmount(BigDecimal.TEN);
         q.setDepositPercent(BigDecimal.ZERO); q.setShippingFee(BigDecimal.ZERO);
         q.setValidUntil(LocalDateTime.now(ZoneOffset.UTC).plusDays(1));
@@ -219,7 +220,7 @@ class RfqAccessIntegrationTest {
     }
 
     private RfqEntity save(String title, RfqStatus status, LocalDateTime expiresAt, RfqAudience audience) {
-        var rfq = new RfqEntity();
+        RfqEntity rfq = new RfqEntity();
         rfq.setRfqCode("FEED-" + title);
         rfq.setCustomerIdRef(11L);
         rfq.setTitle(title);

@@ -144,7 +144,7 @@ class SupplierProfileControllerIntegrationTest {
                         .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.status").value(409))
-                .andExpect(jsonPath("$.message", containsString("already registered as a supplier")));
+                .andExpect(jsonPath("$.message", containsString("đã đăng ký làm nhà cung cấp")));
     }
 
     @Test
@@ -158,7 +158,7 @@ class SupplierProfileControllerIntegrationTest {
                         .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.status").value(409))
-                .andExpect(jsonPath("$.message", containsString("Tax code is already registered")));
+                .andExpect(jsonPath("$.message", containsString("Mã số thuế đã được đăng ký")));
     }
 
     @Test

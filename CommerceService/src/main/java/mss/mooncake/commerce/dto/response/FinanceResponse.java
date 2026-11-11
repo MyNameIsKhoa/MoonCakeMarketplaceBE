@@ -54,5 +54,8 @@ public record FinanceResponse(Context context, List<Payment> payments, List<Case
                 Instant paidAt) { }
         public record Totals(long pendingAmount, long readyAmount, long processingAmount, long paidAmount) { }
     }
+    /** Admin finance list: one page of every seller order (newest first), rows as in {@link SupplierPayouts}. */
+    public record AdminPayouts(List<SupplierPayouts.Row> content, int page, int size, long totalElements,
+            int totalPages) { }
     public record Audit(long auditId, String eventType, long resourceId, String actor, String detail, Instant createdAt) { }
 }

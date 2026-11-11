@@ -37,7 +37,7 @@ public class OutboundEmailServiceImpl implements OutboundEmailService {
             sender.send(message);
         } catch (MailException ex) {
             log.warn("Outbound email delivery failed", ex);
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Email delivery is unavailable");
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Dịch vụ gửi email tạm thời không khả dụng, vui lòng thử lại sau");
         }
     }
 }

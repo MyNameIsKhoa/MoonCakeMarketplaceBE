@@ -98,12 +98,12 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
         SellerOrderEntity sellerOrder = findSellerOrderOrThrow(request.sellerOrderId());
 
         if (supplierId == null || !sellerOrder.getSupplierIdRef().equals(supplierId)) {
-            throw new ForbiddenException("You do not have permission to manage shipments for this seller order");
+            throw new ForbiddenException("Bạn không có quyền quản lý vận đơn của đơn nhà bán này");
         }
 
         String orderStatus = sellerOrder.getStatus();
         if (!List.of("READY_FOR_FULFILLMENT", "PREPARING", "SHIPPING").contains(orderStatus)) {
-            throw new BadRequestException("Cannot create shipment for seller order in status: " + orderStatus);
+            throw new BadRequestException("Không thể tạo vận đơn khi đơn nhà bán đang ở trạng thái: " + orderStatus);
         }
         requirePreparationPayment(request.sellerOrderId(), false);
         List<OrderItemEntity> items = orderItemRepository.findBySellerOrderId(request.sellerOrderId());
@@ -185,15 +185,15 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
         SellerOrderEntity sellerOrder = findSellerOrderOrThrow(shipment.getSellerOrderId());
 
         if (supplierId == null || !sellerOrder.getSupplierIdRef().equals(supplierId)) {
-            throw new ForbiddenException("You do not have permission to update this shipment");
+            throw new ForbiddenException("Bạn không có quyền cập nhật vận đơn này");
         }
         requireOpenOrder(sellerOrder);
 
         if (shipment.getStatus() == ShipmentStatus.DELIVERED) {
-            throw new ConflictException("Cannot modify a shipment that has already been delivered");
+            throw new ConflictException("Không thể sửa vận đơn đã giao");
         }
         if (shipment.getStatus() == ShipmentStatus.CANCELLED) {
-            throw new ConflictException("Cannot modify a cancelled shipment");
+            throw new ConflictException("Không thể sửa vận đơn đã hủy");
         }
         requireDeliveryNotBeforeShip(shipment.getExpectedShipAt(), request.expectedDeliveryAt());
 
@@ -222,14 +222,14 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
         SellerOrderEntity sellerOrder = findSellerOrderOrThrow(shipment.getSellerOrderId());
 
         if (supplierId == null || !sellerOrder.getSupplierIdRef().equals(supplierId)) {
-            throw new ForbiddenException("You do not have permission to ship this order");
+            throw new ForbiddenException("Bạn không có quyền xuất kho đơn này");
         }
         if (shipment.getStatus() == ShipmentStatus.SHIPPED || shipment.getStatus() == ShipmentStatus.DELIVERED)
             return mapToShipmentResponse(shipment);
         requireOpenOrder(sellerOrder);
         requirePreparationPayment(shipment.getSellerOrderId(), true);
         if (!List.of(ShipmentStatus.PLANNED, ShipmentStatus.READY_TO_SHIP).contains(shipment.getStatus()))
-            throw new ConflictException("Shipment is not ready to ship");
+            throw new ConflictException("Kiện hàng chưa sẵn sàng để xuất kho");
 
         shipment.setStatus(ShipmentStatus.SHIPPED);
         shipment.setShippedAt(LocalDateTime.now(java.time.ZoneOffset.UTC));
@@ -251,11 +251,11 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
         ShipmentEntity shipment = findShipmentOrThrow(shipmentId);
         SellerOrderEntity sellerOrder = findSellerOrderOrThrow(shipment.getSellerOrderId());
         if (supplierId == null || !sellerOrder.getSupplierIdRef().equals(supplierId)) {
-            throw new ForbiddenException("You do not have permission to cancel this shipment");
+            throw new ForbiddenException("Bạn không có quyền hủy vận đơn này");
         }
         if (shipment.getStatus() == ShipmentStatus.CANCELLED) return mapToShipmentResponse(shipment);
         if (shipment.getStatus() != ShipmentStatus.PLANNED) {
-            throw new ConflictException("Only a planned shipment can be cancelled");
+            throw new ConflictException("Chỉ hủy được kiện đang ở trạng thái Đã lên kế hoạch");
         }
         shipment.setStatus(ShipmentStatus.CANCELLED);
         return mapToShipmentResponse(shipmentRepository.save(shipment));
@@ -269,7 +269,7 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
         SellerOrderEntity sellerOrder = findSellerOrderOrThrow(shipment.getSellerOrderId());
 
         if (!isAdmin && (actorId == null || !sellerOrder.getSupplierIdRef().equals(actorId))) {
-            throw new ForbiddenException("You do not have permission to confirm delivery for this shipment");
+            throw new ForbiddenException("Bạn không có quyền xác nhận giao vận đơn này");
         }
 
         if (shipment.getStatus() == ShipmentStatus.DELIVERED) {
@@ -277,7 +277,7 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
         }
         requireOpenOrder(sellerOrder);
         if (shipment.getStatus() != ShipmentStatus.SHIPPED) {
-            throw new BadRequestException("Only a shipped shipment can be delivered");
+            throw new BadRequestException("Chỉ xác nhận giao được kiện đang vận chuyển");
         }
 
         shipment.setStatus(ShipmentStatus.DELIVERED);
@@ -345,10 +345,10 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
         finance.lock(sellerOrderId);
         SellerOrderEntity sellerOrder = findSellerOrderOrThrow(sellerOrderId);
         CustomerOrderEntity customerOrder = customerOrderRepository.findById(sellerOrder.getOrderId())
-                .orElseThrow(() -> new ResourceNotFoundException("Customer order not found with ID: " + sellerOrder.getOrderId()));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy đơn hàng, mã: " + sellerOrder.getOrderId()));
 
         if (customerId == null || !customerOrder.getCustomerIdRef().equals(customerId)) {
-            throw new ForbiddenException("You do not have permission to accept this seller order");
+            throw new ForbiddenException("Bạn không có quyền nghiệm thu đơn nhà bán này");
         }
 
         if (OrderStatus.ACCEPTED.name().equalsIgnoreCase(sellerOrder.getStatus())
@@ -357,10 +357,10 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
         }
 
         if (!OrderStatus.DELIVERED.name().equalsIgnoreCase(sellerOrder.getStatus())) {
-            throw new BadRequestException("Cannot accept order that is not delivered yet. Current status: " + sellerOrder.getStatus());
+            throw new BadRequestException("Chưa thể nghiệm thu vì đơn chưa giao xong. Trạng thái hiện tại: " + sellerOrder.getStatus());
         }
         if (hasUnresolvedDispute(sellerOrderId)) {
-            throw new ConflictException("Cannot accept an order while its dispute is unresolved");
+            throw new ConflictException("Chưa thể nghiệm thu khi khiếu nại của đơn chưa được giải quyết");
         }
 
         sellerOrder.setStatus(OrderStatus.ACCEPTED.name());
@@ -403,29 +403,29 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
     @Transactional
     public ReviewResponse createReview(CreateReviewRequest request, Long customerId) {
         if (request.rating() < 1 || request.rating() > 5) {
-            throw new BadRequestException("Rating must be between 1 and 5 stars");
+            throw new BadRequestException("Số sao đánh giá phải từ 1 đến 5");
         }
 
         OrderItemEntity orderItem = orderItemRepository.findById(request.orderItemId())
-                .orElseThrow(() -> new ResourceNotFoundException("Order item not found with ID: " + request.orderItemId()));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy sản phẩm trong đơn, mã: " + request.orderItemId()));
 
         SellerOrderEntity sellerOrder = findSellerOrderOrThrow(orderItem.getSellerOrderId());
         CustomerOrderEntity customerOrder = customerOrderRepository.findById(sellerOrder.getOrderId())
-                .orElseThrow(() -> new ResourceNotFoundException("Customer order not found with ID: " + sellerOrder.getOrderId()));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy đơn hàng, mã: " + sellerOrder.getOrderId()));
 
         if (customerId == null || !customerOrder.getCustomerIdRef().equals(customerId)) {
-            throw new ForbiddenException("You can only review items that you have purchased");
+            throw new ForbiddenException("Bạn chỉ có thể đánh giá sản phẩm mình đã mua");
         }
 
         String orderStatus = sellerOrder.getStatus();
         if (!OrderStatus.DELIVERED.name().equalsIgnoreCase(orderStatus)
                 && !OrderStatus.ACCEPTED.name().equalsIgnoreCase(orderStatus)
                 && !OrderStatus.SETTLED.name().equalsIgnoreCase(orderStatus)) {
-            throw new BadRequestException("Cannot review item from an order that is not delivered or accepted yet. Status: " + orderStatus);
+            throw new BadRequestException("Chỉ đánh giá được khi đơn đã giao hoặc đã nghiệm thu. Trạng thái hiện tại: " + orderStatus);
         }
 
         if (reviewRepository.existsByOrderItemId(request.orderItemId())) {
-            throw new ConflictException("You have already submitted a review for this order item");
+            throw new ConflictException("Bạn đã đánh giá sản phẩm này rồi");
         }
 
         ReviewEntity review = new ReviewEntity(
@@ -477,7 +477,7 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
     @Transactional(readOnly = true)
     public ReviewResponse getReviewById(Long reviewId) {
         ReviewEntity review = reviewRepository.findById(reviewId)
-                .orElseThrow(() -> new ResourceNotFoundException("Review not found with ID: " + reviewId));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy đánh giá, mã: " + reviewId));
         return mapToReviewResponse(review);
     }
 
@@ -498,7 +498,7 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
         SellerOrderEntity sellerOrder = findSellerOrderOrThrow(sellerOrderId);
         String status = sellerOrder.getStatus();
         if (!List.of("READY_FOR_FULFILLMENT", "PREPARING", "SHIPPING").contains(status)) {
-            throw new BadRequestException("Seller order is not eligible for shipment in status: " + status);
+            throw new BadRequestException("Đơn nhà bán chưa thể giao hàng ở trạng thái: " + status);
         }
         requirePreparationPayment(sellerOrderId, false);
     }
@@ -515,36 +515,36 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
 
     private SellerOrderEntity findSellerOrderOrThrow(Long sellerOrderId) {
         return sellerOrderRepository.findById(sellerOrderId)
-                .orElseThrow(() -> new ResourceNotFoundException("Seller order not found with ID: " + sellerOrderId));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy đơn nhà bán, mã: " + sellerOrderId));
     }
 
     private ShipmentEntity findShipmentOrThrow(Long shipmentId) {
         return shipmentRepository.findById(shipmentId)
-                .orElseThrow(() -> new ResourceNotFoundException("Shipment not found with ID: " + shipmentId));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy vận đơn, mã: " + shipmentId));
     }
 
     private void verifyReadPermission(SellerOrderEntity sellerOrder, FinanceService.Actor actor) {
-        if (actor == null) throw new ForbiddenException("Authentication required");
+        if (actor == null) throw new ForbiddenException("Vui lòng đăng nhập");
         if (actor.admin() || sellerOrder.getSupplierIdRef().equals(actor.supplierId())) return;
         var parent = customerOrderRepository.findById(sellerOrder.getOrderId()).orElseThrow();
         if (!parent.getCustomerIdRef().equals(actor.customerId()))
-            throw new ForbiddenException("You do not have access to view this shipment");
+            throw new ForbiddenException("Bạn không có quyền xem vận đơn này");
     }
 
     private void lockShipmentOrder(Long shipmentId) {
         Long sellerId = shipmentRepository.findSellerOrderIdById(shipmentId)
-                .orElseThrow(() -> new ResourceNotFoundException("Shipment not found: " + shipmentId));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy vận đơn, mã: " + shipmentId));
         finance.lock(sellerId);
     }
 
     private static void requireDeliveryNotBeforeShip(LocalDateTime shipAt, LocalDateTime deliveryAt) {
         if (shipAt != null && deliveryAt != null && deliveryAt.isBefore(shipAt))
-            throw new BadRequestException("expectedDeliveryAt must not be before expectedShipAt");
+            throw new BadRequestException("Ngày giao dự kiến không được trước ngày gửi hàng dự kiến");
     }
 
     private void requireOpenOrder(SellerOrderEntity order) {
         if (!List.of("READY_FOR_FULFILLMENT", "PREPARING", "SHIPPING").contains(order.getStatus()))
-            throw new BadRequestException("Seller order is not open for fulfillment");
+            throw new BadRequestException("Đơn nhà bán không còn ở giai đoạn chuẩn bị hoặc giao hàng");
     }
 
     private void requirePreparationPayment(Long sellerId, boolean shipping) {
@@ -552,11 +552,13 @@ public class FulfillmentApplicationServiceImpl implements FulfillmentApplication
         long minimum = shipping || c.deposit() == null ? c.total() : c.deposit();
         // Money already returned to the buyer no longer pays for fulfillment.
         if (finance.paid(sellerId) - finance.refunded(sellerId) < minimum)
-            throw new BadRequestException("Insufficient payment for fulfillment");
+            throw new BadRequestException(shipping
+                    ? "Người mua chưa thanh toán đủ đơn hàng; chỉ được xuất kho khi đã thu đủ tiền"
+                    : "Người mua chưa thanh toán tiền cọc; chưa thể chuẩn bị hàng");
         if (hasUnresolvedDispute(sellerId)
                 || finance.cancellations(sellerId).stream().anyMatch(ca -> !"REJECTED".equals(ca.status()))
                 || finance.refunds(sellerId).stream().anyMatch(r -> "MANUAL_REVIEW".equals(r.status())))
-            throw new ConflictException("Fulfillment blocked by financial case");
+            throw new ConflictException("Đơn đang có yêu cầu hủy, hoàn tiền hoặc khiếu nại chưa xử lý xong; tạm dừng chuẩn bị và giao hàng");
     }
 
     /** OPEN, ADMIN_REVIEW and REFUND_PENDING disputes all still wait for a decision or its refund. */

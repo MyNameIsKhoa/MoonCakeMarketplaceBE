@@ -32,9 +32,9 @@ class ChatStompInterceptorTest {
 
     @Test
     void connectRequiresJwtAndResolvesNumericUserIdRatherThanEmail() {
-        var missing = StompHeaderAccessor.create(StompCommand.CONNECT);
+        StompHeaderAccessor missing = StompHeaderAccessor.create(StompCommand.CONNECT);
         assertThatThrownBy(() -> interceptor.preSend(frame(missing), null)).isInstanceOf(RuntimeException.class);
-        var connect = StompHeaderAccessor.create(StompCommand.CONNECT);
+        StompHeaderAccessor connect = StompHeaderAccessor.create(StompCommand.CONNECT);
         connect.setNativeHeader("Authorization", "Bearer " + token());
         interceptor.preSend(frame(connect), null);
         assertThat(connect.getUser()).isInstanceOf(Authentication.class);
@@ -46,7 +46,7 @@ class ChatStompInterceptorTest {
     void outsidersCannotSubscribeToAnotherConversation() {
         doThrow(ApiException.forbidden("NOT_CONVERSATION_PARTICIPANT", "Denied"))
                 .when(conversations).assertParticipant(99L, 101L);
-        var subscribe = authenticated(StompCommand.SUBSCRIBE, "/topic/conversations/99");
+        StompHeaderAccessor subscribe = authenticated(StompCommand.SUBSCRIBE, "/topic/conversations/99");
         assertThatThrownBy(() -> interceptor.preSend(frame(subscribe), null)).isInstanceOf(RuntimeException.class);
     }
 
@@ -62,22 +62,22 @@ class ChatStompInterceptorTest {
 
     @Test
     void participantCanSubscribeAndSendThroughApprovedDestinations() {
-        var subscribe = frame(authenticated(StompCommand.SUBSCRIBE, "/topic/conversations/7"));
-        var send = frame(authenticated(StompCommand.SEND, "/app/conversations/7/messages"));
+        Message<byte[]> subscribe = frame(authenticated(StompCommand.SUBSCRIBE, "/topic/conversations/7"));
+        Message<byte[]> send = frame(authenticated(StompCommand.SEND, "/app/conversations/7/messages"));
         assertThat(interceptor.preSend(subscribe, null)).isSameAs(subscribe);
         assertThat(interceptor.preSend(send, null)).isSameAs(send);
     }
 
     @Test
     void framesAfterTheConnectTokenExpiresRequireReconnect() {
-        var connect = StompHeaderAccessor.create(StompCommand.CONNECT);
+        StompHeaderAccessor connect = StompHeaderAccessor.create(StompCommand.CONNECT);
         connect.setNativeHeader("Authorization", "Bearer " + token());
         interceptor.preSend(frame(connect), null);
         assertThat(((Authentication) connect.getUser()).getDetails()).isInstanceOf(Instant.class);
 
-        var expired = new UsernamePasswordAuthenticationToken(new UserPrincipal(101L, "buyer@test", List.of()), null, List.of());
+        UsernamePasswordAuthenticationToken expired = new UsernamePasswordAuthenticationToken(new UserPrincipal(101L, "buyer@test", List.of()), null, List.of());
         expired.setDetails(Instant.now().minusSeconds(1));
-        var send = StompHeaderAccessor.create(StompCommand.SEND);
+        StompHeaderAccessor send = StompHeaderAccessor.create(StompCommand.SEND);
         send.setDestination("/app/conversations/7/messages");
         send.setUser(expired);
         assertThatThrownBy(() -> interceptor.preSend(frame(send), null)).isInstanceOf(CredentialsExpiredException.class);
@@ -85,15 +85,15 @@ class ChatStompInterceptorTest {
 
     @Test
     void anonymousCannotSendOrSubscribe() {
-        var subscribe = StompHeaderAccessor.create(StompCommand.SUBSCRIBE);
+        StompHeaderAccessor subscribe = StompHeaderAccessor.create(StompCommand.SUBSCRIBE);
         subscribe.setDestination("/topic/conversations/7");
         assertThatThrownBy(() -> interceptor.preSend(frame(subscribe), null)).isInstanceOf(RuntimeException.class);
     }
 
     private StompHeaderAccessor authenticated(StompCommand command, String destination) {
-        var accessor = StompHeaderAccessor.create(command);
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(command);
         accessor.setDestination(destination);
-        var principal = new UserPrincipal(101L, "buyer@test", List.of());
+        UserPrincipal principal = new UserPrincipal(101L, "buyer@test", List.of());
         accessor.setUser(new UsernamePasswordAuthenticationToken(principal, null, List.of()));
         return accessor;
     }

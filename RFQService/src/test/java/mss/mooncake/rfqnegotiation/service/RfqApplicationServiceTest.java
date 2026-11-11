@@ -28,6 +28,7 @@ import mss.mooncake.rfqnegotiation.client.CatalogServiceClient;
 import mss.mooncake.rfqnegotiation.client.dto.catalog.StoreSummaryResponse;
 import mss.mooncake.rfqnegotiation.dto.request.CreateRfqRequest;
 import mss.mooncake.rfqnegotiation.dto.response.RfqResponse;
+import mss.mooncake.rfqnegotiation.entity.QuotationEntity;
 import mss.mooncake.rfqnegotiation.entity.RfqEntity;
 import mss.mooncake.rfqnegotiation.entity.RfqTargetStoreEntity;
 import mss.mooncake.rfqnegotiation.enums.RfqAudience;
@@ -299,7 +300,7 @@ class RfqApplicationServiceTest {
     void cancellingDeclinesTheQuotationsStillWaiting() {
         when(actor.customerId()).thenReturn(17L);
         when(rfqs.findByIdForUpdate(91L)).thenReturn(Optional.of(entity(RfqStatus.OPEN)));
-        var waiting = new mss.mooncake.rfqnegotiation.entity.QuotationEntity();
+        QuotationEntity waiting = new mss.mooncake.rfqnegotiation.entity.QuotationEntity();
         waiting.setStatus(mss.mooncake.rfqnegotiation.enums.QuotationStatus.SUBMITTED);
         when(quotations.findByRfqIdAndStatus(91L, mss.mooncake.rfqnegotiation.enums.QuotationStatus.SUBMITTED))
                 .thenReturn(List.of(waiting));
@@ -311,7 +312,7 @@ class RfqApplicationServiceTest {
 
     @Test
     void quotationIntakeMustCloseBeforeTheRequestedDeliveryDate() {
-        var request = new CreateRfqRequest("Mooncakes", null, 10, null, LocalDate.now(ZoneOffset.UTC).plusDays(5),
+        CreateRfqRequest request = new CreateRfqRequest("Mooncakes", null, 10, null, LocalDate.now(ZoneOffset.UTC).plusDays(5),
                 null, null, OffsetDateTime.now(ZoneOffset.UTC).plusDays(10), null);
         assertThatThrownBy(() -> service.create(request))
                 .isInstanceOf(ApiException.class).extracting("code").isEqualTo("VALIDATION_FAILED");

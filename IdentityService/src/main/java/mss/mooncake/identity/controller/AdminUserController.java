@@ -22,21 +22,17 @@ public class AdminUserController {
                     user.getCreatedAt());
         }
     }
-    public record Metrics(long users) { }
 
     private final UserRepository users;
 
     public AdminUserController(UserRepository users) { this.users = users; }
-
-    @GetMapping("/metrics")
-    public Metrics metrics() { return new Metrics(users.count()); }
 
     @GetMapping("/users")
     public Page<UserRow> users(@RequestParam(required = false) String q,
                                @RequestParam(required = false) UserStatus status,
                                @RequestParam(defaultValue = "0") int page,
                                @RequestParam(defaultValue = "20") int size) {
-        if (page < 0 || size < 1 || size > 100) throw new IllegalArgumentException("Invalid pagination");
+        if (page < 0 || size < 1 || size > 100) throw new IllegalArgumentException("Tham số phân trang không hợp lệ");
         var paging = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "id"));
         String email = q == null ? "" : q.trim();
         Page<UserEntity> result = email.isEmpty()

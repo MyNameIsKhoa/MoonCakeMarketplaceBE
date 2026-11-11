@@ -239,21 +239,41 @@ public class FinanceServiceImpl implements FinanceService {
         return blocks;
     }
 
+    /** The order was cancelled with its deposit kept for the supplier: only that part is settled, without delivery. */
+    private boolean keptDeposit(long id) {
+        return repository.count("""
+                SELECT COUNT(*) FROM seller_order s JOIN cancellation c ON c.seller_order_id=s.seller_order_id
+                WHERE s.seller_order_id=? AND s.status='CANCELLED' AND c.status='APPROVED' AND c.retained_amount>0
+                """, id) > 0;
+    }
+
+    /** Settlement base before refunds: what was collected for a kept deposit, the order total otherwise. */
+    private long settlementGross(Context c) {
+        return keptDeposit(c.id()) ? repository.paid(c.id()) : c.total();
+    }
+
     private FinanceResponse.Eligibility eligibility(Context c) {
         var blocks = financialBlocks(c.id());
-        if (!c.accepted()) { blocks.add("ORDER_NOT_ACCEPTED"); }
-        if (repository.paid(c.id()) != c.total()) { blocks.add("NOT_FULLY_PAID"); }
-        if (repository.refunded(c.id()) >= c.total()) { blocks.add("FULLY_REFUNDED"); }
-        if (repository.active(c.id())) { blocks.add("PAYMENT_RECONCILIATION_REQUIRED"); }
-        Instant deliveredAt = repository.deliveredAt(c.id());
-        boolean adjudicatedAfterDelivery = deliveredAt != null && repository.disputes(c.id()).stream().anyMatch(d ->
-                "RESOLVED".equals(d.status()) && d.decisionType() != null
-                        && d.openedAt() != null && !d.openedAt().isBefore(deliveredAt));
-        if (!c.delivered() || (!c.received() && !adjudicatedAfterDelivery)) {
-            blocks.add("DELIVERY_ACCEPTANCE_REQUIRED");
-        }
-        if (deliveredAt == null || Instant.now().isBefore(deliveredAt.plus(Duration.ofDays(7)))) {
-            blocks.add("DISPUTE_WINDOW_OPEN");
+        if (keptDeposit(c.id())) {
+            // The approved cancellation is the reason for this payout, not a block.
+            blocks.remove("CANCELLATION");
+            if (repository.refunded(c.id()) >= repository.paid(c.id())) { blocks.add("FULLY_REFUNDED"); }
+            if (repository.active(c.id())) { blocks.add("PAYMENT_RECONCILIATION_REQUIRED"); }
+        } else {
+            if (!c.accepted()) { blocks.add("ORDER_NOT_ACCEPTED"); }
+            if (repository.paid(c.id()) != c.total()) { blocks.add("NOT_FULLY_PAID"); }
+            if (repository.refunded(c.id()) >= c.total()) { blocks.add("FULLY_REFUNDED"); }
+            if (repository.active(c.id())) { blocks.add("PAYMENT_RECONCILIATION_REQUIRED"); }
+            Instant deliveredAt = repository.deliveredAt(c.id());
+            boolean adjudicatedAfterDelivery = deliveredAt != null && repository.disputes(c.id()).stream().anyMatch(d ->
+                    "RESOLVED".equals(d.status()) && d.decisionType() != null
+                            && d.openedAt() != null && !d.openedAt().isBefore(deliveredAt));
+            if (!c.delivered() || (!c.received() && !adjudicatedAfterDelivery)) {
+                blocks.add("DELIVERY_ACCEPTANCE_REQUIRED");
+            }
+            if (deliveredAt == null || Instant.now().isBefore(deliveredAt.plus(Duration.ofDays(7)))) {
+                blocks.add("DISPUTE_WINDOW_OPEN");
+            }
         }
         if (!"NET_AFTER_REFUND".equals(feeBasis)
                 && !("TOTAL_COLLECTED".equals(feeBasis) && repository.refunded(c.id()) == 0)) {
@@ -510,12 +530,16 @@ public class FinanceServiceImpl implements FinanceService {
             // A rejected request is history, not a block: only one REQUESTED/APPROVED case may exist.
             require(repository.cancellations(orderId).stream().allMatch(c -> "REJECTED".equals(c.status())),
                     "CANCELLATION_ALREADY_EXISTS");
-            String requester = actor.admin() ? "ADMIN" : isBuyer(repository.context(orderId), actor)
-                    ? "CUSTOMER" : "SUPPLIER";
+            var context = repository.context(orderId);
+            String requester = actor.admin() ? "ADMIN" : isBuyer(context, actor) ? "CUSTOMER" : "SUPPLIER";
+            // A buyer who cancels after the supplier started preparing leaves the deposit to the supplier.
+            long retained = "CUSTOMER".equals(requester) && context.deposit() != null && repository.count(
+                    "SELECT COUNT(*) FROM seller_order WHERE seller_order_id=? AND status IN ('PREPARING','SHIPPING')",
+                    orderId) == 1 ? Math.min(context.deposit(), repository.paid(orderId)) : 0;
             long id = repository.insert("""
-                    INSERT INTO cancellation(seller_order_id,actor_type,actor_id_ref,reason,status,requested_at)
-                    VALUES(?,?,?,?,'REQUESTED',?)
-                    """, orderId, requester, actor.userId(), reason, FinanceRepository.utc(Instant.now()));
+                    INSERT INTO cancellation(seller_order_id,actor_type,actor_id_ref,reason,status,requested_at,retained_amount)
+                    VALUES(?,?,?,?,'REQUESTED',?,?)
+                    """, orderId, requester, actor.userId(), reason, FinanceRepository.utc(Instant.now()), retained);
             repository.event(orderId, "CANCELLATION_REQUESTED", id, Long.toString(actor.userId()), reason);
             notifier.cancellationRequested(orderId, id, requester, reason);
         });
@@ -529,14 +553,22 @@ public class FinanceServiceImpl implements FinanceService {
             require(!approve || (!repository.active(orderId) && !repository.activeCustomerPayment(orderId)), "CANCEL_UNPAID_LINKS_FIRST");
             require(repository.count("SELECT COUNT(*) FROM customer_order WHERE order_id=? AND status='CANCEL_REQUESTED'",
                     repository.parentOrderId(orderId)) == 0, "CANCELLATION_IN_PROGRESS");
+            // Money already on its way back to the buyer for this request: rejecting would leave a refunded order running.
+            require(approve || repository.count("""
+                    SELECT COUNT(*) FROM refund r JOIN payment p ON p.payment_id=r.payment_id
+                    JOIN cancellation c ON c.seller_order_id=p.seller_order_id
+                    WHERE c.cancellation_id=? AND r.status<>'REJECTED' AND r.requested_at>=c.requested_at
+                    """, id) == 0, "CANCELLATION_REFUND_STARTED");
             long parent = repository.parentOrderId(orderId);
             boolean retail = repository.retailOrder(parent);
             if (approve) {
                 long paid = repository.paid(orderId);
                 // Unpaid retail is cancelled as a whole checkout (cancel-unpaid), which restores its stock hold.
                 require(!retail || paid > 0, "UNPAID_RETAIL_CANCEL_WHOLE_ORDER");
-                // Collected money must first be returned: only refunds confirmed with transfer proof count.
-                require(paid <= repository.refunded(orderId), "PAID_CANCELLATION_REQUIRES_REFUND_REVIEW");
+                // Collected money beyond a deposit kept for the supplier must first be returned:
+                // only refunds confirmed with transfer proof count.
+                long retained = repository.count("SELECT retained_amount FROM cancellation WHERE cancellation_id=?", id);
+                require(paid <= repository.refunded(orderId) + retained, "PAID_CANCELLATION_REQUIRES_REFUND_REVIEW");
             }
             repository.update("UPDATE cancellation SET status=?,decision_reason=?,cancelled_at=? WHERE cancellation_id=?",
                     approve ? "APPROVED" : "REJECTED", reason, approve ? FinanceRepository.utc(Instant.now()) : null, id);
@@ -741,7 +773,8 @@ public class FinanceServiceImpl implements FinanceService {
             var existing = repository.settlements(orderId);
             require(existing.isEmpty() || (existing.size() == 1 && "ON_HOLD".equals(existing.getFirst().status())),
                     "SETTLEMENT_ALREADY_EXISTS");
-            long net = context.total() - repository.refunded(orderId);
+            long gross = settlementGross(context);
+            long net = gross - repository.refunded(orderId);
             require(net > 0, "NOTHING_TO_SETTLE");
             long fee = platformFee(net);
             long id;
@@ -749,14 +782,14 @@ public class FinanceServiceImpl implements FinanceService {
                 id = repository.insert("""
                         INSERT INTO settlement(seller_order_id,gross_amount,refunded_amount,fee_rate,fee_amount,supplier_payout_amount,
                         status,idempotency_key,fee_basis,rounding_rule) VALUES(?,?,?,5.00,?,?,'READY',?,?,?)
-                        """, orderId, context.total(), repository.refunded(orderId), fee, net - fee,
+                        """, orderId, gross, repository.refunded(orderId), fee, net - fee,
                         commandKey, feeBasis, rounding);
             } else {
                 id = existing.getFirst().settlementId();
                 repository.update("""
                         UPDATE settlement SET gross_amount=?,refunded_amount=?,fee_rate=5.00,fee_amount=?,supplier_payout_amount=?,
                         status='READY',idempotency_key=?,fee_basis=?,rounding_rule=? WHERE settlement_id=?
-                        """, context.total(), repository.refunded(orderId), fee, net - fee,
+                        """, gross, repository.refunded(orderId), fee, net - fee,
                         commandKey, feeBasis, rounding, id);
             }
             repository.event(orderId, "SETTLEMENT_READY", id, Long.toString(actor.userId()), "feeRate=5;basis=" + feeBasis + ";rounding=" + rounding);
@@ -796,6 +829,18 @@ public class FinanceServiceImpl implements FinanceService {
                 new FinanceResponse.SupplierPayouts.Totals(pending, ready, processing, paid));
     }
 
+    public FinanceResponse.AdminPayouts adminPayouts(Actor actor, String query, int page, int size) {
+        admin(actor);
+        if (page < 0 || size < 1 || size > 100) {
+            throw new FinanceException(HttpStatus.BAD_REQUEST, "INVALID_FINANCE_REQUEST");
+        }
+        // Read-only and lock-free; only the requested page is evaluated.
+        long total = repository.countPayouts(query);
+        var rows = repository.payouts(query, (int) Math.min((long) page * size, Integer.MAX_VALUE), size).stream()
+                .map(this::payoutRow).toList();
+        return new FinanceResponse.AdminPayouts(rows, page, size, total, (int) ((total + size - 1) / size));
+    }
+
     private FinanceResponse.SupplierPayouts.Row payoutRow(FinanceRepository.SupplierPayout order) {
         long id = order.sellerOrderId();
         var context = repository.context(id);
@@ -812,7 +857,7 @@ public class FinanceServiceImpl implements FinanceService {
         String payoutStatus = switch (settlement) {
             case "SUCCESS" -> "PAID";
             case "PROCESSING", "READY", "ON_HOLD" -> settlement;
-            default -> "CANCELLED".equals(order.status()) || (collected > 0 && net <= 0) ? "NO_PAYOUT"
+            default -> ("CANCELLED".equals(order.status()) && !keptDeposit(id)) || (collected > 0 && net <= 0) ? "NO_PAYOUT"
                     : eligibility.eligible() ? "READY" : "BLOCKED";
         };
         return new FinanceResponse.SupplierPayouts.Row(id, order.sellerOrderNo(), order.orderId(), order.orderNo(),
@@ -831,7 +876,7 @@ public class FinanceServiceImpl implements FinanceService {
             var settlement = repository.settlements(orderId).stream()
                     .filter(s -> s.settlementId() == id && "READY".equals(s.status())).findFirst()
                     .orElseThrow(() -> new FinanceException(HttpStatus.CONFLICT, "SETTLEMENT_NOT_READY"));
-            require(settlement.grossAmount() == context.total()
+            require(settlement.grossAmount() == settlementGross(context)
                     && settlement.refundedAmount() == repository.refunded(orderId)
                     && settlement.grossAmount() == settlement.refundedAmount()
                             + settlement.feeAmount() + settlement.supplierPayoutAmount()

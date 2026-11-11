@@ -76,7 +76,7 @@ public class AuthEmailFlowServiceImpl implements AuthEmailFlowService {
     public void verifyEmail(String rawToken) {
         AuthActionTokenEntity token = consume(rawToken, AuthTokenPurpose.EMAIL_VERIFICATION);
         UserEntity user = userRepository.findById(token.getUserId())
-                .orElseThrow(() -> new UnauthorizedException("Invalid or expired verification token"));
+                .orElseThrow(() -> new UnauthorizedException("Liên kết xác minh email không hợp lệ hoặc đã hết hạn"));
         user.setEmailVerified(true);
         user.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
         token.setUsedAt(LocalDateTime.now(ZoneOffset.UTC));
@@ -142,9 +142,9 @@ public class AuthEmailFlowServiceImpl implements AuthEmailFlowService {
     private AuthActionTokenEntity consume(String rawToken, AuthTokenPurpose purpose) {
         AuthActionTokenEntity token = tokenRepository
                 .findUsableTokenForUpdate(hash(rawToken), purpose)
-                .orElseThrow(() -> new UnauthorizedException("Invalid or expired token"));
+                .orElseThrow(() -> new UnauthorizedException("Liên kết không hợp lệ hoặc đã hết hạn"));
         if (!token.getExpiresAt().isAfter(LocalDateTime.now(ZoneOffset.UTC))) {
-            throw new UnauthorizedException("Invalid or expired token");
+            throw new UnauthorizedException("Liên kết không hợp lệ hoặc đã hết hạn");
         }
         return token;
     }

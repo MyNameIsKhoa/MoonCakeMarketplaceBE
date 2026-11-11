@@ -84,7 +84,7 @@ class AuthAndUserControllerIntegrationTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.status").value(409))
                 .andExpect(jsonPath("$.error").value("Conflict"))
-                .andExpect(jsonPath("$.message", containsString("already registered")));
+                .andExpect(jsonPath("$.message", containsString("Email đã được đăng ký")));
     }
 
     @Test

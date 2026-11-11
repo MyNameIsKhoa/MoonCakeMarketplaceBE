@@ -98,7 +98,7 @@ public class ProductVariantServiceImpl implements ProductVariantService {
         if (current == next)
             return;
         if (next == ProductStatus.DRAFT || next == ProductStatus.OUT_OF_STOCK) {
-            throw new BadRequestException("Cannot change variant status from " + current + " to " + next);
+            throw new BadRequestException("Không thể chuyển trạng thái biến thể từ " + current + " sang " + next);
         }
         if (current == ProductStatus.ACTIVE
                 && product.getStatus() == ProductStatus.ACTIVE

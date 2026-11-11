@@ -3,6 +3,8 @@ package mss.mooncake.commerce.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import jakarta.validation.Validation;
+import jakarta.validation.Validator;
+import jakarta.validation.ValidatorFactory;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -13,7 +15,7 @@ import org.junit.jupiter.api.Test;
 class AcceptedQuotationContractTest {
     @Test
     void validatesNestedSnapshotsAtInternalTrustBoundary() {
-        var request = new CreateOrderFromQuotationRequest(1L, 2L, 1, LocalDateTime.now(),
+        CreateOrderFromQuotationRequest request = new CreateOrderFromQuotationRequest(1L, 2L, 1, LocalDateTime.now(),
                 3L, 4L, 5L, "accept-key-1",
                 new CreateOrderFromQuotationRequest.StoreSnapshot("Store", "Supplier"),
                 new CreateOrderFromQuotationRequest.AddressSnapshot(6L, "Buyer", "0123",
@@ -24,10 +26,10 @@ class AcceptedQuotationContractTest {
                         null, null, 1, BigDecimal.TEN, BigDecimal.ZERO, BigDecimal.TEN)),
                 BigDecimal.TEN, BigDecimal.TEN);
 
-        try (var factory = Validation.buildDefaultValidatorFactory()) {
-            var validator = factory.getValidator();
+        try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
+            Validator validator = factory.getValidator();
             assertThat(validator.validate(request)).isEmpty();
-            var invalid = new CreateOrderFromQuotationRequest(request.rfqId(), request.quotationId(),
+            CreateOrderFromQuotationRequest invalid = new CreateOrderFromQuotationRequest(request.rfqId(), request.quotationId(),
                     request.quotationVersion(), request.acceptedAt(), request.customerId(), request.supplierId(),
                     request.storeId(), request.idempotencyKey(), request.storeSnapshot(),
                     request.deliveryAddressSnapshot(), request.terms(),

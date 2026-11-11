@@ -3,6 +3,7 @@ import java.math.BigDecimal;
 import java.time.*;
 import java.util.List;
 import mss.mooncake.commerce.dto.request.CreateOrderFromQuotationRequest;
+import mss.mooncake.commerce.dto.response.OrderResponse;
 import mss.mooncake.commerce.entity.*;
 import mss.mooncake.commerce.enums.PaymentType;
 import mss.mooncake.commerce.repository.*;
@@ -27,18 +28,18 @@ class QuotationOrderIntegrationTest {
     // The verification database is kept between runs; fresh quotation IDs keep each run independent.
     private final long base=Math.floorMod(System.nanoTime(),1_000_000_000L)*10;
     @Test void snapshotsOrderAndCreatesDepositOnlyOnce() {
-        var request=request(base+1,"30.00");
-        var first=service.createOrderFromAcceptedQuotation(request);
-        var replay=service.createOrderFromAcceptedQuotation(request);
+        CreateOrderFromQuotationRequest request=request(base+1,"30.00");
+        OrderResponse first=service.createOrderFromAcceptedQuotation(request);
+        OrderResponse replay=service.createOrderFromAcceptedQuotation(request);
         assertThat(replay).isEqualTo(first);
-        var seller=sellers.findById(first.sellerOrderId()).orElseThrow();
+        SellerOrderEntity seller=sellers.findById(first.sellerOrderId()).orElseThrow();
         assertThat(seller.getTotalAmount()).isEqualByComparingTo("1050.00");
         assertThat(seller.getDepositAmount()).isEqualByComparingTo("315.00");
         assertThat(seller.getRemainingAmount()).isEqualByComparingTo("735.00");
         assertThat(seller.getStatus()).isEqualTo("AWAITING_DEPOSIT");
         // Same due instant TV5 puts on the REMAINING obligation (00:00 Asia/Ho_Chi_Minh, stored as UTC).
         assertThat(seller.getRemainingDueAt()).isEqualTo(LocalDateTime.ofInstant(FinanceIntegrationService.remainingDue(request.terms().deliveryDate()),ZoneOffset.UTC));
-        var context=finance.context(seller.getId());
+        FinanceRepository.Context context=finance.context(seller.getId());
         assertThat(context.total()).isEqualTo(1050L); assertThat(context.deposit()).isEqualTo(315L);
         assertThat(paymentsOf(seller)).hasSize(2).extracting(PaymentEntity::getPaymentType).containsExactlyInAnyOrder(PaymentType.DEPOSIT,PaymentType.REMAINING);
         assertThat(service.getOrderByQuotation(base+1)).isEqualTo(first);
@@ -46,15 +47,15 @@ class QuotationOrderIntegrationTest {
     }
     @Test void rejectsInconsistentTotalsWithoutPartialOrder() {
         long count=orders.count();
-        var good=request(base+2,"30.00");
-        var bad=new CreateOrderFromQuotationRequest(good.rfqId(),good.quotationId(),good.quotationVersion(),good.acceptedAt(),good.customerId(),good.supplierId(),good.storeId(),good.idempotencyKey(),good.storeSnapshot(),good.deliveryAddressSnapshot(),good.terms(),good.items(),good.subtotal(),new BigDecimal("999.00"));
+        CreateOrderFromQuotationRequest good=request(base+2,"30.00");
+        CreateOrderFromQuotationRequest bad=new CreateOrderFromQuotationRequest(good.rfqId(),good.quotationId(),good.quotationVersion(),good.acceptedAt(),good.customerId(),good.supplierId(),good.storeId(),good.idempotencyKey(),good.storeSnapshot(),good.deliveryAddressSnapshot(),good.terms(),good.items(),good.subtotal(),new BigDecimal("999.00"));
         assertThatThrownBy(()->service.createOrderFromAcceptedQuotation(bad)).isInstanceOf(ResponseStatusException.class);
         assertThat(orders.count()).isEqualTo(count); assertThat(conversions.findByQuotationIdRef(base+2)).isEmpty();
     }
     // Payments are whole VND (TV5 CK_payment_integer_vnd): 30% of 1005 = 301.5 rounds HALF_UP to 302.
     @Test void roundsDepositHalfUpToWholeVnd() {
-        var created=service.createOrderFromAcceptedQuotation(request(base+3,"key-"+(base+3),1,"955.00","30.00"));
-        var seller=sellers.findById(created.sellerOrderId()).orElseThrow();
+        OrderResponse created=service.createOrderFromAcceptedQuotation(request(base+3,"key-"+(base+3),1,"955.00","30.00"));
+        SellerOrderEntity seller=sellers.findById(created.sellerOrderId()).orElseThrow();
         assertThat(seller.getTotalAmount()).isEqualByComparingTo("1005");
         assertThat(seller.getDepositAmount()).isEqualByComparingTo("302");
         assertThat(seller.getRemainingAmount()).isEqualByComparingTo("703");
@@ -68,9 +69,9 @@ class QuotationOrderIntegrationTest {
     }
     // TV5 only accepts a deposit strictly between 0 and the total; 0% and 100% become one FULL payment.
     @Test void zeroOrFullDepositBecomesSingleFullPayment() {
-        for (var percent:List.of("0.00","100.00")) {
+        for (String percent:List.of("0.00","100.00")) {
             long id=base+("0.00".equals(percent)?5:6);
-            var seller=sellers.findById(service.createOrderFromAcceptedQuotation(request(id,percent)).sellerOrderId()).orElseThrow();
+            SellerOrderEntity seller=sellers.findById(service.createOrderFromAcceptedQuotation(request(id,percent)).sellerOrderId()).orElseThrow();
             assertThat(seller.getStatus()).isEqualTo("AWAITING_PAYMENT");
             assertThat(seller.getDepositAmount()).isNull(); assertThat(seller.getRemainingAmount()).isNull(); assertThat(seller.getRemainingDueAt()).isNull();
             assertThat(finance.context(seller.getId()).deposit()).isNull();

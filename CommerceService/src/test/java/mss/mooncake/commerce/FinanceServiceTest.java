@@ -78,7 +78,7 @@ class FinanceServiceTest {
                 "V7__customer_order_payment.sql", "V8__seller_order_acceptance_timestamp.sql",
                 "V10__dispute_workflow.sql", "V11__cancellation_retry_and_stock_restore.sql",
                 "V12__shipment_line.sql", "V13__seller_order_stock_restore.sql",
-                "V14__manual_transfer_destination.sql"}) {
+                "V14__manual_transfer_destination.sql", "V16__cancellation_retained_deposit.sql"}) {
             var resource = new ClassPathResource("db/migration/" + file);
             String sql = resource.getContentAsString(StandardCharsets.UTF_8)
                     .replace("dbo.", "").replace("SYSUTCDATETIME()", "CURRENT_TIMESTAMP")
@@ -733,6 +733,224 @@ class FinanceServiceTest {
     }
 
     @Test
+    void adminCancellationListTracksTheRefundAndARefundedCancellationCannotBeRejected() {
+        rfqOrder(3000L, Instant.now());
+        long deposit = repository.payments(1).getFirst().id();
+        service.initiate(deposit, key(), BUYER);
+        collect(deposit, "deposit-paid");
+        service.requestCancellation(1, "Đổi ý sau khi đặt cọc", key(), BUYER);
+        long id = repository.cancellations(1).getFirst().id();
+        long paid = repository.paid(1);
+        var cases = new mss.mooncake.commerce.controller.AdminCancellationController(new JdbcTemplate(datasource));
+        assertThat(cases.pending()).singleElement().satisfies(c -> {
+            assertThat(c.paidAmount()).isEqualTo(paid);
+            assertThat(c.refundedAmount()).isZero();
+            assertThat(c.pendingRefundAmount()).isZero();
+        });
+
+        service.requestRefund(1, deposit, paid, "Hoàn tiền hủy đơn", "Hủy đơn: hoàn 100% số đã thu", key(), ADMIN);
+        assertThat(cases.pending().getFirst().pendingRefundAmount()).isEqualTo(paid);
+        // Money is on its way back to the buyer: rejecting would leave a refunded order running.
+        assertThatThrownBy(() -> service.decideCancellation(1, id, false, "Từ chối", key(), ADMIN))
+                .hasMessage("CANCELLATION_REFUND_STARTED");
+
+        long refund = repository.refunds(1).getLast().id();
+        service.prepareRefundTransfer(1, refund, key(), ADMIN);
+        service.confirmRefund(1, refund, "bank-refund-1", "https://proof.test/refund", key(), ADMIN);
+        assertThat(cases.pending().getFirst()).satisfies(c -> {
+            assertThat(c.refundedAmount()).isEqualTo(paid);
+            assertThat(c.pendingRefundAmount()).isZero();
+        });
+        assertThatThrownBy(() -> service.decideCancellation(1, id, false, "Từ chối", key(), ADMIN))
+                .hasMessage("CANCELLATION_REFUND_STARTED");
+
+        service.decideCancellation(1, id, true, "Đã hoàn 100% tiền cọc", key(), ADMIN);
+        assertThat(orders("CANCELLED")).isEqualTo(2);
+        assertThat(cases.pending()).isEmpty();
+    }
+
+    @Test
+    void aRejectedRefundNoLongerBlocksRejectingTheCancellation() {
+        rfqOrder(3000L, Instant.now());
+        long deposit = repository.payments(1).getFirst().id();
+        service.initiate(deposit, key(), BUYER);
+        collect(deposit, "deposit-paid");
+        service.requestCancellation(1, "Đổi ý sau khi đặt cọc", key(), BUYER);
+        long id = repository.cancellations(1).getFirst().id();
+        service.requestRefund(1, deposit, repository.paid(1), "Hoàn tiền hủy đơn", "Hủy đơn: hoàn 100% số đã thu", key(), ADMIN);
+        service.rejectRefund(1, repository.refunds(1).getLast().id(), "Tạo nhầm", key(), ADMIN);
+
+        service.decideCancellation(1, id, false, "Đơn đã được chuẩn bị", key(), ADMIN);
+
+        assertThat(repository.cancellations(1).getFirst().status()).isEqualTo("REJECTED");
+    }
+
+    // --- Deposit kept for the supplier once preparation started (policy chốt 11/11/2026) ---
+
+    private long paidDeposit() {
+        rfqOrder(3000L, Instant.now());
+        long deposit = repository.payments(1).getFirst().id();
+        service.initiate(deposit, key(), BUYER);
+        collect(deposit, "deposit-paid");
+        return deposit;
+    }
+
+    private long retained() {
+        return repository.count("SELECT COALESCE(SUM(retained_amount),0) FROM cancellation WHERE seller_order_id=1");
+    }
+
+    @Test
+    void buyerCancellingAfterPreparationStartedKeepsTheDepositForTheSupplier() {
+        paidDeposit();
+        repository.update("UPDATE seller_order SET status='PREPARING' WHERE seller_order_id=1");
+        service.requestCancellation(1, "Đổi ý khi nhà bán đang làm", key(), BUYER);
+        long id = repository.cancellations(1).getFirst().id();
+        var cases = new mss.mooncake.commerce.controller.AdminCancellationController(new JdbcTemplate(datasource));
+        assertThat(cases.pending().getFirst().retainedAmount()).isEqualTo(3000);
+
+        // Only the deposit was paid and it stays with the supplier: nothing to refund before approving.
+        service.decideCancellation(1, id, true, "Người mua hủy khi nhà bán đã chuẩn bị", key(), ADMIN);
+        assertThat(orders("CANCELLED")).isEqualTo(2);
+
+        var supplier = new FinanceService.Actor(202, null, 20L, false);
+        assertThat(service.supplierPayouts(supplier, 0, 20).content().getFirst()).satisfies(row -> {
+            assertThat(row.payoutStatus()).isEqualTo("READY");
+            assertThat(row.netPayout()).isEqualTo(2850);
+        });
+        assertThat(service.summary(1, ADMIN).eligibility().eligible()).isTrue();
+        service.createSettlement(1, key(), ADMIN);
+        var settlement = repository.settlements(1).getFirst();
+        assertThat(settlement.grossAmount()).isEqualTo(3000);
+        assertThat(settlement.feeAmount()).isEqualTo(150);
+        assertThat(settlement.supplierPayoutAmount()).isEqualTo(2850);
+        service.beginPayout(1, settlement.settlementId(), key(), ADMIN);
+        service.confirmPayout(1, settlement.settlementId(), "bank-payout-deposit", "https://proof.test/payout", key(), ADMIN);
+        assertThat(repository.settlements(1).getFirst().status()).isEqualTo("SUCCESS");
+        assertThat(orders("CANCELLED")).isEqualTo(2);
+    }
+
+    @Test
+    void buyerCancellingBeforePreparationStartedGetsTheDepositBack() {
+        paidDeposit();
+        service.requestCancellation(1, "Đổi ý trước khi nhà bán làm", key(), BUYER);
+
+        assertThat(retained()).isZero();
+        assertThatThrownBy(() -> service.decideCancellation(1, repository.cancellations(1).getFirst().id(), true,
+                "Duyệt", key(), ADMIN)).hasMessage("PAID_CANCELLATION_REQUIRES_REFUND_REVIEW");
+    }
+
+    @Test
+    void supplierCancellingNeverKeepsTheDeposit() {
+        paidDeposit();
+        repository.update("UPDATE seller_order SET status='PREPARING' WHERE seller_order_id=1");
+
+        service.requestCancellation(1, "Nhà bán không làm kịp", key(), new FinanceService.Actor(202, null, 20L, false));
+
+        assertThat(retained()).isZero();
+        assertThatThrownBy(() -> service.decideCancellation(1, repository.cancellations(1).getFirst().id(), true,
+                "Duyệt", key(), ADMIN)).hasMessage("PAID_CANCELLATION_REQUIRES_REFUND_REVIEW");
+    }
+
+    @Test
+    void buyerCancellingAFullyPaidOrderInPreparationGetsBackEverythingButTheDeposit() {
+        var netService = new FinanceServiceImpl(repository, provider, new DataSourceTransactionManager(datasource),
+                "NET_AFTER_REFUND", "HALF_UP", true, customerPayments, integration, 7, CommerceNotifier.disabled(), identity);
+        paidDeposit();
+        repository.update("UPDATE seller_order SET status='PREPARING' WHERE seller_order_id=1");
+        long remaining = repository.payments(1).get(1).id();
+        netService.initiate(remaining, key(), BUYER);
+        collect(remaining, "remaining-paid");
+        netService.requestCancellation(1, "Đổi ý khi nhà bán đang làm", key(), BUYER);
+        long id = repository.cancellations(1).getFirst().id();
+        assertThatThrownBy(() -> netService.decideCancellation(1, id, true, "Duyệt", key(), ADMIN))
+                .hasMessage("PAID_CANCELLATION_REQUIRES_REFUND_REVIEW");
+
+        netService.requestRefund(1, remaining, 7001, "Hoàn phần đã trả thêm", "Giữ cọc cho nhà bán", key(), ADMIN);
+        long refund = repository.refunds(1).getLast().id();
+        netService.prepareRefundTransfer(1, refund, key(), ADMIN);
+        netService.confirmRefund(1, refund, "bank-refund-balance", "https://proof.test/refund", key(), ADMIN);
+        netService.decideCancellation(1, id, true, "Giữ cọc, hoàn phần còn lại", key(), ADMIN);
+
+        netService.createSettlement(1, key(), ADMIN);
+        var settlement = repository.settlements(1).getFirst();
+        assertThat(settlement.grossAmount()).isEqualTo(10001);
+        assertThat(settlement.refundedAmount()).isEqualTo(7001);
+        assertThat(settlement.feeAmount()).isEqualTo(150);
+        assertThat(settlement.supplierPayoutAmount()).isEqualTo(2850);
+    }
+
+    @Test
+    void adminMayStillRefundTheWholeDepositAndThenNothingIsPaidOut() {
+        long deposit = paidDeposit();
+        repository.update("UPDATE seller_order SET status='PREPARING' WHERE seller_order_id=1");
+        service.requestCancellation(1, "Nhà bán giao trễ", key(), BUYER);
+        refundInFull(service, 1);
+
+        service.decideCancellation(1, repository.cancellations(1).getFirst().id(), true, "Lỗi do nhà bán", key(), ADMIN);
+
+        assertThat(repository.refunded(1)).isEqualTo(repository.payment(deposit).amount());
+        assertThat(service.summary(1, ADMIN).eligibility().blockingReasons()).contains("FULLY_REFUNDED");
+        assertThatThrownBy(() -> service.createSettlement(1, key(), ADMIN)).hasMessage("SETTLEMENT_NOT_ELIGIBLE");
+    }
+
+    private static final java.time.ZoneId VIETNAM = java.time.ZoneId.of("Asia/Ho_Chi_Minh");
+
+    /** Balance due 00:00 Vietnam time three days before delivery: delivery in 3 days means it was due today. */
+    private void balanceDue(boolean passed) {
+        repository.update("UPDATE finance_context SET delivery_date=? WHERE seller_order_id=1",
+                LocalDate.now(VIETNAM).plusDays(passed ? 3 : 4));
+    }
+
+    @Test
+    void overdueBalanceCancelsTheOrderAndKeepsTheDepositForTheSupplier() {
+        var cancellation = rfqCancellation(mock(mss.mooncake.commerce.client.CatalogServiceClient.class));
+        paidDeposit();
+        balanceDue(true);
+
+        cancellation.cancelOverdueRemainingRfqOrders();
+        cancellation.cancelOverdueRemainingRfqOrders();
+
+        assertThat(orders("CANCELLED")).isEqualTo(2);
+        assertThat(repository.cancellations(1)).singleElement().satisfies(c -> assertThat(c.status()).isEqualTo("APPROVED"));
+        assertThat(retained()).isEqualTo(3000);
+        assertThat(repository.count("""
+                SELECT COUNT(*) FROM finance_audit WHERE seller_order_id=1
+                AND event_type='CANCELLATION_DECIDED' AND actor='SYSTEM'
+                """)).isEqualTo(1);
+        assertThat(service.summary(1, ADMIN).eligibility().eligible()).isTrue();
+    }
+
+    @Test
+    void balanceNotYetDueLeavesTheOrderRunning() {
+        var cancellation = rfqCancellation(mock(mss.mooncake.commerce.client.CatalogServiceClient.class));
+        paidDeposit();
+        balanceDue(false);
+
+        cancellation.cancelOverdueRemainingRfqOrders();
+
+        assertThat(orders("READY_FOR_FULFILLMENT")).isEqualTo(2);
+        assertThat(repository.cancellations(1)).isEmpty();
+    }
+
+    @Test
+    void balancePaidAtTheDeadlineIsCollectedInsteadOfCancelling() {
+        var cancellation = rfqCancellation(mock(mss.mooncake.commerce.client.CatalogServiceClient.class));
+        paidDeposit();
+        long remaining = repository.payments(1).get(1).id();
+        service.initiate(remaining, key(), BUYER);
+        var link = repository.payment(remaining);
+        when(provider.cancel(link.orderCode())).thenReturn(new PaymentProvider.Status(link.orderCode(),
+                link.amount(), link.amount(), link.linkId(), "PAID", "balance-at-deadline"));
+        balanceDue(true);
+
+        cancellation.cancelOverdueRemainingRfqOrders();
+
+        assertThat(repository.paid(1)).isEqualTo(10001);
+        assertThat(orders("READY_FOR_FULFILLMENT")).isEqualTo(2);
+        assertThat(repository.cancellations(1)).isEmpty();
+    }
+
+    @Test
     void rejectedCancellationCanBeRequestedAgainButOnlyOneCaseIsOpen() {
         rfqOrder(3000L, Instant.now());
         service.requestCancellation(1, "Lần thứ nhất", key(), BUYER);
@@ -1029,7 +1247,7 @@ class FinanceServiceTest {
             assertThat(shipment.lines()).extracting(l -> l.quantity()).containsExactly(2);
             assertThat(repository.count("SELECT COALESCE(SUM(quantity),0) FROM shipment_line")).isEqualTo(2);
             assertThatThrownBy(() -> tx.execute(s -> fulfillment.markAsShipped(shipment.shipmentId(), 20L)))
-                    .hasMessageContaining("Insufficient payment");
+                    .hasMessageContaining("chưa thanh toán đủ");
             long remaining = repository.payments(1).get(1).id();
             service.initiate(remaining, key(), BUYER);
             collect(remaining, "jpa-remaining");
@@ -1523,6 +1741,35 @@ class FinanceServiceTest {
         assertThatThrownBy(() -> service.supplierPayouts(supplier, 0, 0)).hasMessage("INVALID_FINANCE_REQUEST");
         assertThatThrownBy(() -> service.supplierPayouts(supplier, -1, 20)).hasMessage("INVALID_FINANCE_REQUEST");
         assertThat(service.supplierPayouts(new FinanceService.Actor(203, null, 99L, false), 0, 20).content()).isEmpty();
+    }
+
+    @Test
+    void adminListsEverySellerOrderPayoutNewestFirstAndFiltersByOrderNumber() {
+        fullPayment();
+        deliver();
+        sellerOrder(2, 20, 5000, "AWAITING_PAYMENT");
+        sellerOrder(3, 21, 7000, "AWAITING_PAYMENT");
+
+        var first = service.adminPayouts(ADMIN, null, 0, 2);
+        assertThat(first.totalElements()).isEqualTo(3);
+        assertThat(first.totalPages()).isEqualTo(2);
+        assertThat(first.content()).extracting(FinanceResponse.SupplierPayouts.Row::sellerOrderId).containsExactly(3L, 2L);
+        assertThat(service.adminPayouts(ADMIN, "", 1, 2).content().getFirst())
+                .extracting(FinanceResponse.SupplierPayouts.Row::sellerOrderId,
+                        FinanceResponse.SupplierPayouts.Row::netPayout, FinanceResponse.SupplierPayouts.Row::payoutStatus)
+                .containsExactly(1L, 9501L, "READY");
+
+        var byNumber = service.adminPayouts(ADMIN, " SELLER-3 ", 0, 20);
+        assertThat(byNumber.totalElements()).isEqualTo(1);
+        assertThat(byNumber.content()).extracting(FinanceResponse.SupplierPayouts.Row::sellerOrderNo).containsExactly("SELLER-3");
+        // The customer order number matches too; LIKE wildcards typed by the admin are literal.
+        assertThat(service.adminPayouts(ADMIN, "TEST", 0, 20).totalElements()).isEqualTo(3);
+        assertThat(service.adminPayouts(ADMIN, "%", 0, 20).content()).isEmpty();
+
+        assertThatThrownBy(() -> service.adminPayouts(new FinanceService.Actor(202, null, 20L, false), null, 0, 20))
+                .hasMessage("FINANCE_ADMIN_REQUIRED");
+        assertThatThrownBy(() -> service.adminPayouts(ADMIN, null, 0, 101)).hasMessage("INVALID_FINANCE_REQUEST");
+        assertThatThrownBy(() -> service.adminPayouts(ADMIN, null, -1, 20)).hasMessage("INVALID_FINANCE_REQUEST");
     }
 
     @Test

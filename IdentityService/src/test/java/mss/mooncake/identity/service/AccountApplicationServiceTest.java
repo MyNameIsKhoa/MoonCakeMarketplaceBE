@@ -179,7 +179,7 @@ class AccountApplicationServiceTest {
         when(userRepository.existsByEmail("duplicate@example.com")).thenReturn(true);
 
         DuplicateResourceException ex = assertThrows(DuplicateResourceException.class, () -> accountService.register(request));
-        assertTrue(ex.getMessage().contains("already registered"));
+        assertTrue(ex.getMessage().contains("Email đã được đăng ký"));
         verify(userRepository, never()).save(any());
     }
 
@@ -217,7 +217,7 @@ class AccountApplicationServiceTest {
         when(passwordEncoder.matches("wrongpass", "hashedPassword")).thenReturn(false);
 
         UnauthorizedException ex = assertThrows(UnauthorizedException.class, () -> accountService.login(request));
-        assertEquals("Invalid email or password", ex.getMessage());
+        assertEquals("Email hoặc mật khẩu không đúng", ex.getMessage());
     }
 
     @Test
@@ -226,7 +226,7 @@ class AccountApplicationServiceTest {
         when(userRepository.findByEmail("unknown@example.com")).thenReturn(Optional.empty());
 
         UnauthorizedException ex = assertThrows(UnauthorizedException.class, () -> accountService.login(request));
-        assertEquals("Invalid email or password", ex.getMessage());
+        assertEquals("Email hoặc mật khẩu không đúng", ex.getMessage());
     }
 
     @Test

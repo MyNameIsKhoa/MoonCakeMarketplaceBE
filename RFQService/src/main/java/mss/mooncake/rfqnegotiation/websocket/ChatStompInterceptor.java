@@ -4,6 +4,7 @@ import io.jsonwebtoken.Claims;
 import java.security.Principal;
 import java.time.Instant;
 import java.util.List;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import mss.mooncake.rfqnegotiation.security.JwtTokenProvider;
 import mss.mooncake.rfqnegotiation.security.UserPrincipal;
@@ -36,7 +37,7 @@ public class ChatStompInterceptor implements ChannelInterceptor {
 
     @Override
     public Message<?> preSend(Message<?> message, MessageChannel channel) {
-        var accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
+        StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
         if (accessor == null) throw new AccessDeniedException("Không nhận diện được STOMP frame");
         StompCommand command = accessor.getCommand();
         if (command == StompCommand.CONNECT || command == StompCommand.STOMP) {
@@ -53,7 +54,7 @@ public class ChatStompInterceptor implements ChannelInterceptor {
                 throw new CredentialsExpiredException("Phiên chat đã hết hạn; hãy kết nối lại với token mới");
             }
             String destination = accessor.getDestination();
-            var matcher = (command == StompCommand.SEND ? SEND : SUBSCRIBE)
+            Matcher matcher = (command == StompCommand.SEND ? SEND : SUBSCRIBE)
                     .matcher(destination == null ? "" : destination);
             if (!matcher.matches()) throw new AccessDeniedException("Kênh chat không được phép");
             Long conversationId;
@@ -84,10 +85,10 @@ public class ChatStompInterceptor implements ChannelInterceptor {
             throw new AuthenticationCredentialsNotFoundException("JWT không có userId hợp lệ");
         }
         List<?> roles = claims.get("roles", List.class);
-        var authorities = roles.stream().filter(String.class::isInstance).map(String.class::cast)
+        List<SimpleGrantedAuthority> authorities = roles.stream().filter(String.class::isInstance).map(String.class::cast)
                 .map(SimpleGrantedAuthority::new).toList();
-        var principal = new UserPrincipal(userId, claims.getSubject(), authorities);
-        var authentication = new UsernamePasswordAuthenticationToken(principal, null, authorities);
+        UserPrincipal principal = new UserPrincipal(userId, claims.getSubject(), authorities);
+        UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(principal, null, authorities);
         authentication.setDetails(claims.getExpiration().toInstant());
         accessor.setUser(authentication);
     }

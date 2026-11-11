@@ -66,10 +66,10 @@ public class RfqNotifier {
                 "QUOTATION_REJECTED:" + quotation.getId()));
     }
 
-    /** Declined because accepted quotations filled the RFQ. No dedup key: it may compete again if an order is cancelled. */
+    /** Declined because the buyer accepted another quotation. No dedup key: it may compete again if that order is cancelled. */
     public void quotationNotSelected(RfqEntity rfq, QuotationEntity quotation) {
         send(toSupplier(quotation, rfq, "QUOTATION_NOT_SELECTED", "Báo giá không được chọn",
-                "Yêu cầu " + quoted(rfq) + " đã đủ số lượng nên báo giá của bạn không được chọn.", null));
+                "Người mua đã chốt báo giá khác cho yêu cầu " + quoted(rfq) + " nên báo giá của bạn không được chọn.", null));
     }
 
     public void rfqCancelled(RfqEntity rfq, QuotationEntity quotation) {

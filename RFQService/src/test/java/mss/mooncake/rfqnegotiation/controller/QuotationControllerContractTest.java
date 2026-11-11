@@ -18,6 +18,7 @@ import mss.mooncake.rfqnegotiation.service.QuotationApplicationService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -33,10 +34,10 @@ class QuotationControllerContractTest {
 
     @Test
     void forwardsPathIdBodyAndIdempotencyKeyInsteadOfClientControlledIds() {
-        var request = new AcceptQuotationRequest(3, 17L);
+        AcceptQuotationRequest request = new AcceptQuotationRequest(3, 17L);
         when(service.acceptQuotation(21L, request, "accept-1")).thenReturn(accepted("COMPLETED"));
 
-        var response = controller.accept(21L, request, "accept-1");
+        ResponseEntity<QuotationAcceptedResponse> response = controller.accept(21L, request, "accept-1");
 
         verify(service).acceptQuotation(21L, request, "accept-1");
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -44,7 +45,7 @@ class QuotationControllerContractTest {
 
     @Test
     void returnsAcceptedWhileCommerceConversionIsPending() {
-        var request = new AcceptQuotationRequest(3, 17L);
+        AcceptQuotationRequest request = new AcceptQuotationRequest(3, 17L);
         when(service.acceptQuotation(21L, request, "accept-1")).thenReturn(accepted("PENDING"));
 
         assertThat(controller.accept(21L, request, "accept-1").getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
@@ -52,8 +53,8 @@ class QuotationControllerContractTest {
 
     @Test
     void rejectsAuthenticatedUserWithoutCustomerProfile() {
-        var identity = mock(IdentityServiceClient.class);
-        var authorities = List.of(new SimpleGrantedAuthority("ROLE_CUSTOMER"));
+        IdentityServiceClient identity = mock(IdentityServiceClient.class);
+        List<SimpleGrantedAuthority> authorities = List.of(new SimpleGrantedAuthority("ROLE_CUSTOMER"));
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
                 new UserPrincipal(5L, "x", authorities), null, authorities));
         when(identity.getUserSummary(5L)).thenReturn(new UserSummaryResponse(5L, null, "X", "x", null));

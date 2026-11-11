@@ -6,11 +6,14 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import mss.mooncake.rfqnegotiation.client.IdentityServiceClient;
 import mss.mooncake.rfqnegotiation.client.dto.identity.SupplierSummaryResponse;
+import mss.mooncake.rfqnegotiation.client.dto.identity.UserSummaryResponse;
 import mss.mooncake.rfqnegotiation.dto.request.CreateConversationRequest;
 import mss.mooncake.rfqnegotiation.dto.request.SendMessageRequest;
 import mss.mooncake.rfqnegotiation.dto.response.ConversationCreatedResponse;
@@ -40,7 +43,9 @@ import mss.mooncake.rfqnegotiation.service.ConversationApplicationService;
 import mss.mooncake.rfqnegotiation.util.Paging;
 import mss.mooncake.rfqnegotiation.websocket.MessagePersistedEvent;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -79,7 +84,7 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
     public ConversationCreatedResponse create(Long rfqId, CreateConversationRequest request) {
         actor.userId();
         // Lock the parent, including when no conversation row exists yet, to serialize creation.
-        var rfq = rfqs.findByIdForUpdate(rfqId)
+        RfqEntity rfq = rfqs.findByIdForUpdate(rfqId)
                 .orElseThrow(() -> ApiException.notFound("RFQ_NOT_FOUND", "Không tìm thấy RFQ"));
         Long customerId = actor.optionalCustomerId();
         boolean owner = Objects.equals(customerId, rfq.getCustomerIdRef());
@@ -100,8 +105,8 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
             throw owner ? ApiException.forbidden("SUPPLIER_NOT_TARGETED", "Nhà cung cấp này không được mời cho yêu cầu báo giá")
                     : ApiException.notFound("RFQ_NOT_FOUND", "Không tìm thấy RFQ");
         }
-        var supplier = requireSupplier(supplierId);
-        var existing = conversations.findByRfqIdAndSupplierIdRef(rfqId, supplierId);
+        SupplierSummaryResponse supplier = requireSupplier(supplierId);
+        Optional<ConversationEntity> existing = conversations.findByRfqIdAndSupplierIdRef(rfqId, supplierId);
         if (existing.isPresent()) {
             return new ConversationCreatedResponse(toResponse(existing.get(), rfq.getCustomerNameSnapshot()), false);
         }
@@ -114,7 +119,7 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
                 && !rfq.getExpiresAt().isAfter(LocalDateTime.now(ZoneOffset.UTC))))) {
             throw ApiException.conflict("RFQ_NOT_OPEN", "Chỉ mở hội thoại mới khi RFQ đang nhận trao đổi");
         }
-        var conversation = new ConversationEntity();
+        ConversationEntity conversation = new ConversationEntity();
         conversation.setRfqId(rfqId);
         conversation.setCustomerIdRef(rfq.getCustomerIdRef());
         conversation.setSupplierIdRef(supplierId);
@@ -127,8 +132,8 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
     @Override
     public PageResponse<ConversationResponse> list(Long rfqId, int page, int size, String sort) {
         actor.userId();
-        var pageable = Paging.page(page, size, sort, Set.of("id", "createdAt", "status"), "createdAt");
-        var found = conversations.findForParticipant(actor.optionalCustomerId(), actor.optionalSupplierId(), rfqId, pageable);
+        Pageable pageable = Paging.page(page, size, sort, Set.of("id", "createdAt", "status"), "createdAt");
+        Page<ConversationEntity> found = conversations.findForParticipant(actor.optionalCustomerId(), actor.optionalSupplierId(), rfqId, pageable);
         // One query for the buyer names of the whole page.
         Map<Long, String> buyerNames = new HashMap<>();
         rfqs.findAllById(found.map(ConversationEntity::getRfqId).toSet())
@@ -138,7 +143,7 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
 
     @Override
     public ConversationResponse get(Long conversationId) {
-        var conversation = requireConversation(conversationId);
+        ConversationEntity conversation = requireConversation(conversationId);
         requireParticipant(conversation, actor.userId());
         String buyerName = rfqs.findById(conversation.getRfqId()).map(RfqEntity::getCustomerNameSnapshot).orElse(null);
         return toResponse(conversation, buyerName);
@@ -159,13 +164,13 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
         if (cursor != null && (cursor <= 0 || !messages.existsByIdAndConversationId(cursor, conversationId))) {
             throw ApiException.badRequest("INVALID_MESSAGE_CURSOR", "Cursor không thuộc hội thoại này");
         }
-        var batch = afterMessageId != null
+        List<MessageEntity> batch = afterMessageId != null
                 ? messages.findAfter(conversationId, afterMessageId, PageRequest.of(0, limit + 1))
                 : messages.findBefore(conversationId, beforeMessageId, PageRequest.of(0, limit + 1));
         boolean hasMore = batch.size() > limit;
-        var selected = new ArrayList<>(batch.subList(0, Math.min(limit, batch.size())));
+        ArrayList<MessageEntity> selected = new ArrayList<>(batch.subList(0, Math.min(limit, batch.size())));
         if (afterMessageId == null) Collections.reverse(selected);
-        var items = selected.stream().map(this::toResponse).toList();
+        List<MessageResponse> items = selected.stream().map(this::toResponse).toList();
         String nextCursor = !hasMore || items.isEmpty() ? null : (afterMessageId == null
                 ? items.getFirst().messageId() : items.getLast().messageId());
         return new MessagePageResponse(items, nextCursor, hasMore);
@@ -176,17 +181,17 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
     public MessageResponse send(Long conversationId, Long userId, SendMessageRequest request) {
         validateMessage(request);
         // One conversation lock protects dedup across concurrent sessions; the DB unique is the final guard.
-        var conversation = conversations.findByIdForUpdate(conversationId)
+        ConversationEntity conversation = conversations.findByIdForUpdate(conversationId)
                 .orElseThrow(() -> ApiException.notFound("CONVERSATION_NOT_FOUND", "Không tìm thấy hội thoại"));
-        var sender = requireParticipant(conversation, userId);
-        var existing = messages.findByConversationIdAndSenderUserIdRefAndClientMessageId(
+        Participant sender = requireParticipant(conversation, userId);
+        Optional<MessageEntity> existing = messages.findByConversationIdAndSenderUserIdRefAndClientMessageId(
                 conversationId, userId, request.clientMessageId());
         if (existing.isPresent()) {
-            var stored = existing.get();
+            MessageEntity stored = existing.get();
             if (!stored.getMessageType().equals(request.messageType()) || !stored.getContent().equals(request.content())) {
                 throw ApiException.conflict("CLIENT_MESSAGE_ID_REUSED", "clientMessageId đã dùng cho một nội dung khác");
             }
-            var response = toResponse(stored);
+            MessageResponse response = toResponse(stored);
             // Echo the durable message again when its earlier delivery/ack was lost; clients dedup messageId.
             events.publishEvent(new MessagePersistedEvent(response));
             return response;
@@ -194,14 +199,14 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
         if (conversation.getStatus() != ConversationStatus.OPEN) {
             throw ApiException.conflict("CONVERSATION_NOT_OPEN", "Hội thoại đã đóng hoặc bị khóa");
         }
-        var message = new MessageEntity();
+        MessageEntity message = new MessageEntity();
         message.setConversationId(conversationId);
         message.setSenderUserIdRef(userId);
         message.setClientMessageId(request.clientMessageId());
         message.setMessageType(request.messageType());
         message.setContent(request.content());
         message.setSentAt(LocalDateTime.now(ZoneOffset.UTC).withNano(0));
-        var response = toResponse(messages.saveAndFlush(message));
+        MessageResponse response = toResponse(messages.saveAndFlush(message));
         events.publishEvent(new MessagePersistedEvent(response));
         Long recipientLastRead = reads.findFirstByConversationIdAndUserIdRefNotOrderByLastReadMessageIdDesc(conversationId, userId)
                 .map(ConversationReadStateEntity::getLastReadMessageId).orElse(null);
@@ -220,12 +225,12 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
     public void markRead(Long conversationId) {
         Long userId = actor.userId();
         // The conversation lock serializes several tabs of the same user creating the unique read row.
-        var conversation = conversations.findByIdForUpdate(conversationId)
+        ConversationEntity conversation = conversations.findByIdForUpdate(conversationId)
                 .orElseThrow(() -> ApiException.notFound("CONVERSATION_NOT_FOUND", "Không tìm thấy hội thoại"));
         requireParticipant(conversation, userId);
         Long latest = messages.findLatestId(conversationId);
         if (latest == null) return;
-        var read = reads.findByConversationIdAndUserIdRef(conversationId, userId)
+        ConversationReadStateEntity read = reads.findByConversationIdAndUserIdRef(conversationId, userId)
                 .orElseGet(() -> new ConversationReadStateEntity(conversationId, userId));
         read.readUpTo(latest, LocalDateTime.now(ZoneOffset.UTC).withNano(0));
         reads.save(read);
@@ -250,12 +255,12 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
     private Participant requireParticipant(ConversationEntity conversation, Long userId) {
         if (userId == null) throw ApiException.forbidden("NOT_CONVERSATION_PARTICIPANT", "Bạn không thuộc hội thoại này");
         try {
-            var user = identity.getUserSummary(userId);
+            UserSummaryResponse user = identity.getUserSummary(userId);
             if (user == null || !Objects.equals(user.userId(), userId)) {
                 throw ApiException.unavailable("IDENTITY_UNAVAILABLE", "Không xác minh được tài khoản");
             }
             if (Objects.equals(user.customerId(), conversation.getCustomerIdRef())) return new Participant(true, user.fullName());
-            var supplier = requireSupplier(conversation.getSupplierIdRef());
+            SupplierSummaryResponse supplier = requireSupplier(conversation.getSupplierIdRef());
             if (Objects.equals(supplier.userId(), userId)) return new Participant(false, supplier.companyName());
         } catch (FeignException ex) {
             throw ApiException.unavailable("IDENTITY_UNAVAILABLE", "Không xác minh được quyền hội thoại");
@@ -265,7 +270,7 @@ public class ConversationApplicationServiceImpl implements ConversationApplicati
 
     private SupplierSummaryResponse requireSupplier(Long supplierId) {
         try {
-            var supplier = identity.getSupplierSummary(supplierId);
+            SupplierSummaryResponse supplier = identity.getSupplierSummary(supplierId);
             if (supplier == null || supplier.userId() == null || !Objects.equals(supplier.supplierId(), supplierId)) {
                 throw ApiException.unavailable("IDENTITY_UNAVAILABLE", "Không xác minh được nhà cung cấp");
             }

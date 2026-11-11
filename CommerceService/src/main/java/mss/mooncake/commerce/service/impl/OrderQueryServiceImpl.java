@@ -61,7 +61,7 @@ public class OrderQueryServiceImpl implements OrderQueryService {
     @Override
     @Transactional(readOnly = true)
     public Page<OrderSummaryResponse> listCustomerOrders(Long customerId, Pageable pageable) {
-        if (pageable.getPageSize() > 100) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "size must be <= 100");
+        if (pageable.getPageSize() > 100) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tham số size không được vượt quá 100");
         Page<CustomerOrderEntity> page = orders.findByCustomerIdRef(customerId, pageable);
         List<SellerOrderEntity> sellers = page.isEmpty() ? List.of()
                 : sellerOrders.findByOrderIdInOrderByIdAsc(page.map(CustomerOrderEntity::getId).getContent());
@@ -81,7 +81,7 @@ public class OrderQueryServiceImpl implements OrderQueryService {
     @Transactional(readOnly = true)
     public OrderDetailResponse getCustomerOrder(Long customerId, Long orderId) {
         CustomerOrderEntity order = orders.findByIdAndCustomerIdRef(orderId, customerId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy đơn hàng"));
         DeliveryAddressEntity address = addresses.findByOrderId(orderId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
                         "Order address snapshot missing"));
@@ -103,7 +103,7 @@ public class OrderQueryServiceImpl implements OrderQueryService {
 
     @Override
     public Page<SellerOrderSummaryResponse> listSupplierOrders(Long userId, Pageable pageable) {
-        if (pageable.getPageSize() > 100) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "size must be <= 100");
+        if (pageable.getPageSize() > 100) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tham số size không được vượt quá 100");
         SupplierSummaryResponse supplier = supplierForUser(userId, HttpStatus.FORBIDDEN);
         Page<SellerOrderEntity> page = sellerOrders.findBySupplierIdRef(supplier.supplierId(), pageable);
         Set<Long> pending = page.isEmpty() ? Set.of() : Set.copyOf(cancellations.pendingSellerOrderIds(
@@ -117,13 +117,13 @@ public class OrderQueryServiceImpl implements OrderQueryService {
     @Override
     public SellerOrderResponse getSellerOrder(Long userId, Long customerId, Long sellerOrderId, boolean admin) {
         SellerOrderEntity seller = sellerOrders.findById(sellerOrderId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Seller order not found"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy đơn nhà bán"));
         CustomerOrderEntity order = orders.findById(seller.getOrderId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Seller order not found"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy đơn nhà bán"));
         if (!admin && (customerId == null || !customerId.equals(order.getCustomerIdRef()))) {
             SupplierSummaryResponse supplier = supplierForUser(userId, HttpStatus.NOT_FOUND);
             if (!supplier.supplierId().equals(seller.getSupplierIdRef())) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Seller order not found");
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy đơn nhà bán");
             }
         }
         return mapSeller(seller, items.findBySellerOrderIdIn(List.of(sellerOrderId)),
@@ -139,7 +139,7 @@ public class OrderQueryServiceImpl implements OrderQueryService {
         } catch (FeignException.NotFound missing) {
             // Do not expose whether another user's seller order exists.
         }
-        throw new ResponseStatusException(missingStatus, "Supplier context unavailable");
+        throw new ResponseStatusException(missingStatus, "Không xác định được tài khoản nhà cung cấp");
     }
 
     private OrderSummaryResponse summary(CustomerOrderEntity order, List<SellerOrderEntity> sellers,

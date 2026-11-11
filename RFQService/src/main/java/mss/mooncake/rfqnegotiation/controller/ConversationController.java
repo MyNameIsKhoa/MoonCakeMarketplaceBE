@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import java.net.URI;
 import mss.mooncake.rfqnegotiation.dto.request.CreateConversationRequest;
+import mss.mooncake.rfqnegotiation.dto.response.ConversationCreatedResponse;
 import mss.mooncake.rfqnegotiation.dto.response.ConversationResponse;
 import mss.mooncake.rfqnegotiation.dto.response.MessagePageResponse;
 import mss.mooncake.rfqnegotiation.dto.response.PageResponse;
@@ -26,7 +27,7 @@ public class ConversationController {
     @Operation(summary = "Tạo hoặc lấy hội thoại; supplier dùng hồ sơ của mình, buyer chọn supplierId")
     public ResponseEntity<ConversationResponse> create(@PathVariable Long rfqId,
             @Valid @RequestBody(required = false) CreateConversationRequest request) {
-        var result = conversations.create(rfqId, request);
+        ConversationCreatedResponse result = conversations.create(rfqId, request);
         return result.created() ? ResponseEntity.created(URI.create("/api/conversations/"
                 + result.conversation().conversationId())).body(result.conversation()) : ResponseEntity.ok(result.conversation());
     }

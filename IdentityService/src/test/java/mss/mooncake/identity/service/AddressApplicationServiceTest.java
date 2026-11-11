@@ -144,7 +144,7 @@ class AddressApplicationServiceTest {
         UpdateAddressRequest request = new UpdateAddressRequest("A hacker", null, null, null, null, null, null);
 
         ForbiddenException ex = assertThrows(ForbiddenException.class, () -> addressService.updateAddress(1L, 2L, request));
-        assertTrue(ex.getMessage().contains("do not have permission"));
+        assertTrue(ex.getMessage().contains("không có quyền"));
         verify(addressRepository, never()).save(any());
     }
 
@@ -158,7 +158,7 @@ class AddressApplicationServiceTest {
         when(addressRepository.findById(2L)).thenReturn(Optional.of(addressB));
 
         ForbiddenException ex = assertThrows(ForbiddenException.class, () -> addressService.deleteAddress(1L, 2L));
-        assertTrue(ex.getMessage().contains("do not have permission"));
+        assertTrue(ex.getMessage().contains("không có quyền"));
         verify(addressRepository, never()).delete(any());
     }
 
