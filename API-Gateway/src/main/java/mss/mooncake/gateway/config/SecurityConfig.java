@@ -32,7 +32,8 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/payments/payos/callback").permitAll()
-                        .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+                        .requestMatchers("/v3/api-docs/**", "/identity/v3/api-docs", "/catalog/v3/api-docs",
+                                "/commerce/v3/api-docs", "/rfq/v3/api-docs", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login", "/api/auth/google",
                                 "/api/auth/email/verification-requests", "/api/auth/email/verify",
                                 "/api/auth/password-reset-requests", "/api/auth/password-resets").permitAll()

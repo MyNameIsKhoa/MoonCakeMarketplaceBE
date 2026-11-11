@@ -8,6 +8,30 @@ spring:
       server:
         webmvc:
           routes:
+            - id: identity-openapi
+              uri: ${IDENTITY_SERVICE_URL:http://localhost:8081}
+              predicates:
+                - Path=/identity/v3/api-docs
+              filters:
+                - SetPath=/v3/api-docs
+            - id: catalog-openapi
+              uri: ${CATALOG_SERVICE_URL:http://localhost:8082}
+              predicates:
+                - Path=/catalog/v3/api-docs
+              filters:
+                - SetPath=/v3/api-docs
+            - id: commerce-openapi
+              uri: ${COMMERCE_SERVICE_URL:http://localhost:8083}
+              predicates:
+                - Path=/commerce/v3/api-docs
+              filters:
+                - SetPath=/v3/api-docs
+            - id: rfq-openapi
+              uri: ${RFQ_SERVICE_URL:http://localhost:8084}
+              predicates:
+                - Path=/rfq/v3/api-docs
+              filters:
+                - SetPath=/v3/api-docs
             - id: admin-catalog
               uri: ${CATALOG_SERVICE_URL:http://localhost:8082}
               predicates:
@@ -68,3 +92,16 @@ springdoc:
     path: /v3/api-docs
   swagger-ui:
     path: /swagger-ui.html
+    disable-swagger-default-url: true
+    urls-primary-name: API Gateway
+    urls:
+      - name: API Gateway
+        url: /v3/api-docs
+      - name: Identity Service
+        url: /identity/v3/api-docs
+      - name: Catalog and Store Service
+        url: /catalog/v3/api-docs
+      - name: Commerce Service
+        url: /commerce/v3/api-docs
+      - name: RFQ and Negotiation Service
+        url: /rfq/v3/api-docs
